@@ -49,6 +49,7 @@ import {
   updateCamera,
   updateNvr,
   updateSite,
+  ALL_CAMERA_PURPOSES,
   type CameraPurpose,
   type CameraRecord,
   type CameraWritePayload,
@@ -83,8 +84,8 @@ const emptyCameraForm = (nvrId?: number): CameraWritePayload => ({
   nvr: nvrId ?? 0,
   channel: 1,
   zone: "",
-  purpose: "general_objects",
-  purposes: ["general_objects"],
+  purpose: ALL_CAMERA_PURPOSES[0],
+  purposes: [...ALL_CAMERA_PURPOSES],
 })
 
 export function CameraManagementContent({
@@ -288,6 +289,33 @@ export function CameraManagementContent({
     })
   }
 
+  const selectedPurposes = useMemo(() => {
+    if (cameraForm.purposes?.length) return cameraForm.purposes
+    if (cameraForm.purpose) return [cameraForm.purpose]
+    return [] as CameraPurpose[]
+  }, [cameraForm.purposes, cameraForm.purpose])
+
+  const allPurposesSelected =
+    purposes.length > 0 && purposes.every((p) => selectedPurposes.includes(p.value))
+  const somePurposesSelected = purposes.some((p) => selectedPurposes.includes(p.value))
+
+  const toggleAllPurposes = (checked: boolean) => {
+    if (checked) {
+      const next = purposes.map((p) => p.value)
+      setCameraForm((prev) => ({
+        ...prev,
+        purposes: next,
+        purpose: next[0] ?? prev.purpose,
+      }))
+      return
+    }
+    setCameraForm((prev) => ({
+      ...prev,
+      purposes: [],
+      purpose: prev.purpose,
+    }))
+  }
+
   const onBulkCreate = async () => {
     const nvrId = filterNvrId !== "all" ? Number(filterNvrId) : cameraForm.nvr
     if (!nvrId) {
@@ -306,7 +334,7 @@ export function CameraManagementContent({
           ? cameraForm.purposes
           : cameraForm.purpose
             ? [cameraForm.purpose]
-            : ["surveillance"],
+            : [...ALL_CAMERA_PURPOSES],
         purpose: cameraForm.purpose,
       })
       await load()
@@ -672,13 +700,22 @@ export function CameraManagementContent({
                   <div className="space-y-2">
                     <Label>AI purposes / models</Label>
                     <div className="rounded-md border p-3 space-y-2 max-h-56 overflow-y-auto">
+                      <label className="flex items-start gap-2 text-sm cursor-pointer border-b pb-2 mb-1 font-medium">
+                        <Checkbox
+                          checked={
+                            allPurposesSelected
+                              ? true
+                              : somePurposesSelected
+                                ? "indeterminate"
+                                : false
+                          }
+                          onCheckedChange={(v) => toggleAllPurposes(v === true)}
+                          className="mt-0.5"
+                        />
+                        <span>{allPurposesSelected ? "Deselect all" : "Select all"}</span>
+                      </label>
                       {purposes.map((p) => {
-                        const selected = (cameraForm.purposes?.length
-                          ? cameraForm.purposes
-                          : cameraForm.purpose
-                            ? [cameraForm.purpose]
-                            : []
-                        ).includes(p.value)
+                        const selected = selectedPurposes.includes(p.value)
                         return (
                           <label
                             key={p.value}
@@ -695,8 +732,8 @@ export function CameraManagementContent({
                       })}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Each option is one model. Only checked models run on this camera
-                      (e.g. Fire &amp; Smoke alone will not detect vehicles or general objects).
+                      All models are selected by default. Use Select all / Deselect all,
+                      or check only the models you want on this camera.
                     </p>
                   </div>
 
@@ -768,7 +805,6 @@ export function CameraManagementContent({
                           <TableHead>Site / NVR</TableHead>
                           <TableHead>Ch</TableHead>
                           <TableHead>Zone</TableHead>
-                          <TableHead>Purpose</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -780,9 +816,6 @@ export function CameraManagementContent({
                             <TableCell className="text-xs text-muted-foreground">{cameraSourceLabel(cam)}</TableCell>
                             <TableCell className="font-mono">{cam.channel}</TableCell>
                             <TableCell>{zoneLabel(cam.zone)}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="font-normal">{cam.purpose_label}</Badge>
-                            </TableCell>
                             <TableCell>
                               <Badge variant={cam.status === "Online" ? "default" : "outline"}>{cam.status}</Badge>
                             </TableCell>

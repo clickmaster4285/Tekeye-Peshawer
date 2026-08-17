@@ -48,6 +48,35 @@ def _link_journey_snapshot(detection_event_id: int) -> None:
         logger.debug("Journey snapshot link skipped for detection %s", detection_event_id)
 
 
+def _link_object_tracking_snapshot(detection_event_id: int) -> None:
+    """Attach DetectionEvent clip path onto GlobalObject / ObjectVisit after capture."""
+    try:
+        from object_tracking.models import GlobalObject, ObjectVisit
+
+        from .models import DetectionEvent
+
+        event = DetectionEvent.objects.filter(pk=detection_event_id).only("clip", "person_qr").first()
+        if event is None or not event.clip:
+            return
+        clip_name = str(event.clip.name or "").replace("\\", "/").strip()
+        if not clip_name:
+            return
+
+        ObjectVisit.objects.filter(detection_event_id=detection_event_id).exclude(
+            snapshot_path=clip_name
+        ).update(snapshot_path=clip_name)
+
+        code = (event.person_qr or "").strip()
+        if code:
+            GlobalObject.objects.filter(code=code, snapshot_path="").update(snapshot_path=clip_name)
+        GlobalObject.objects.filter(
+            first_detection_event_id=detection_event_id,
+            snapshot_path="",
+        ).update(snapshot_path=clip_name)
+    except Exception:
+        logger.debug("Object tracking snapshot link skipped for detection %s", detection_event_id)
+
+
 def _update_clip_status(event_id: int, status: str) -> None:
     close_old_connections()
     from .models import DetectionEvent
@@ -455,6 +484,7 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
     if event.clip:
         _update_clip_status(event_id, ClipStatus.READY)
         _link_journey_snapshot(event_id)
+        _link_object_tracking_snapshot(event_id)
         return
 
     _update_clip_status(event_id, ClipStatus.RECORDING)
@@ -495,12 +525,14 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
         if event.clip:
             _update_clip_status(event_id, ClipStatus.READY)
             _link_journey_snapshot(event_id)
+            _link_object_tracking_snapshot(event_id)
             return
 
         filename = f"event_{event_id}.jpg"
         event.clip.save(filename, ContentFile(encoded.tobytes()), save=True)
         _update_clip_status(event_id, ClipStatus.READY)
         _link_journey_snapshot(event_id)
+        _link_object_tracking_snapshot(event_id)
         logger.info(
             "Saved detection snapshot for event %s (%s) class=%s",
             event_id,

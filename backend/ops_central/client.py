@@ -248,6 +248,77 @@ def probe_ml_health(ml_base_url: str) -> dict[str, Any]:
     return {"ok": False, "error": errors[0] if errors else "ML unreachable", "details": errors}
 
 
+def remote_delete_json(
+    base_url: str,
+    path: str,
+    token: str,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> tuple[int, Any]:
+    url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    resp = requests.delete(url, headers=_auth_headers(token), timeout=timeout)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"detail": (resp.text or "")[:500]}
+    return resp.status_code, data
+
+
+def unregister_ml_camera_remote(ml_base_url: str, stream_key: str) -> dict[str, Any]:
+    """Unregister a camera from a remote (or local) ML node."""
+    base = (ml_base_url or "").rstrip("/")
+    key = (stream_key or "").strip()
+    if not base:
+        return {"ok": False, "error": "ML URL is required."}
+    if not key:
+        return {"ok": False, "error": "stream_key is required."}
+    try:
+        resp = requests.delete(
+            f"{base}/live/cam/{key}/register",
+            timeout=15,
+            headers={"Accept": "application/json"},
+        )
+    except requests.RequestException as exc:
+        return {"ok": False, "error": _friendly_conn_error(exc, base)}
+
+    if resp.status_code in (200, 204):
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"removed": True}
+        return {"ok": True, **(data if isinstance(data, dict) else {"data": data})}
+
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            detail = str(body.get("detail") or body.get("error") or "")
+    except Exception:
+        detail = (resp.text or "")[:200]
+    return {
+        "ok": False,
+        "error": detail or f"ML unregister returned HTTP {resp.status_code}",
+        "status": resp.status_code,
+    }
+
+
+def delete_remote_camera(base_url: str, token: str, camera_id: int) -> dict[str, Any]:
+    """Delete a camera on a remote Tekeye Django API."""
+    base = base_url.rstrip("/")
+    if not camera_id:
+        return {"ok": False, "error": "camera_id is required."}
+    try:
+        status, data = remote_delete_json(base, f"api/cameras/{camera_id}/", token)
+    except requests.RequestException as exc:
+        return {"ok": False, "error": _friendly_conn_error(exc, base)}
+    if status in (200, 204):
+        return {"ok": True}
+    detail = ""
+    if isinstance(data, dict):
+        detail = str(data.get("detail") or data.get("error") or "")
+    return {"ok": False, "error": detail or f"Remote delete returned HTTP {status}", "status": status}
+
+
 def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, Any]:
     """
     List cameras registered on a remote ML service (GET /live/status).

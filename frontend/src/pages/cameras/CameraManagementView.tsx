@@ -97,7 +97,7 @@ export function CameraManagementView({
                 Live feed
               </CardTitle>
               <CardDescription>
-                {camera.purpose_label} · Ch {camera.channel}
+                Channel {camera.channel}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0 pb-4 px-4">

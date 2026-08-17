@@ -35,6 +35,7 @@ import {
   fetchServerCameras,
   listRemoteServers,
   quickConnect,
+  removeServerCamera,
   testRemoteServer,
   withOpsStreamToken,
   type OpsCamera,
@@ -42,7 +43,15 @@ import {
 } from "@/lib/ops-central-api"
 import { cn } from "@/lib/utils"
 
-function OpsStreamTile({ camera }: { camera: OpsCamera }) {
+function OpsStreamTile({
+  camera,
+  onRemove,
+  removing,
+}: {
+  camera: OpsCamera
+  onRemove?: () => void
+  removing?: boolean
+}) {
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const raw = (camera.ml_live_stream_url || "").trim()
@@ -80,6 +89,24 @@ function OpsStreamTile({ camera }: { camera: OpsCamera }) {
           </p>
         </div>
         <Badge className="absolute top-2 right-2 bg-emerald-600/90 text-white">ML</Badge>
+        {onRemove ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="absolute top-2 left-2 h-8 w-8 bg-black/55 text-white hover:bg-red-700/80 hover:text-white"
+            onClick={onRemove}
+            disabled={removing}
+            title="Remove camera"
+            aria-label="Remove camera"
+          >
+            {removing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+        ) : null}
       </div>
     </div>
   )
@@ -104,6 +131,7 @@ export default function OpsCentralPage() {
   const [formName, setFormName] = useState("")
   const [formMl, setFormMl] = useState("")
   const [saving, setSaving] = useState(false)
+  const [removingCameraKey, setRemovingCameraKey] = useState<string | null>(null)
 
   const selectedServer = useMemo(
     () => servers.find((s) => String(s.id) === selectedId) || null,
@@ -207,8 +235,9 @@ export default function OpsCentralPage() {
     }
   }
 
-  const onDelete = async (id: number) => {
-    if (!window.confirm("Remove this ML server?")) return
+  const onDelete = async (id: number, name?: string) => {
+    const label = name ? `"${name}"` : "this ML server"
+    if (!window.confirm(`Remove ${label} from Central Ops? Connected cameras will no longer appear.`)) return
     try {
       await deleteRemoteServer(id)
       if (selectedId === String(id)) {
@@ -216,8 +245,49 @@ export default function OpsCentralPage() {
         setCameras([])
       }
       await loadServers()
+      setStatusMsg(`Removed server ${name || id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed")
+    }
+  }
+
+  const onRemoveCamera = async (cam: OpsCamera) => {
+    if (!selectedId) return
+    const label = cam.name || cam.code || "this camera"
+    if (
+      !window.confirm(
+        `Remove ${label} from this server? This deletes it on the remote/local node when possible.`
+      )
+    ) {
+      return
+    }
+    const key = cam.ml_stream_key || cam.code || String(cam.id)
+    setRemovingCameraKey(key)
+    setError(null)
+    try {
+      const result = await removeServerCamera(Number(selectedId), {
+        stream_key: cam.ml_stream_key || cam.code,
+        camera_id: cam.id,
+        code: cam.code,
+      })
+      setCameras((prev) =>
+        prev.filter(
+          (row) =>
+            row.id !== cam.id &&
+            (row.ml_stream_key || row.code) !== (cam.ml_stream_key || cam.code)
+        )
+      )
+      const warn = result.warnings.length ? ` (${result.warnings[0]})` : ""
+      setStatusMsg(
+        result.removed_remote
+          ? `Removed ${label} from server${warn}`
+          : `Removed ${label} from hub cache${warn}`
+      )
+      await loadServers()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Remove camera failed")
+    } finally {
+      setRemovingCameraKey(null)
     }
   }
 
@@ -353,6 +423,53 @@ export default function OpsCentralPage() {
                         ))}
                       </SelectContent>
                     </Select>
+
+                    <div className="max-h-56 space-y-2 overflow-y-auto">
+                      {servers.map((s) => (
+                        <div
+                          key={s.id}
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-md border p-2 text-xs",
+                            selectedId === String(s.id) && "border-sky-300 bg-sky-50/60"
+                          )}
+                        >
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left"
+                            onClick={() => setSelectedId(String(s.id))}
+                          >
+                            <p className="truncate font-medium text-foreground">{s.name}</p>
+                            <p className="truncate text-muted-foreground">
+                              {s.ml_base_url || s.base_url}
+                            </p>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              disabled={loadingCameras}
+                              onClick={() => void connectSaved(s.id)}
+                              title="Fetch cameras"
+                            >
+                              <Video className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => void onDelete(s.id, s.name)}
+                              title="Remove server"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
                     {selectedServer ? (
                       <div className="space-y-2 rounded-md border p-3 text-xs text-muted-foreground">
                         <div className="flex items-center gap-2">
@@ -385,11 +502,14 @@ export default function OpsCentralPage() {
                       </Button>
                       <Button
                         variant="outline"
-                        size="icon"
                         disabled={!selectedId}
-                        onClick={() => selectedId && void onDelete(Number(selectedId))}
+                        onClick={() =>
+                          selectedId &&
+                          void onDelete(Number(selectedId), selectedServer?.name)
+                        }
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remove
                       </Button>
                     </div>
                   </>
@@ -423,9 +543,17 @@ export default function OpsCentralPage() {
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {cameras.map((cam) => (
-                    <OpsStreamTile key={`${cam.ml_stream_key}-${cam.code}`} camera={cam} />
-                  ))}
+                  {cameras.map((cam) => {
+                    const removeKey = cam.ml_stream_key || cam.code || String(cam.id)
+                    return (
+                      <OpsStreamTile
+                        key={`${cam.ml_stream_key}-${cam.code}`}
+                        camera={cam}
+                        onRemove={() => void onRemoveCamera(cam)}
+                        removing={removingCameraKey === removeKey}
+                      />
+                    )
+                  })}
                 </div>
               )}
             </CardContent>

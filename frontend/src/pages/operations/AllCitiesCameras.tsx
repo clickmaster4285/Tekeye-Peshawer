@@ -10,6 +10,7 @@ import {
   Minimize2,
   RefreshCw,
   Server,
+  Trash2,
   Video,
   Wifi,
   WifiOff,
@@ -28,7 +29,9 @@ import { getStoredUser } from "@/lib/auth"
 import { normalizeRole } from "@/lib/role-access"
 import { ROUTES } from "@/routes/config"
 import {
+  deleteRemoteServer,
   fetchAllCitiesStreams,
+  removeServerCamera,
   withOpsStreamToken,
   type OpsCamera,
 } from "@/lib/ops-central-api"
@@ -67,9 +70,15 @@ const GRID_CLASS: Record<GridLayout, string> = {
 function StreamTile({
   camera,
   showTimestamp,
+  canManage,
+  onRemove,
+  removing,
 }: {
   camera: CityCamera
   showTimestamp: boolean
+  canManage?: boolean
+  onRemove?: () => void
+  removing?: boolean
 }) {
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
@@ -171,6 +180,24 @@ function StreamTile({
         </div>
 
         <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+          {canManage && onRemove ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 bg-black/55 text-white hover:bg-red-700/80 hover:text-white"
+              onClick={onRemove}
+              disabled={removing}
+              title="Remove camera"
+              aria-label="Remove camera"
+            >
+              {removing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="icon"
@@ -254,6 +281,7 @@ export default function AllCitiesCamerasPage() {
   const user = getStoredUser()
   const role = normalizeRole(user?.role)
   const allowed = role === "ADMIN" || role === "IT_SUPERADMIN"
+  const canManage = role === "IT_SUPERADMIN"
 
   const [servers, setServers] = useState<ServerSummary[]>([])
   const [cameras, setCameras] = useState<CityCamera[]>([])
@@ -263,6 +291,8 @@ export default function AllCitiesCamerasPage() {
   const [layout, setLayout] = useState<GridLayout>("auto")
   const [showTimestamp, setShowTimestamp] = useState(true)
   const [wallFullscreen, setWallFullscreen] = useState(false)
+  const [removingCameraKey, setRemovingCameraKey] = useState<string | null>(null)
+  const [removingServerId, setRemovingServerId] = useState<number | null>(null)
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true)
@@ -296,6 +326,54 @@ export default function AllCitiesCamerasPage() {
       document.body.style.overflow = ""
     }
   }, [wallFullscreen])
+
+  const onRemoveServer = async (server: ServerSummary) => {
+    if (
+      !window.confirm(
+        `Remove "${server.name}" from Central Ops? Its cameras will disappear from All Cities.`
+      )
+    ) {
+      return
+    }
+    setRemovingServerId(server.id)
+    setError(null)
+    try {
+      await deleteRemoteServer(server.id)
+      if (filterServerId === String(server.id)) setFilterServerId("all")
+      await load(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove server")
+    } finally {
+      setRemovingServerId(null)
+    }
+  }
+
+  const onRemoveCamera = async (cam: CityCamera) => {
+    if (!cam.server_id) return
+    const label = cam.name || cam.code || "this camera"
+    if (
+      !window.confirm(
+        `Remove ${label} from ${cam.server_name || "this server"}? This deletes it on the node when possible.`
+      )
+    ) {
+      return
+    }
+    const key = cam.ml_stream_key || cam.code || String(cam.id)
+    setRemovingCameraKey(`${cam.server_id}-${key}`)
+    setError(null)
+    try {
+      await removeServerCamera(cam.server_id, {
+        stream_key: cam.ml_stream_key || cam.code,
+        camera_id: cam.id,
+        code: cam.code,
+      })
+      await load(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove camera")
+    } finally {
+      setRemovingCameraKey(null)
+    }
+  }
 
   const visibleCameras = useMemo(() => {
     if (filterServerId === "all") return cameras
@@ -354,18 +432,41 @@ export default function AllCitiesCamerasPage() {
             {server?.error ? (
               <span className="text-xs text-amber-700">{server.error}</span>
             ) : null}
+            {canManage && server ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto h-7 text-destructive hover:text-destructive"
+                disabled={removingServerId === server.id}
+                onClick={() => void onRemoveServer(server)}
+              >
+                {removingServerId === server.id ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Remove server
+              </Button>
+            ) : null}
           </div>
           {cams.length === 0 ? (
             <p className="text-sm text-muted-foreground">No live cameras on this server.</p>
           ) : (
             <div className={cn("grid gap-3", GRID_CLASS[layout])}>
-              {cams.map((cam) => (
-                <StreamTile
-                  key={`${cam.server_id}-${cam.id}-${cam.ml_stream_key || cam.code}`}
-                  camera={cam}
-                  showTimestamp={showTimestamp}
-                />
-              ))}
+              {cams.map((cam) => {
+                const removeKey = `${cam.server_id}-${cam.ml_stream_key || cam.code || cam.id}`
+                return (
+                  <StreamTile
+                    key={`${cam.server_id}-${cam.id}-${cam.ml_stream_key || cam.code}`}
+                    camera={cam}
+                    showTimestamp={showTimestamp}
+                    canManage={canManage}
+                    onRemove={() => void onRemoveCamera(cam)}
+                    removing={removingCameraKey === removeKey}
+                  />
+                )
+              })}
             </div>
           )}
         </section>

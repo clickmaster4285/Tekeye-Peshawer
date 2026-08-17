@@ -154,12 +154,17 @@ export const PAGE_LOADERS = {
       default: m.AnalyticsCameraManagementViewPage,
     })),
   ObjectDetection: () => import("@/pages/cameras/ObjectDetection").then((m) => ({ default: m.default })),
+  ObjectTracking: () => import("@/pages/operations/ObjectTracking").then((m) => ({ default: m.default })),
+  ObjectTrackingDetail: () =>
+    import("@/pages/operations/ObjectTrackingDetail").then((m) => ({ default: m.default })),
   PersonJourney: () => import("@/pages/operations/PersonJourney").then((m) => ({ default: m.default })),
   PersonJourneyDetail: () =>
     import("@/pages/operations/PersonJourneyDetail").then((m) => ({ default: m.default })),
   AnprSettings: () => import("@/pages/cameras/AnprSettings").then((m) => ({ default: m.default })),
   AnprVehicleTracking: () =>
     import("@/pages/cameras/VehicleTracking").then((m) => ({ default: m.default })),
+  NumberPlateDetection: () =>
+    import("@/pages/cameras/NumberPlateDetection").then((m) => ({ default: m.default })),
   AnomalyDetection: () => import("@/pages/cameras/AnomalyDetection").then((m) => ({ default: m.default })),
   Reports: () => import("@/pages/reports/Reports").then((m) => ({ default: m.default })),
   PredictiveInsights: () => import("@/pages/reports/PredictiveInsights").then((m) => ({ default: m.default })),

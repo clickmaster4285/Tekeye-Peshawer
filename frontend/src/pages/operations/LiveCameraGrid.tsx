@@ -383,7 +383,7 @@ export default function LiveCameraGridPage() {
                         </span>
                       )}
                       <span className="absolute bottom-1 left-1 z-20 text-xs text-white/90 bg-black/60 px-1.5 py-0.5 rounded pointer-events-none">
-                        {cam.location} • {cam.zone} • {cam.purpose_label}
+                        {cam.location} • {cam.zone}
                       </span>
                     </div>
                   ))}

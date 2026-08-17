@@ -14,6 +14,17 @@ export type CameraPurpose =
   | "zone_monitoring"
   | "thermal";
 
+/** All selectable AI models — default when creating a camera. */
+export const ALL_CAMERA_PURPOSES: CameraPurpose[] = [
+  "general_objects",
+  "custom_objects",
+  "smoke_fire",
+  "weapon",
+  "face_recognition",
+  "attendance",
+  "anpr",
+];
+
 export type NvrBrand = "hikvision" | "dahua" | "uniview" | "generic";
 
 export type SiteRecord = {
@@ -153,6 +164,9 @@ export type DetectionEventsPage = {
   page: number;
   page_size: number;
   total_pages: number;
+  /** Snapshot tip — reuse on page > 1 so new inserts don't shift offsets. */
+  as_of?: string | null;
+  as_of_id?: number | null;
   results: DetectionEvent[];
 };
 
@@ -170,6 +184,9 @@ export type DetectionEventsQuery = {
   q?: string;
   is_alert?: boolean;
   class_name?: string;
+  vehicle_only?: boolean;
+  as_of?: string;
+  as_of_id?: number;
 };
 
 export type StreamCameraMeta = {
@@ -426,7 +443,14 @@ export async function createCamera(payload: CameraWritePayload): Promise<CameraR
   const res = await fetch(`${API}/cameras/`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ status: "Online", is_active: true, zone: "", ...payload }),
+    body: JSON.stringify({
+      status: "Online",
+      is_active: true,
+      zone: "",
+      purpose: ALL_CAMERA_PURPOSES[0],
+      purposes: [...ALL_CAMERA_PURPOSES],
+      ...payload,
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(formatApiError(data, "Failed to create camera"));
@@ -510,8 +534,11 @@ export async function fetchDetectionEventsPage(
   if (query.date_to) params.set("date_to", query.date_to);
   if (query.q?.trim()) params.set("q", query.q.trim());
   if (query.class_name?.trim()) params.set("class_name", query.class_name.trim());
+  if (query.vehicle_only) params.set("vehicle_only", "true");
   if (query.is_alert === true) params.set("is_alert", "true");
   if (query.is_alert === false) params.set("is_alert", "false");
+  if (query.as_of) params.set("as_of", query.as_of);
+  if (query.as_of_id != null) params.set("as_of_id", String(query.as_of_id));
 
   const res = await fetch(`${API}/cameras/detection-events/?${params}`, {
     headers: getAuthHeaders(),
@@ -643,6 +670,9 @@ export async function fetchPlateCaptures(opts?: {
   page_size?: number;
   camera_key?: string;
   q?: string;
+  plate_number?: string;
+  date_from?: string;
+  date_to?: string;
   cleanup?: boolean;
 }): Promise<{
   count: number;
@@ -658,6 +688,9 @@ export async function fetchPlateCaptures(opts?: {
   params.set("page_size", String(opts?.page_size ?? 25));
   if (opts?.camera_key) params.set("camera_key", opts.camera_key);
   if (opts?.q) params.set("q", opts.q);
+  if (opts?.plate_number) params.set("plate_number", opts.plate_number);
+  if (opts?.date_from) params.set("date_from", opts.date_from);
+  if (opts?.date_to) params.set("date_to", opts.date_to);
   if (opts?.cleanup === false) params.set("cleanup", "false");
   const res = await fetch(`${API}/cameras/plate-captures/?${params.toString()}`, {
     headers: getAuthHeaders(),

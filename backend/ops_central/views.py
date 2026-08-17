@@ -17,12 +17,14 @@ from rest_framework.views import APIView
 from users.permissions import is_ops_viewer
 
 from .client import (
+    delete_remote_camera,
     fetch_ml_cameras,
     fetch_remote_cameras,
     fetch_remote_detection_events,
     mark_server_health,
     probe_health,
     probe_ml_health,
+    unregister_ml_camera_remote,
 )
 from .models import ConnectionMode, RemoteServer
 from .permissions import IsITSuperAdminOnly, IsOpsViewer
@@ -81,13 +83,90 @@ def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]
     return out
 
 
+def _is_local_hub_server(server: RemoteServer) -> bool:
+    ml = (server.resolved_ml_base_url() or "").lower()
+    base = (server.normalized_base_url() or "").lower()
+    local_hosts = ("127.0.0.1", "localhost", "::1")
+    return any(host in ml or host in base for host in local_hosts)
+
+
+def _parse_camera_id(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_stream_key(stream_key: str, camera_id, code: str) -> str:
+    key = (stream_key or "").strip()
+    if key:
+        return key
+    cid = _parse_camera_id(camera_id)
+    if cid:
+        return f"cam-{cid}"
+    code = (code or "").strip()
+    if code:
+        return code if code.startswith("cam-") else f"cam-{code}"
+    return ""
+
+
+def _camera_matches_entry(
+    cam: dict,
+    *,
+    stream_key: str,
+    camera_id: int | None,
+    code: str,
+) -> bool:
+    if stream_key and (cam.get("ml_stream_key") or cam.get("code") or "") == stream_key:
+        return True
+    if camera_id is not None and cam.get("id") == camera_id:
+        return True
+    if code and (cam.get("code") or "") == code:
+        return True
+    if stream_key.startswith("cam-"):
+        sid = stream_key[4:]
+        if sid.isdigit() and cam.get("id") == int(sid):
+            return True
+    return False
+
+
+def _prune_server_camera_cache(
+    server: RemoteServer,
+    *,
+    stream_key: str,
+    camera_id: int | None,
+    code: str,
+) -> list[dict]:
+    cached = list(server.cached_cameras or [])
+    if not cached:
+        return cached
+    pruned = [
+        cam
+        for cam in cached
+        if isinstance(cam, dict)
+        and not _camera_matches_entry(
+            cam,
+            stream_key=stream_key,
+            camera_id=camera_id,
+            code=code,
+        )
+    ]
+    if len(pruned) != len(cached):
+        server.cached_cameras = pruned
+        server.save(update_fields=["cached_cameras", "updated_at"])
+    return pruned
+
+
 class RemoteServerViewSet(viewsets.ModelViewSet):
     queryset = RemoteServer.objects.all()
     serializer_class = RemoteServerSerializer
     permission_classes = [IsOpsViewer]
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy"):
+        if self.action in ("create", "update", "partial_update", "destroy", "remove_camera"):
             return [IsITSuperAdminOnly()]
         return [IsOpsViewer()]
 
@@ -213,6 +292,74 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
         if not result.get("ok"):
             return Response(result, status=status.HTTP_502_BAD_GATEWAY)
         return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="remove-camera")
+    def remove_camera(self, request, pk=None):
+        """Remove a camera from this server (remote delete + hub cache prune)."""
+        server = self.get_object()
+        stream_key = _resolve_stream_key(
+            (request.data.get("stream_key") or request.data.get("ml_stream_key") or ""),
+            request.data.get("camera_id"),
+            (request.data.get("code") or ""),
+        )
+        camera_id = _parse_camera_id(request.data.get("camera_id"))
+        code = (request.data.get("code") or "").strip()
+        if not stream_key and camera_id is None and not code:
+            return Response(
+                {"detail": "stream_key, camera_id, or code is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if camera_id is None and stream_key.startswith("cam-"):
+            camera_id = _parse_camera_id(stream_key[4:])
+
+        removed_remote = False
+        warnings: list[str] = []
+
+        # Local hub — delete from Django registry (signals unregister ML/journey).
+        if _is_local_hub_server(server) and camera_id is not None:
+            from cameras.models import Camera
+
+            local = Camera.objects.filter(pk=camera_id).first()
+            if local:
+                local.delete()
+                removed_remote = True
+
+        if not removed_remote:
+            if server.is_ml_mode():
+                ml_result = unregister_ml_camera_remote(server.resolved_ml_base_url(), stream_key)
+                if ml_result.get("ok"):
+                    removed_remote = True
+                else:
+                    warnings.append(ml_result.get("error") or "ML unregister failed")
+            elif camera_id is not None:
+                token = self._effective_token(server)
+                dj_result = delete_remote_camera(server.normalized_base_url(), token, camera_id)
+                if dj_result.get("ok"):
+                    removed_remote = True
+                else:
+                    warnings.append(dj_result.get("error") or "Remote delete failed")
+                ml_base = server.resolved_ml_base_url()
+                if ml_base and stream_key:
+                    ml_result = unregister_ml_camera_remote(ml_base, stream_key)
+                    if ml_result.get("ok"):
+                        removed_remote = True
+                    elif not dj_result.get("ok"):
+                        warnings.append(ml_result.get("error") or "ML unregister failed")
+
+        remaining = _prune_server_camera_cache(
+            server,
+            stream_key=stream_key,
+            camera_id=camera_id,
+            code=code,
+        )
+        return Response(
+            {
+                "ok": True,
+                "removed_remote": removed_remote,
+                "warnings": warnings,
+                "remaining_count": len(remaining),
+            }
+        )
 
 
 class AllCitiesStreamsAPIView(APIView):

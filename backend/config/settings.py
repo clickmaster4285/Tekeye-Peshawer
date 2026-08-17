@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "warehouse",
     "ml.apps.MlConfig",
     "person_journey.apps.PersonJourneyConfig",
+    "object_tracking.apps.ObjectTrackingConfig",
     "recognition.apps.RecognitionConfig",
     "ops_central.apps.OpsCentralConfig",
 ]

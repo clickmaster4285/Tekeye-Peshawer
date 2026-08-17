@@ -86,6 +86,35 @@ def get_face_engine():
     return _engine
 
 
+def _ensure_insightface_pack(model_name: str, root: str = "~/.insightface") -> Path:
+    """Ensure the InsightFace model pack exists and contains ONNX files.
+
+    InsightFace skips download when the pack folder already exists — even if it
+    is empty — which leads to ``assert 'detection' in self.models``.
+    """
+    from insightface.utils.storage import download
+
+    pack_dir = Path(root).expanduser() / "models" / model_name
+    onnx_files = list(pack_dir.glob("*.onnx")) if pack_dir.is_dir() else []
+    if onnx_files:
+        return pack_dir
+
+    logger.warning(
+        "InsightFace pack '%s' missing or empty at %s — downloading…",
+        model_name,
+        pack_dir,
+    )
+    download("models", model_name, force=True, root=root)
+    onnx_files = list(pack_dir.glob("*.onnx"))
+    if not onnx_files:
+        raise RuntimeError(
+            f"InsightFace model pack '{model_name}' has no .onnx files after download "
+            f"at {pack_dir}. Check network access to GitHub releases."
+        )
+    logger.info("InsightFace pack '%s' ready (%d onnx files)", model_name, len(onnx_files))
+    return pack_dir
+
+
 class FaceEngine:
     def __init__(self):
         from insightface.app import FaceAnalysis
@@ -94,6 +123,7 @@ class FaceEngine:
         ctx_id = -1 if providers == ["CPUExecutionProvider"] else 0
         self.providers = providers
         model_name = getattr(settings, "ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
+        _ensure_insightface_pack(model_name)
         self.app = FaceAnalysis(name=model_name, providers=providers)
         self.app.prepare(ctx_id=ctx_id, det_size=(640, 640))
         self.quality = FaceQualityChecker()

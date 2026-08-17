@@ -46,6 +46,7 @@ if "OPENCV_FFMPEG_CAPTURE_OPTIONS" not in os.environ:
 import cv2
 import numpy as np
 
+from camera_byte_tracker import CameraByteTrackerPool
 from face_recognizer import KnownFaceDB
 from inference_engine import (
     ALLOWED_COCO_CLASS_IDS,
@@ -67,6 +68,7 @@ from inference_engine import (
     resolve_smoke_weights_path,
     resolve_weapon_weights_path,
 )
+from object_identity import get_object_identity_registry
 from plate_recognizer import PlateEngine, get_plate_engine
 
 
@@ -853,6 +855,8 @@ class LiveStreamManager:
         self._registry: dict[str, str] = {}
         self._purposes: dict[str, list[str]] = {}
         self._lock = threading.Lock()
+        self._byte_trackers = CameraByteTrackerPool(track_buffer=90)
+        self._object_identity = get_object_identity_registry()
         self._infer_executor: ThreadPoolExecutor | None = None
         self._infer_futures: list[Future] = []
         self._infer_threads: list[threading.Thread] = []  # compat / status
@@ -1567,6 +1571,13 @@ class LiveStreamManager:
         detections = filter_detections_for_purposes(
             detections,
             pipeline.get("purposes") or self._purposes_for(camera_key),
+        )
+        detections = self._byte_trackers.assign_track_ids(camera_key, detections, frame)
+        detections = self._object_identity.enrich_detections(
+            camera_key,
+            frame,
+            detections,
+            face_db=self._face_db,
         )
         return detections
 

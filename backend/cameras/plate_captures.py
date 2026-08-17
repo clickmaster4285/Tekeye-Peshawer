@@ -510,15 +510,45 @@ def dedupe_plate_captures(*, camera_key: str = "", persist: bool = True) -> dict
         }
 
 
+def _parse_filter_bound(value: str, *, end_of_day: bool = False) -> datetime | None:
+    """Parse date (YYYY-MM-DD) or datetime filter bounds from query params."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    # datetime-local / ISO with T
+    normalized = raw.replace("Z", "+00:00")
+    if "T" in normalized or " " in normalized:
+        dt = _parse_ts(normalized.replace(" ", "T", 1) if " " in normalized and "T" not in normalized else normalized)
+        if dt:
+            return dt
+    try:
+        day = datetime.strptime(raw[:10], "%Y-%m-%d")
+    except ValueError:
+        return _parse_ts(raw)
+    if end_of_day:
+        return day.replace(hour=23, minute=59, second=59)
+    return day.replace(hour=0, minute=0, second=0)
+
+
 def load_plate_captures(
     *,
     page: int = 1,
     page_size: int = 25,
     camera_key: str = "",
     q: str = "",
+    plate_number: str = "",
+    date_from: str = "",
+    date_to: str = "",
     cleanup: bool = True,
 ) -> dict[str, Any]:
-    """Return unique/valid plate captures with pagination."""
+    """Return unique/valid plate captures with pagination.
+
+    Filters:
+      - camera_key: exact / cam-<id> match
+      - plate_number: substring match on display or canonical plate
+      - q: substring match on plate or camera_key
+      - date_from / date_to: inclusive datetime bounds
+    """
     if cleanup:
         dedupe = dedupe_plate_captures(camera_key="", persist=True)
         rows = dedupe["results"]
@@ -544,6 +574,19 @@ def load_plate_captures(
             or str(r.get("camera_key") or "").lower() == f"cam-{key_filter}"
         ]
 
+    plate_term = (plate_number or "").strip().lower()
+    if plate_term:
+        plate_compact = _plate_key(plate_term)
+        rows = [
+            r
+            for r in rows
+            if plate_term in str(r.get("plate_number") or "").lower()
+            or (
+                plate_compact
+                and plate_compact in _plate_key(str(r.get("plate_number") or "")).lower()
+            )
+        ]
+
     term = (q or "").strip().lower()
     if term:
         rows = [
@@ -551,7 +594,25 @@ def load_plate_captures(
             for r in rows
             if term in str(r.get("plate_number") or "").lower()
             or term in str(r.get("camera_key") or "").lower()
+            or term in _plate_key(str(r.get("plate_number") or "")).lower()
         ]
+
+    from_dt = _parse_filter_bound(date_from, end_of_day=False)
+    to_dt = _parse_filter_bound(date_to, end_of_day=True)
+    if from_dt or to_dt:
+        filtered: list[dict[str, Any]] = []
+        for row in rows:
+            ts = _parse_ts(str(row.get("timestamp") or ""))
+            if ts is None:
+                continue
+            # Compare naive timestamps consistently
+            cmp = ts.replace(tzinfo=None) if ts.tzinfo else ts
+            if from_dt and cmp < from_dt:
+                continue
+            if to_dt and cmp > to_dt:
+                continue
+            filtered.append(row)
+        rows = filtered
 
     total = len(rows)
     page_size = max(5, min(int(page_size or 25), 100))

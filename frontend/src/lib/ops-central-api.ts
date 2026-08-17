@@ -178,6 +178,25 @@ export async function deleteRemoteServer(id: number): Promise<void> {
   if (!res.ok) throw new Error(await parseError(res, "Failed to delete server"))
 }
 
+export async function removeServerCamera(
+  serverId: number,
+  payload: { stream_key?: string; ml_stream_key?: string; camera_id?: number; code?: string }
+): Promise<{ ok: boolean; removed_remote: boolean; warnings: string[]; remaining_count: number }> {
+  const res = await fetch(`${API}/ops/servers/${serverId}/remove-camera/`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to remove camera"))
+  return {
+    ok: Boolean(data.ok),
+    removed_remote: Boolean(data.removed_remote),
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    remaining_count: data.remaining_count ?? 0,
+  }
+}
+
 export async function testRemoteServer(id: number): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${API}/ops/servers/${id}/test/`, {
     method: "POST",

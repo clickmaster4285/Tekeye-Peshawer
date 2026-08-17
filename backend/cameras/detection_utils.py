@@ -219,16 +219,32 @@ def save_detection_batch(
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
     dedup_seconds: int | None = None,
 ) -> int:
-    """Save detections from a live ML poll. Returns number of new rows created."""
+    """Save detections from a live ML poll. Returns number of new rows created.
+
+    Uses ByteTrack local track id + ReID global object id so the same object is
+    captured once (smoke/fire/weapon are excluded from this identity flow).
+    """
     detections = filter_detections_for_camera(camera, detections)
     if not detections:
         return 0
 
+    from object_tracking.services import (
+        finalize_missing_tracks,
+        finalize_stale_visits_globally,
+        is_excluded_detection,
+        mark_detection_captured,
+        upsert_global_object,
+    )
+
     dedup_window = _dedup_seconds() if dedup_seconds is None else max(0, dedup_seconds)
     since = timezone.now() - timedelta(seconds=max(1, dedup_window)) if dedup_window > 0 else None
     saved = 0
+    active_track_ids: set[int] = set()
 
     for det in detections:
+        if is_excluded_detection(det):
+            continue
+
         label = str(det.get("label") or det.get("class_name") or "").strip()
         class_name = str(det.get("class_name") or label or "object").strip()
         if not label:
@@ -239,6 +255,14 @@ def save_detection_batch(
             continue
         if confidence < min_confidence:
             continue
+
+        track_id = det.get("track_id")
+        try:
+            track_id_i = int(track_id) if track_id is not None else None
+        except (TypeError, ValueError):
+            track_id_i = None
+        if track_id_i is not None:
+            active_track_ids.add(track_id_i)
 
         clip_enabled = bool(getattr(settings, "DETECTION_CLIP_ENABLED", True))
         employee_name, personal_number = resolve_staff_identity(label, class_name)
@@ -271,13 +295,35 @@ def save_detection_batch(
         except Exception:
             logger.exception("Attendance mark failed for camera %s", camera.pk)
 
-        if since is not None and DetectionEvent.objects.filter(
+        global_obj = None
+        visit = None
+        should_capture = False
+        try:
+            global_obj, visit, should_capture = upsert_global_object(camera, det)
+        except Exception:
+            logger.exception("Global object upsert failed for camera %s", camera.pk)
+            should_capture = False
+
+        if not should_capture:
+            continue
+
+        # Fallback short-window dedupe when tracker/ReID did not assign an identity yet
+        if global_obj is None and since is not None and DetectionEvent.objects.filter(
             camera=camera,
             label=label,
             class_name=class_name,
             created_at__gte=since,
         ).exists():
             continue
+
+        if track_id_i is not None and visit is None and DetectionEvent.objects.filter(
+            camera=camera,
+            local_track_id=track_id_i,
+            class_name=class_name[:80],
+        ).exists():
+            continue
+
+        global_code = (global_obj.code if global_obj is not None else str(det.get("global_object_id") or ""))[:32]
 
         event = DetectionEvent.objects.create(
             camera=camera,
@@ -289,8 +335,22 @@ def save_detection_batch(
             bbox=det.get("bbox") or [],
             is_alert=bool(det.get("alert")),
             clip_status=ClipStatus.PENDING if clip_enabled else ClipStatus.SKIPPED,
+            local_track_id=track_id_i,
+            person_qr=global_code,
+            track_event="enter",
         )
+        if global_obj is not None:
+            try:
+                mark_detection_captured(global_obj, event.pk, visit=visit)
+            except Exception:
+                logger.exception("Failed to mark global object %s captured", global_obj.code)
         schedule_detection_clip(camera.pk, event.pk)
         saved += 1
+
+    try:
+        finalize_missing_tracks(camera, active_track_ids)
+        finalize_stale_visits_globally(limit=50)
+    except Exception:
+        logger.exception("Failed to finalize exited object tracks for camera %s", camera.pk)
 
     return saved

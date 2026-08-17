@@ -37,6 +37,8 @@ CAMERA_PURPOSE_OPTIONS: tuple[CameraPurpose, ...] = (
     CameraPurpose.ANPR,
 )
 
+DEFAULT_CAMERA_PURPOSES: list[str] = [c.value for c in CAMERA_PURPOSE_OPTIONS]
+
 
 class CameraType(models.TextChoices):
     PTZ = "PTZ", "PTZ"
@@ -162,7 +164,7 @@ class Camera(models.Model):
             if code in allowed and code not in out:
                 out.append(code)
         if not out:
-            out = [CameraPurpose.GENERAL_OBJECTS]
+            out = list(DEFAULT_CAMERA_PURPOSES)
         return out
 
     def purpose_list(self) -> list[str]:

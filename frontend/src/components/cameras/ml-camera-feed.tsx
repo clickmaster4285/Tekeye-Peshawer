@@ -189,7 +189,6 @@ export function MlCameraFeed({
             {camera.name}
           </Badge>
           {mlLiveSrc && <Badge className="bg-[#3b82f6] text-xs">Live</Badge>}
-          <Badge className="bg-[#3b82f6]/80 text-xs">{camera.purpose_label}</Badge>
         </div>
 
         {showFullscreenButton && (

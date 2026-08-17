@@ -1,11 +1,22 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Car, ChevronLeft, ChevronRight, FileText, RefreshCw, Search, Settings2 } from "lucide-react"
+import {
+  Car,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Filter,
+  RefreshCw,
+  Search,
+  Settings2,
+  X,
+} from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   Dialog,
@@ -20,6 +31,18 @@ import {
 } from "@/lib/cameras-api"
 
 const PAGE_SIZE = 25
+
+type AppliedFilters = {
+  plate_number: string
+  date_from: string
+  date_to: string
+}
+
+const emptyFilters: AppliedFilters = {
+  plate_number: "",
+  date_from: "",
+  date_to: "",
+}
 
 function formatTime(value: string) {
   if (!value) return "—"
@@ -53,27 +76,49 @@ function PlateThumb({
 }
 
 export default function VehicleTrackingPage() {
-  const [q, setQ] = useState("")
-  const [debouncedQ, setDebouncedQ] = useState("")
+  const [filters, setFilters] = useState<AppliedFilters>(emptyFilters)
+  const [debouncedPlate, setDebouncedPlate] = useState("")
   const [page, setPage] = useState(1)
   const [preview, setPreview] = useState<PlateCapture | null>(null)
 
+  // Debounce plate text; date controls apply immediately.
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQ(q.trim()), 300)
-    return () => window.clearTimeout(t)
-  }, [q])
+    const next = filters.plate_number.trim()
+    const timer = window.setTimeout(() => {
+      setDebouncedPlate((prev) => {
+        if (prev !== next) setPage(1)
+        return next
+      })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [filters.plate_number])
 
-  useEffect(() => {
-    setPage(1)
-  }, [debouncedQ])
+  const applied = useMemo(
+    () => ({
+      plate_number: debouncedPlate,
+      date_from: filters.date_from,
+      date_to: filters.date_to,
+    }),
+    [debouncedPlate, filters.date_from, filters.date_to]
+  )
+
+  const hasActiveFilters = useMemo(
+    () =>
+      filters.plate_number.trim() !== "" ||
+      filters.date_from !== "" ||
+      filters.date_to !== "",
+    [filters]
+  )
 
   const { data, isLoading, isFetching, refetch, error } = useQuery({
-    queryKey: ["plate-captures", page, PAGE_SIZE, debouncedQ],
+    queryKey: ["plate-captures", page, PAGE_SIZE, applied],
     queryFn: () =>
       fetchPlateCaptures({
         page,
         page_size: PAGE_SIZE,
-        q: debouncedQ || undefined,
+        plate_number: applied.plate_number || undefined,
+        date_from: applied.date_from || undefined,
+        date_to: applied.date_to || undefined,
         cleanup: true,
       }),
     refetchInterval: 8_000,
@@ -86,11 +131,28 @@ export default function VehicleTrackingPage() {
   const totalPages = data?.total_pages ?? 1
   const cleanup = data?.cleanup
 
+  const updateFilters = (patch: Partial<AppliedFilters>) => {
+    setFilters((f) => ({ ...f, ...patch }))
+    if (!("plate_number" in patch)) setPage(1)
+  }
+
+  const clearFilters = () => {
+    setFilters(emptyFilters)
+    setDebouncedPlate("")
+    setPage(1)
+  }
+
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, totalPages])
+
   return (
     <ModulePageLayout
-      title="Vehicle Tracking"
-      description="Unique ANPR plate reads with crop and scene images. Duplicates are removed automatically."
-      breadcrumbs={[{ label: "AI Computer Vision" }, { label: "Vehicle Tracking" }]}
+      title="Number Plate Tracking"
+      description="Unique ANPR plate reads with crop and scene images. Filter by plate number and date/time."
+      breadcrumbs={[{ label: "AI Computer Vision" }, { label: "Number Plate Tracking" }]}
     >
       <div className="grid gap-6">
         <div className="grid gap-4 md:grid-cols-3">
@@ -131,6 +193,59 @@ export default function VehicleTrackingPage() {
         </div>
 
         <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Filter className="h-4 w-4" />
+                Filters
+              </CardTitle>
+              <CardDescription>Filters apply as you change them</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasActiveFilters ? (
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1">
+                  <X className="h-4 w-4" />
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="plate-number">Plate number</Label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="plate-number"
+                  className="pl-8"
+                  placeholder="e.g. BSD987"
+                  value={filters.plate_number}
+                  onChange={(e) => updateFilters({ plate_number: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="plate-from">Date & time from</Label>
+              <Input
+                id="plate-from"
+                type="datetime-local"
+                value={filters.date_from}
+                onChange={(e) => updateFilters({ date_from: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="plate-to">Date & time to</Label>
+              <Input
+                id="plate-to"
+                type="datetime-local"
+                value={filters.date_to}
+                onChange={(e) => updateFilters({ date_to: e.target.value })}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Plate Captures</CardTitle>
@@ -140,28 +255,18 @@ export default function VehicleTrackingPage() {
                   ? ` Cleaned ${cleanup.removed_rows} rows · ${cleanup.deleted_files} files.`
                   : ""}{" "}
                 Showing {results.length} of {total}
+                {hasActiveFilters ? " (filtered)" : ""}
               </CardDescription>
             </div>
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-              <div className="relative min-w-[220px] flex-1">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="pl-8"
-                  placeholder="Search plate or camera…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => refetch()}
-                disabled={isFetching}
-                className="gap-2"
-              >
-                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
           </CardHeader>
           <CardContent>
             {error ? (
@@ -173,7 +278,9 @@ export default function VehicleTrackingPage() {
               <p className="text-sm text-muted-foreground">Loading captures…</p>
             ) : results.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No unique plate captures yet. Run an ANPR camera stream so plates are saved under media.
+                {hasActiveFilters
+                  ? "No plate captures match your filters."
+                  : "No unique plate captures yet. Run an ANPR camera stream so plates are saved under media."}
               </p>
             ) : (
               <>

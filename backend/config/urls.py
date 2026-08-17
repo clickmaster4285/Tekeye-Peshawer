@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/", include("warehouse.urls")),
     path("api/", include("ml.urls")),
     path("api/", include("person_journey.urls")),
+    path("api/", include("object_tracking.urls")),
     path("api/recognition/", include("recognition.urls")),
     path("api/", include("ops_central.urls")),
 ]

@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     CAMERA_PURPOSE_OPTIONS,
+    DEFAULT_CAMERA_PURPOSES,
     Camera,
     CameraPurpose,
     DetectionEvent,
@@ -212,9 +213,8 @@ class CameraWriteSerializer(serializers.ModelSerializer):
             attrs["purposes"] = Camera.normalize_purposes([purpose])
             attrs["purpose"] = attrs["purposes"][0]
         elif not self.instance:
-            raise serializers.ValidationError(
-                {"purposes": "Select at least one AI purpose / model."}
-            )
+            attrs["purposes"] = list(DEFAULT_CAMERA_PURPOSES)
+            attrs["purpose"] = attrs["purposes"][0]
         return attrs
 
 
@@ -237,9 +237,7 @@ class BulkCameraCreateSerializer(serializers.Serializer):
         elif purpose:
             attrs["purposes"] = Camera.normalize_purposes([purpose])
         else:
-            raise serializers.ValidationError(
-                {"purposes": "Select at least one AI purpose / model."}
-            )
+            attrs["purposes"] = list(DEFAULT_CAMERA_PURPOSES)
         attrs["purpose"] = attrs["purposes"][0]
         return attrs
 

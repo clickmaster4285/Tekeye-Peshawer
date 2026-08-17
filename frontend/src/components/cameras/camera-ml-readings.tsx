@@ -44,11 +44,10 @@ export function CameraMlReadings({
             <Activity className="h-4 w-4 text-[#3b82f6]" />
             Model status
           </CardTitle>
-          <CardDescription>Live inference for this camera&apos;s purpose.</CardDescription>
+          <CardDescription>Live inference for this camera.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="flex flex-wrap gap-2">
-            <Badge className="bg-[#3b82f6]">{camera.purpose_label}</Badge>
             <Badge variant="default">ML active</Badge>
             {scanning && <Badge variant="outline">Scanning…</Badge>}
           </div>

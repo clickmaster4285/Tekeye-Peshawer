@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.db.models import Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status, viewsets
 from rest_framework.authtoken.models import Token
@@ -165,9 +166,16 @@ class CameraViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="detection-events")
     def detection_events(self, request):
+        def _aware(dt):
+            if dt is None:
+                return None
+            if timezone.is_naive(dt):
+                return timezone.make_aware(dt, timezone.get_current_timezone())
+            return dt
+
         qs = (
             DetectionEvent.objects.select_related("camera", "camera__nvr", "camera__nvr__site")
-            .order_by("-created_at")
+            .order_by("-created_at", "-id")
         )
         camera_id = request.query_params.get("camera")
         if camera_id:
@@ -192,14 +200,85 @@ class CameraViewSet(viewsets.ModelViewSet):
             qs = qs.filter(camera__zone__iexact=zone.strip())
         date_from = request.query_params.get("date_from")
         if date_from:
-            parsed = parse_date(date_from.strip())
-            if parsed:
-                qs = qs.filter(created_at__date__gte=parsed)
+            raw = date_from.strip()
+            dt = parse_datetime(raw.replace(" ", "T", 1) if " " in raw and "T" not in raw else raw)
+            if dt:
+                qs = qs.filter(created_at__gte=_aware(dt))
+            else:
+                parsed = parse_date(raw[:10])
+                if parsed:
+                    qs = qs.filter(created_at__date__gte=parsed)
         date_to = request.query_params.get("date_to")
         if date_to:
-            parsed = parse_date(date_to.strip())
-            if parsed:
-                qs = qs.filter(created_at__date__lte=parsed)
+            raw = date_to.strip()
+            dt = parse_datetime(raw.replace(" ", "T", 1) if " " in raw and "T" not in raw else raw)
+            if dt:
+                qs = qs.filter(created_at__lte=_aware(dt))
+            else:
+                parsed = parse_date(raw[:10])
+                if parsed:
+                    qs = qs.filter(created_at__date__lte=parsed)
+
+        # Freeze the result set at a point-in-time so offset pages don't shift
+        # when new detections arrive (client reuses as_of / as_of_id from page 1).
+        as_of_raw = (request.query_params.get("as_of") or "").strip()
+        as_of_id_raw = (request.query_params.get("as_of_id") or "").strip()
+        as_of_dt = None
+        as_of_id = None
+        if as_of_raw:
+            normalized = as_of_raw.replace("Z", "+00:00")
+            as_of_dt = parse_datetime(
+                normalized.replace(" ", "T", 1) if " " in normalized and "T" not in normalized else normalized
+            )
+            as_of_dt = _aware(as_of_dt)
+            if as_of_dt is not None:
+                try:
+                    as_of_id = int(as_of_id_raw) if as_of_id_raw else None
+                except (TypeError, ValueError):
+                    as_of_id = None
+                if as_of_id is not None:
+                    qs = qs.filter(
+                        Q(created_at__lt=as_of_dt)
+                        | Q(created_at=as_of_dt, id__lte=as_of_id)
+                    )
+                else:
+                    qs = qs.filter(created_at__lte=as_of_dt)
+
+        # Restrict to vehicle classes before search/pagination so this panel
+        # never returns person/object/other detections.
+        vehicle_only = str(request.query_params.get("vehicle_only", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        # COCO + custom YOLO vehicle aliases used by ml_services weights.
+        vehicle_classes = (
+            "car",
+            "truck",
+            "bus",
+            "motorcycle",
+            "bicycle",
+            "vehicle",
+            "van",
+            "microbus",
+            "pickup-van",
+            "pickup_van",
+            "pickupvan",
+        )
+        if vehicle_only:
+            class_q = Q()
+            for name in vehicle_classes:
+                class_q |= Q(class_name__iexact=name)
+            qs = qs.filter(class_q)
+
+        class_name = request.query_params.get("class_name")
+        if class_name and class_name.strip():
+            wanted = class_name.strip().lower()
+            if vehicle_only and wanted not in vehicle_classes:
+                qs = qs.none()
+            else:
+                qs = qs.filter(class_name__iexact=wanted)
+
         search_q = request.query_params.get("q") or request.query_params.get("search")
         if search_q and search_q.strip():
             qs = apply_detection_search(qs, search_q.strip())
@@ -225,9 +304,12 @@ class CameraViewSet(viewsets.ModelViewSet):
         elif is_alert is not None and str(is_alert).strip().lower() in ("false", "0", "no"):
             qs = qs.filter(is_alert=False)
 
-        class_name = request.query_params.get("class_name")
-        if class_name and class_name.strip():
-            qs = qs.filter(class_name__icontains=class_name.strip())
+        # Tip of the live filtered stream — client stores this to freeze later pages.
+        tip = None
+        if as_of_dt is None:
+            tip = qs.values("created_at", "id").first()
+        resp_as_of = as_of_dt if as_of_dt is not None else (tip["created_at"] if tip else None)
+        resp_as_of_id = as_of_id if as_of_id is not None else (tip["id"] if tip else None)
 
         total = qs.count()
         offset = (page - 1) * page_size
@@ -240,6 +322,9 @@ class CameraViewSet(viewsets.ModelViewSet):
                 "page": page,
                 "page_size": page_size,
                 "total_pages": total_pages,
+                # Echo snapshot used (or live tip) so offset pages stay stable.
+                "as_of": resp_as_of.isoformat() if resp_as_of else None,
+                "as_of_id": resp_as_of_id,
                 "results": DetectionEventSerializer(
                     events, many=True, context={"request": request}
                 ).data,
@@ -263,6 +348,8 @@ class CameraViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="plate-captures")
     def plate_captures(self, request):
         """Unique ANPR plate reads (deduped); deletes duplicate media files."""
+        import inspect
+
         from .plate_captures import load_plate_captures, plate_capture_summary
 
         try:
@@ -275,15 +362,28 @@ class CameraViewSet(viewsets.ModelViewSet):
             page_size = 25
         camera_key = (request.query_params.get("camera_key") or "").strip()
         q = (request.query_params.get("q") or "").strip()
+        plate_number = (request.query_params.get("plate_number") or "").strip()
+        date_from = (request.query_params.get("date_from") or "").strip()
+        date_to = (request.query_params.get("date_to") or "").strip()
         cleanup = str(request.query_params.get("cleanup", "true")).lower() in ("1", "true", "yes")
 
-        payload = load_plate_captures(
-            page=page,
-            page_size=page_size,
-            camera_key=camera_key,
-            q=q,
-            cleanup=cleanup,
-        )
+        # Pass only kwargs supported by the installed load_plate_captures()
+        # (avoids 500 if an older plate_captures.py is still on the server).
+        kwargs = {
+            "page": page,
+            "page_size": page_size,
+            "camera_key": camera_key,
+            "q": q,
+            "plate_number": plate_number,
+            "date_from": date_from,
+            "date_to": date_to,
+            "cleanup": cleanup,
+        }
+        accepted = set(inspect.signature(load_plate_captures).parameters)
+        if plate_number and "plate_number" not in accepted and "q" in accepted:
+            # Older loader: fold plate filter into generic search.
+            kwargs["q"] = plate_number if not q else q
+        payload = load_plate_captures(**{k: v for k, v in kwargs.items() if k in accepted})
         return Response(
             {
                 **payload,

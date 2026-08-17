@@ -262,7 +262,7 @@ export default function AttendanceMonitorPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">{cam.name}</CardTitle>
                   <CardDescription>
-                    {cam.location || cam.purpose_label || cam.purpose || "Camera"} ·{" "}
+                    {cam.location || "Camera"} ·{" "}
                     {cam.runtime?.running
                       ? cam.runtime.connected
                         ? "Connected"

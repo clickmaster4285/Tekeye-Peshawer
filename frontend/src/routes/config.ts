@@ -79,6 +79,8 @@ export const ROUTES = {
   ANALYTICS_CAMERA_MANAGEMENT: "/analytics/camera-management",
   ANALYTICS_CAMERA_MANAGEMENT_VIEW: "/analytics/camera-management/:id",
   OBJECT_DETECTION: "/object-detection",
+  OBJECT_TRACKING: "/object-tracking",
+  OBJECT_TRACKING_DETAIL: "/object-tracking/:uuid",
   /** Super Admin only — remote location servers + live detection streams */
   OPS_CENTRAL: "/ops-central",
   /** All connected Central Ops servers — live city camera wall */
@@ -87,6 +89,9 @@ export const ROUTES = {
   PERSON_JOURNEY_DETAIL: "/person-journey/:uuid",
   ANPR_SETTINGS: "/anpr-settings",
   ANPR_VEHICLE_TRACKING: "/anpr-vehicle-tracking",
+  /** Vehicle detection log (car/truck/bus/etc.). Legacy path kept for bookmarks. */
+  NUMBER_PLATE_DETECTION: "/vehicle-detection",
+  NUMBER_PLATE_DETECTION_LEGACY: "/number-plate-detection",
   ANOMALY_DETECTION: "/anomaly-detection",
 
   // Detentions
@@ -231,6 +236,10 @@ export function getPersonJourneyPath(qrCode?: string): string {
     return `${ROUTES.PERSON_JOURNEY}?qr=${encodeURIComponent(qrCode.trim())}`
   }
   return ROUTES.PERSON_JOURNEY
+}
+
+export function getObjectTrackingDetailPath(uuid: string): string {
+  return `/object-tracking/${encodeURIComponent(uuid)}`
 }
 
 /** Build path to user detail page */
@@ -545,9 +554,11 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
         children: [
           { label: "Cameras", href: ROUTES.CAMERA_MANAGEMENT },
           { label: "Object Detection", href: ROUTES.OBJECT_DETECTION },
+          { label: "Object Tracking", href: ROUTES.OBJECT_TRACKING },
           { label: "Person Journey", href: ROUTES.PERSON_JOURNEY },
           { label: "ANPR Settings", href: ROUTES.ANPR_SETTINGS },
-          { label: "Vehicle Tracking", href: ROUTES.ANPR_VEHICLE_TRACKING },
+          { label: "Number Plate Tracking", href: ROUTES.ANPR_VEHICLE_TRACKING },
+          { label: "Vehicle Detection", href: ROUTES.NUMBER_PLATE_DETECTION },
           { label: "Anomaly Detection", href: ROUTES.ANOMALY_DETECTION },
         ],
       },
