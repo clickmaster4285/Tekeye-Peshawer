@@ -801,7 +801,7 @@ def save_assessment_uploads(request, obj: DetentionAssessment) -> list[Detention
                     assessment=obj,
                     file=uploaded,
                     file_type=file_type,
-                    original_filename=(getattr(uploaded, "name", "") or "")[:255],
+                    original_filename=getattr(uploaded, "name", "") or "",
                 )
             )
     return created

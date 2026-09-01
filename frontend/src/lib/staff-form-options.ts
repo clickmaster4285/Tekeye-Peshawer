@@ -16,6 +16,7 @@ export const STAFF_ROLE_OPTIONS = [
   { value: "STOCK_CONTROLLER", label: "Stock Controller" },
   { value: "IT_ADMIN", label: "IT Administrator" },
   { value: "AUDITOR", label: "Auditor" },
+  { value: "PRAL", label: "PRAL" },
   { value: "DETECTION_OFFICER", label: "Detection Officer" },
   { value: "FIR_OFFICER", label: "FIR Officer" },
   { value: "INVESTIGATION_OFFICER", label: "Investigation Officer" },

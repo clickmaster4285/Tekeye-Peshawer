@@ -40,30 +40,29 @@ class DetentionMemo(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    case_no = models.CharField(max_length=120, blank=True, db_index=True)
-    reference_number = models.CharField(max_length=200, blank=True)
-    fir_number = models.CharField(max_length=120, blank=True)
+    case_no = models.TextField(blank=True, db_index=True)
+    reference_number = models.TextField(blank=True)
+    fir_number = models.TextField(blank=True)
 
-    date_time_occurrence = models.CharField(max_length=80, blank=True)
-    place_of_occurrence = models.CharField(max_length=300, blank=True)
-    date_time_detention = models.CharField(max_length=80, blank=True)
-    place_of_detention = models.CharField(max_length=300, blank=True)
+    date_time_occurrence = models.TextField(blank=True)
+    place_of_occurrence = models.TextField(blank=True)
+    date_time_detention = models.TextField(blank=True)
+    place_of_detention = models.TextField(blank=True)
 
-    detention_type = models.CharField(max_length=80, blank=True)
-    directorate = models.CharField(max_length=200, blank=True)
-    reason_for_detention = models.CharField(max_length=200, blank=True)
+    detention_type = models.TextField(blank=True)
+    directorate = models.TextField(blank=True)
+    reason_for_detention = models.TextField(blank=True)
 
-    location_of_detention = models.CharField(max_length=300, blank=True)
-    gd_number = models.CharField(max_length=120, blank=True)
-    gd_number_2 = models.CharField(max_length=120, blank=True)
-    where_deposited = models.CharField(max_length=400, blank=True)
-    search_chassis_number = models.CharField(max_length=120, blank=True)
-    receipt_officer = models.CharField(max_length=200, blank=True)
+    location_of_detention = models.TextField(blank=True)
+    gd_number = models.TextField(blank=True)
+    gd_number_2 = models.TextField(blank=True)
+    where_deposited = models.TextField(blank=True)
+    search_chassis_number = models.TextField(blank=True)
+    receipt_officer = models.TextField(blank=True)
 
-    settlement_status = models.CharField(max_length=80, blank=True)
-    verification_status = models.CharField(max_length=80, blank=True)
-    disposition_status = models.CharField(
-        max_length=80,
+    settlement_status = models.TextField(blank=True)
+    verification_status = models.TextField(blank=True)
+    disposition_status = models.TextField(
         blank=True,
         default="",
         help_text="e.g. In Warehouse, Destructed, Released",
@@ -73,18 +72,18 @@ class DetentionMemo(models.Model):
     forwarding_officer_remarks = models.TextField(blank=True)
     purpose_of_detention = models.TextField(blank=True)
 
-    owner_name = models.CharField(max_length=200, blank=True)
-    owner_cnic = models.CharField(max_length=30, blank=True)
-    owner_contact = models.CharField(max_length=50, blank=True)
+    owner_name = models.TextField(blank=True)
+    owner_cnic = models.TextField(blank=True)
+    owner_contact = models.TextField(blank=True)
     # Legacy/base64 fallback (prefer owner_photo_upload for large binaries)
     owner_picture = models.TextField(blank=True)
     owner_photo_upload = models.FileField(
         upload_to=detention_owner_photo_path, blank=True, null=True,
     )
 
-    driver_name = models.CharField(max_length=200, blank=True)
-    driver_cnic = models.CharField(max_length=30, blank=True)
-    driver_contact = models.CharField(max_length=50, blank=True)
+    driver_name = models.TextField(blank=True)
+    driver_cnic = models.TextField(blank=True)
+    driver_contact = models.TextField(blank=True)
     driver_picture = models.TextField(blank=True)
     driver_photo_upload = models.FileField(
         upload_to=detention_driver_photo_path, blank=True, null=True,
@@ -94,10 +93,10 @@ class DetentionMemo(models.Model):
     examining_officer_notes = models.TextField(blank=True)
     detention_notes = models.TextField(blank=True)
 
-    memo_qr_code_number = models.CharField(max_length=160, blank=True)
+    memo_qr_code_number = models.TextField(blank=True)
     memo_qr_code_payload = models.TextField(blank=True)
 
-    created_by = models.CharField(max_length=150, blank=True)
+    created_by = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -117,15 +116,15 @@ class DetentionMemoGoodsLine(models.Model):
         on_delete=models.CASCADE,
         related_name="goods_lines",
     )
-    client_line_id = models.CharField(max_length=80, blank=True)
-    qr_code_number = models.CharField(max_length=160, blank=True)
+    client_line_id = models.TextField(blank=True)
+    qr_code_number = models.TextField(blank=True)
     description = models.TextField(blank=True)
-    pct_code = models.CharField(max_length=40, blank=True)
-    quantity = models.CharField(max_length=40, blank=True)
-    unit = models.CharField(max_length=40, blank=True)
-    condition = models.CharField(max_length=80, blank=True)
-    assessable_value_pkr = models.CharField(max_length=40, blank=True)
-    identification_ref = models.CharField(max_length=200, blank=True)
+    pct_code = models.TextField(blank=True)
+    quantity = models.TextField(blank=True)
+    unit = models.TextField(blank=True)
+    condition = models.TextField(blank=True)
+    assessable_value_pkr = models.TextField(blank=True)
+    identification_ref = models.TextField(blank=True)
     item_notes = models.TextField(blank=True)
     perishable = models.BooleanField(default=False)
 
@@ -169,7 +168,7 @@ class DetentionMemoAttachment(models.Model):
     )
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     file = models.FileField(upload_to=detention_attachment_path)
-    original_filename = models.CharField(max_length=255, blank=True)
+    original_filename = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -194,15 +193,15 @@ class DepositAccountEntry(models.Model):
         related_name="deposit_entries",
     )
 
-    treasury_challan_no = models.CharField(max_length=120, blank=True)
-    deposit_type = models.CharField(max_length=80, blank=True)
-    case_seizure_ref = models.CharField(max_length=200, blank=True)
-    fir_no = models.CharField(max_length=120, blank=True)
-    customs_station = models.CharField(max_length=200, blank=True)
-    amount = models.CharField(max_length=120, blank=True)
-    deposit_date = models.CharField(max_length=40, blank=True)
-    bank_treasury_name = models.CharField(max_length=255, blank=True)
-    status = models.CharField(max_length=80, blank=True)
+    treasury_challan_no = models.TextField(blank=True)
+    deposit_type = models.TextField(blank=True)
+    case_seizure_ref = models.TextField(blank=True)
+    fir_no = models.TextField(blank=True)
+    customs_station = models.TextField(blank=True)
+    amount = models.TextField(blank=True)
+    deposit_date = models.TextField(blank=True)
+    bank_treasury_name = models.TextField(blank=True)
+    status = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

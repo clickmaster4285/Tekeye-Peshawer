@@ -106,6 +106,26 @@ const CITIES_DATA: CityRow[] = [
       { name: "Perimeter", count: 4, description: "Perimeter protection" },
     ],
   },
+  {
+    city: "SWH Ratta Kulachi",
+    status: "Online",
+    visitors: 42,
+    vehicles: 210,
+    cases: 12,
+    alerts: 0,
+    cameraCount: 8,
+    activeCameras: 8,
+    offlineCameras: 0,
+    coverageZones: 3,
+    storageUsed: "38%",
+    uptime: "99.8%",
+    lastUpdate: "6 min ago",
+    cameraTypes: [
+      { name: "ANPR", count: 3, description: "License plate recognition" },
+      { name: "Dome", count: 3, description: "Wide area coverage" },
+      { name: "Perimeter", count: 2, description: "Perimeter protection" },
+    ],
+  },
 ]
 
 const getStatusColor = (status: string) => {

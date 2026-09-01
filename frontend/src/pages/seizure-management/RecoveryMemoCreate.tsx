@@ -28,6 +28,7 @@ import {
 } from "@/lib/seizure-management-api"
 import { getStoredUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
 import { DetentionMemoReadOnlyView } from "@/pages/seizure-management/DetentionMemoReadOnlyView"
 
 export default function RecoveryMemoCreatePage() {
@@ -42,6 +43,7 @@ export default function RecoveryMemoCreatePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   const [detentionMemoId, setDetentionMemoId] = useState(memoFromQuery)
   const [assessmentId] = useState(assessmentFromQuery)
@@ -102,18 +104,22 @@ export default function RecoveryMemoCreatePage() {
 
   const handleSave = async (submitForApproval: boolean) => {
     setFormError("")
-    if (!detentionMemoId) {
-      const msg = "Select a detention memo."
-      setFormError(msg)
-      toast({ title: "Detention memo required", description: msg, variant: "destructive" })
+    const missing = firstMissingField([
+      { id: "rm-memo", label: "Detention Memo", missing: !detentionMemoId },
+      { id: "rm-officer", label: "Recovery Officer", missing: !recoveryOfficer.trim() },
+      {
+        id: "rm-goods",
+        label: "Goods Description",
+        missing: submitForApproval && !goodsDescription.trim(),
+      },
+    ])
+    if (missing) {
+      setInvalidField(missing.id)
+      setFormError(missing.message ?? `${missing.label} is required`)
+      reportMissingField(missing)
       return
     }
-    if (!recoveryOfficer.trim()) {
-      const msg = "Recovery officer is required."
-      setFormError(msg)
-      toast({ title: "Missing officer", description: msg, variant: "destructive" })
-      return
-    }
+    setInvalidField("")
 
     setSaving(true)
     try {
@@ -179,13 +185,16 @@ export default function RecoveryMemoCreatePage() {
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2 md:col-span-2">
-              <Label>Detention Memo *</Label>
+              <Label htmlFor="rm-memo">Detention Memo <span className="text-red-600">*</span></Label>
               <Select
                 value={detentionMemoId || undefined}
-                onValueChange={setDetentionMemoId}
+                onValueChange={(v) => {
+                  setDetentionMemoId(v)
+                  if (invalidField === "rm-memo") setInvalidField("")
+                }}
                 disabled={loading || Boolean(memoFromQuery)}
               >
-                <SelectTrigger>
+                <SelectTrigger id="rm-memo" className="w-full" aria-invalid={invalidField === "rm-memo"}>
                   <SelectValue placeholder={loading ? "Loading…" : "Select detention memo"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -206,10 +215,15 @@ export default function RecoveryMemoCreatePage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label>Recovery Officer *</Label>
+              <Label htmlFor="rm-officer">Recovery Officer <span className="text-red-600">*</span></Label>
               <Input
+                id="rm-officer"
                 value={recoveryOfficer}
-                onChange={(e) => setRecoveryOfficer(e.target.value)}
+                aria-invalid={invalidField === "rm-officer"}
+                onChange={(e) => {
+                  setRecoveryOfficer(e.target.value)
+                  if (invalidField === "rm-officer") setInvalidField("")
+                }}
                 placeholder="Recovery officer name"
               />
             </div>
@@ -245,7 +259,7 @@ export default function RecoveryMemoCreatePage() {
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
-              <Label>Category *</Label>
+              <Label>Category <span className="text-red-600">*</span></Label>
               <Select
                 value={category}
                 onValueChange={(v) => setCategory(v as (typeof RECOVERY_CATEGORIES)[number])}
@@ -267,10 +281,15 @@ export default function RecoveryMemoCreatePage() {
               <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} />
             </div>
             <div className="grid gap-2 md:col-span-2">
-              <Label>Goods Description</Label>
+              <Label htmlFor="rm-goods">Goods Description <span className="text-red-600">*</span></Label>
               <Textarea
+                id="rm-goods"
                 value={goodsDescription}
-                onChange={(e) => setGoodsDescription(e.target.value)}
+                aria-invalid={invalidField === "rm-goods"}
+                onChange={(e) => {
+                  setGoodsDescription(e.target.value)
+                  if (invalidField === "rm-goods") setInvalidField("")
+                }}
                 rows={3}
                 placeholder="Description of goods being recovered"
               />

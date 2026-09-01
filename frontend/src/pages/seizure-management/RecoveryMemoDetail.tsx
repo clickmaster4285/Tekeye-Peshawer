@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   CheckCircle,
@@ -11,12 +11,14 @@ import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { PrintMenu } from "@/components/seizure/print-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   ROUTES,
   getSeizureMgmtAssessmentDetailPath,
+  getSeizureMgmtRecoveryMemoDetailPath,
 } from "@/routes/config"
 import {
   fetchRecoveryMemoById,
@@ -26,7 +28,9 @@ import {
 import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { getStoredUser, type AuthUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { reportMissingField } from "@/lib/form-missing-field"
 import { DetentionMemoReadOnlyView } from "@/pages/seizure-management/DetentionMemoReadOnlyView"
+import RecoveryMemoReportPrint from "@/components/seizure/RecoveryMemoReportPrint"
 
 const APPROVER_ROLES = new Set([
   "ADMIN",
@@ -62,6 +66,10 @@ function statusBadge(status: RecoveryMemoRecord["approvalStatus"]) {
 export default function RecoveryMemoDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const printMode = searchParams.get("print")
+  const autoPrint = searchParams.get("autoprint") === "1"
+  const autoSavePdf = searchParams.get("savepdf") === "1"
   const [row, setRow] = useState<RecoveryMemoRecord | null>(null)
   const [memo, setMemo] = useState<DetentionMemoApiRecord | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,6 +80,7 @@ export default function RecoveryMemoDetailPage() {
   )
   const [approvalRemarks, setApprovalRemarks] = useState("")
   const [rejectionReason, setRejectionReason] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   useEffect(() => {
     if (!id) return
@@ -94,6 +103,13 @@ export default function RecoveryMemoDetailPage() {
       })
       .finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    if (printMode === "full" && autoPrint && row) {
+      const timer = window.setTimeout(() => window.print(), 350)
+      return () => window.clearTimeout(timer)
+    }
+  }, [printMode, autoPrint, row])
 
   if (loading) {
     return (
@@ -128,19 +144,26 @@ export default function RecoveryMemoDetailPage() {
     )
   }
 
+  if (printMode === "full") {
+    return <RecoveryMemoReportPrint row={row} memo={memo} autoSavePdf={autoSavePdf} />
+  }
+
   const canSubmit = row.approvalStatus === "Draft" || row.approvalStatus === "Rejected"
   const canApprove = canUserApproveRecovery(row, currentUser)
   const isPending = row.approvalStatus === "Pending Approval"
 
   const runApproval = async (action: "submit" | "approve" | "reject") => {
     if (action === "approve" && !approver.trim()) {
-      toast({ title: "Approving officer is required", variant: "destructive" })
+      setInvalidField("rm-approver")
+      reportMissingField({ id: "rm-approver", label: "Approving Officer" })
       return
     }
     if (action === "reject" && !rejectionReason.trim()) {
-      toast({ title: "Rejection reason is required", variant: "destructive" })
+      setInvalidField("rm-rejection")
+      reportMissingField({ id: "rm-rejection", label: "Rejection Reason" })
       return
     }
+    setInvalidField("")
     setActing(true)
     try {
       const updated = await recoveryMemoApproval(row.id, action, {
@@ -233,7 +256,7 @@ export default function RecoveryMemoDetailPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
               {statusBadge(row.approvalStatus)}
               {memo?.verificationStatus && (
                 <Badge
@@ -242,6 +265,10 @@ export default function RecoveryMemoDetailPage() {
                   {memo.verificationStatus}
                 </Badge>
               )}
+              <PrintMenu
+                printHref={`${getSeizureMgmtRecoveryMemoDetailPath(row.id)}?print=full`}
+                pdfHref={`${getSeizureMgmtRecoveryMemoDetailPath(row.id)}?print=full&savepdf=1`}
+              />
             </div>
           </CardHeader>
 
@@ -317,8 +344,18 @@ export default function RecoveryMemoDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2 max-w-sm">
-                    <Label>Approving Officer (you) *</Label>
-                    <Input value={approver} onChange={(e) => setApprover(e.target.value)} className="bg-muted" readOnly />
+                    <Label htmlFor="rm-approver">Approving Officer (you) <span className="text-red-600">*</span></Label>
+                    <Input
+                      id="rm-approver"
+                      value={approver}
+                      onChange={(e) => {
+                        setApprover(e.target.value)
+                        if (invalidField === "rm-approver") setInvalidField("")
+                      }}
+                      aria-invalid={invalidField === "rm-approver"}
+                      className="bg-muted"
+                      readOnly
+                    />
                     <p className="text-xs text-muted-foreground">
                       Filled from your login — not the recovery officer above.
                     </p>
@@ -333,11 +370,16 @@ export default function RecoveryMemoDetailPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Rejection Reason (if rejecting)</Label>
+                    <Label htmlFor="rm-rejection">Rejection Reason (if rejecting) <span className="text-red-600">*</span></Label>
                     <Textarea
+                      id="rm-rejection"
                       rows={3}
                       value={rejectionReason}
-                      onChange={(e) => setRejectionReason(e.target.value)}
+                      aria-invalid={invalidField === "rm-rejection"}
+                      onChange={(e) => {
+                        setRejectionReason(e.target.value)
+                        if (invalidField === "rm-rejection") setInvalidField("")
+                      }}
                       placeholder="e.g. Rejected because recovery details are incomplete."
                     />
                   </div>

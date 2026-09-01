@@ -114,6 +114,20 @@ def user_can_approve_note_sheet(user, obj: NoteSheet | None = None) -> bool:
     return user_loc == submitter_loc
 
 
+def user_can_delete_note_sheet(user, obj: NoteSheet) -> bool:
+    """Any authenticated user may delete before approval; after approval only higher officials.
+
+    A note sheet already linked to a detention memo cannot be deleted.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if obj.detention_memo_id:
+        return False
+    if obj.status != NoteSheet.STATUS_APPROVED:
+        return True
+    return user_can_approve_note_sheet(user, obj)
+
+
 def user_can_approve_assessment(user, obj: DetentionAssessment | None = None) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False

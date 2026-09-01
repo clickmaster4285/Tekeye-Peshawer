@@ -132,6 +132,46 @@ export async function listRemoteServers(): Promise<RemoteServerRecord[]> {
   return data.results || []
 }
 
+export async function fetchAllCitiesStreams(opts?: {
+  refresh?: boolean
+}): Promise<{
+  servers: Array<{
+    id: number
+    name: string
+    location_code: string
+    connection_mode: string
+    ml_base_url: string
+    last_health: string
+    last_error: string
+    ok: boolean
+    source: string
+    error: string
+    camera_count: number
+  }>
+  cameras: Array<
+    OpsCamera & {
+      server_id?: number
+      server_name?: string
+      location_code?: string
+    }
+  >
+  count: number
+  server_count: number
+}> {
+  const qs = opts?.refresh ? "?refresh=1" : ""
+  const res = await fetch(`${API}/ops/all-cities-streams/${qs}`, {
+    headers: getAuthHeaders(),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to load all-cities streams"))
+  return {
+    servers: data.servers || [],
+    cameras: data.cameras || [],
+    count: data.count ?? (data.cameras || []).length,
+    server_count: data.server_count ?? (data.servers || []).length,
+  }
+}
+
 export async function createRemoteServer(payload: RemoteServerWrite): Promise<RemoteServerRecord> {
   const mode = payload.connection_mode || "ml"
   const body: Record<string, unknown> = {
@@ -282,46 +322,6 @@ export async function quickConnect(payload: {
     server_id: data.server_id ?? null,
     server_name: data.server_name,
     connection_mode: data.connection_mode,
-  }
-}
-
-export async function fetchAllCitiesStreams(opts?: {
-  refresh?: boolean
-}): Promise<{
-  servers: Array<{
-    id: number
-    name: string
-    location_code: string
-    connection_mode: string
-    ml_base_url: string
-    last_health: string
-    last_error: string
-    ok: boolean
-    source: string
-    error: string
-    camera_count: number
-  }>
-  cameras: Array<
-    OpsCamera & {
-      server_id?: number
-      server_name?: string
-      location_code?: string
-    }
-  >
-  count: number
-  server_count: number
-}> {
-  const qs = opts?.refresh ? "?refresh=1" : ""
-  const res = await fetch(`${API}/ops/all-cities-streams/${qs}`, {
-    headers: getAuthHeaders(),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(formatApiError(data, "Failed to load all-cities streams"))
-  return {
-    servers: data.servers || [],
-    cameras: data.cameras || [],
-    count: data.count ?? (data.cameras || []).length,
-    server_count: data.server_count ?? (data.servers || []).length,
   }
 }
 

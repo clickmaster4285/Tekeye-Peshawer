@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, CheckCircle, Pencil, Send, XCircle } from "lucide-react"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { ArrowLeft, CheckCircle, ChevronDown, FileOutput, Pencil, Printer, Send, Trash2, XCircle } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,12 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Table,
   TableBody,
@@ -19,9 +25,12 @@ import {
 import {
   ROUTES,
   getDetentionMemoDetailPath,
+  getSeizureMgmtNoteSheetDetailPath,
   getSeizureMgmtNoteSheetEditPath,
 } from "@/routes/config"
 import {
+  canUserDeleteNoteSheet,
+  deleteNoteSheet,
   fetchNoteSheetById,
   noteSheetApproval,
   type NoteSheetRecord,
@@ -30,7 +39,10 @@ import {
 import { getStoredUser, setAuthenticatedWithToken, type AuthUser } from "@/lib/auth"
 import { getStoredToken } from "@/lib/api"
 import { fetchCurrentUser } from "@/lib/users-api"
-import { toast } from "@/components/ui/use-toast"
+import { toast } from "@/hooks/use-toast"
+import { reportMissingField } from "@/lib/form-missing-field"
+import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import NoteSheetReportPrint from "@/components/seizure/NoteSheetReportPrint"
 
 function statusBadge(status: NoteSheetStatus) {
   if (status === "Approved") return <Badge>Approved</Badge>
@@ -72,6 +84,10 @@ function canUserApproveNoteSheet(
 export default function NoteSheetDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const printMode = searchParams.get("print")
+  const autoPrint = searchParams.get("autoprint") === "1"
+  const autoSavePdf = searchParams.get("savepdf") === "1"
   const [row, setRow] = useState<NoteSheetRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
@@ -79,6 +95,7 @@ export default function NoteSheetDetailPage() {
   const [approver, setApprover] = useState("")
   const [approvalRemarks, setApprovalRemarks] = useState("")
   const [rejectionReason, setRejectionReason] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   const load = () => {
     if (!id) return
@@ -135,6 +152,13 @@ export default function NoteSheetDetailPage() {
     }
   }, [id])
 
+  useEffect(() => {
+    if (printMode === "full" && autoPrint && row) {
+      const timer = window.setTimeout(() => window.print(), 350)
+      return () => window.clearTimeout(timer)
+    }
+  }, [printMode, autoPrint, row])
+
   if (loading) {
     return (
       <ModulePageLayout title="Note Sheet" description="Loading..." breadcrumbs={[]}>
@@ -161,15 +185,22 @@ export default function NoteSheetDetailPage() {
     )
   }
 
+  if (printMode === "full") {
+    return <NoteSheetReportPrint row={row} autoSavePdf={autoSavePdf} />
+  }
+
   const runApproval = async (action: "submit" | "approve" | "reject") => {
     if (action === "approve" && !approver.trim()) {
-      toast({ title: "Approving officer is required", variant: "destructive" })
+      setInvalidField("ns-approver")
+      reportMissingField({ id: "ns-approver", label: "Approving Officer" })
       return
     }
     if (action === "reject" && !rejectionReason.trim()) {
-      toast({ title: "Rejection reason is required", variant: "destructive" })
+      setInvalidField("ns-rejection")
+      reportMissingField({ id: "ns-rejection", label: "Rejection Reason" })
       return
     }
+    setInvalidField("")
     setActing(true)
     try {
       const updated = await noteSheetApproval(row.id, action, {
@@ -199,6 +230,29 @@ export default function NoteSheetDetailPage() {
   const title = row.noteSheetNo || row.referenceNumber || row.subject || "Note Sheet"
   const canEdit = row.status === "Draft" || row.status === "Rejected"
   const canApprove = canUserApproveNoteSheet(row, currentUser)
+  const canDelete = canUserDeleteNoteSheet(row, currentUser?.role)
+
+  const handleDelete = async () => {
+    const label = row.noteSheetNo || row.referenceNumber || "this note sheet"
+    const approvedHint =
+      row.status === "Approved"
+        ? " This sheet is already approved. Only a higher official can delete it."
+        : ""
+    if (!window.confirm(`Delete ${label}? This cannot be undone.${approvedHint}`)) return
+    setActing(true)
+    try {
+      await deleteNoteSheet(row.id)
+      toast({ title: `${label} deleted` })
+      navigate(ROUTES.SEIZURE_MGMT_NOTE_SHEET)
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : "Could not delete note sheet",
+        variant: "destructive",
+      })
+    } finally {
+      setActing(false)
+    }
+  }
   const approvalStatusLabel =
     row.status === "Approved"
       ? "Approved"
@@ -218,7 +272,8 @@ export default function NoteSheetDetailPage() {
         { label: row.noteSheetNo || row.referenceNumber || "Detail" },
       ]}
     >
-      <div className="mb-4 flex flex-wrap gap-2 items-center">
+      <div className="mb-4 flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex flex-wrap gap-2 items-center">
         <Button variant="ghost" size="sm" asChild>
           <Link to={ROUTES.SEIZURE_MGMT_NOTE_SHEET}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -235,6 +290,42 @@ export default function NoteSheetDetailPage() {
             </Link>
           </Button>
         )}
+        {canDelete && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={acting}
+            onClick={() => void handleDelete()}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+        )}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Printer className="h-4 w-4 mr-2" />
+              Print
+              <ChevronDown className="h-4 w-4 ml-1" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-0 w-max">
+            <DropdownMenuItem asChild>
+              <Link to={`${getSeizureMgmtNoteSheetDetailPath(row.id)}?print=full`}>
+                <Printer className="h-4 w-4" />
+                Print
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to={`${getSeizureMgmtNoteSheetDetailPath(row.id)}?print=full&savepdf=1`}>
+                <FileOutput className="h-4 w-4" />
+                Save as PDF
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {row.status === "Submitted" && canApprove && (
@@ -268,9 +359,8 @@ export default function NoteSheetDetailPage() {
                 {row.timeline.map((step) => (
                   <li key={step.key} className="ml-4">
                     <span
-                      className={`absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border ${
-                        step.done ? "bg-primary border-primary" : "bg-background border-muted-foreground/40"
-                      }`}
+                      className={`absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border ${step.done ? "bg-primary border-primary" : "bg-background border-muted-foreground/40"
+                        }`}
                     />
                     <p className={`text-sm font-medium ${step.done ? "" : "text-muted-foreground"}`}>
                       {step.label}
@@ -346,17 +436,17 @@ export default function NoteSheetDetailPage() {
           <CardContent>
             {row.items?.length ? (
               <div className="overflow-auto">
-                <Table>
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow>
                       <TableHead>QR Code</TableHead>
-                      <TableHead>Description</TableHead>
+                      <TableHead className="w-[22%]">Description</TableHead>
                       <TableHead>Qty</TableHead>
                       <TableHead>Unit</TableHead>
                       <TableHead>Condition</TableHead>
                       <TableHead>Perishable</TableHead>
                       <TableHead>ID / Chassis No.</TableHead>
-                      <TableHead>Item Notes</TableHead>
+                      <TableHead className="w-[16%]">Item Notes</TableHead>
                       <TableHead>Images</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -364,13 +454,17 @@ export default function NoteSheetDetailPage() {
                     {row.items.map((item, i) => (
                       <TableRow key={item.id ?? i}>
                         <TableCell className="font-mono text-xs">{item.qrCodeNumber || "—"}</TableCell>
-                        <TableCell>{item.product || item.description || "—"}</TableCell>
+                        <TableCell className={goodsLineCellClass}>
+                          <GoodsLineText>{item.product || item.description || "—"}</GoodsLineText>
+                        </TableCell>
                         <TableCell>{item.quantity || "—"}</TableCell>
                         <TableCell>{item.unit || "—"}</TableCell>
                         <TableCell>{item.condition || "—"}</TableCell>
                         <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
                         <TableCell>{item.identificationRef || "—"}</TableCell>
-                        <TableCell>{item.remarks || item.itemNotes || "—"}</TableCell>
+                        <TableCell className={goodsLineCellClass}>
+                          <GoodsLineText>{item.remarks || item.itemNotes || "—"}</GoodsLineText>
+                        </TableCell>
                         <TableCell>
                           {item.images?.length ? (
                             <div className="flex flex-wrap gap-1">
@@ -584,10 +678,15 @@ export default function NoteSheetDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2 max-w-sm">
-                <Label>Approving Officer (you) *</Label>
+                <Label htmlFor="ns-approver">Approving Officer (you) <span className="text-red-600">*</span></Label>
                 <Input
+                  id="ns-approver"
                   value={approver}
-                  onChange={(e) => setApprover(e.target.value)}
+                  onChange={(e) => {
+                    setApprover(e.target.value)
+                    if (invalidField === "ns-approver") setInvalidField("")
+                  }}
+                  aria-invalid={invalidField === "ns-approver"}
                   className="bg-muted"
                   readOnly
                 />
@@ -605,11 +704,16 @@ export default function NoteSheetDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Rejection Reason (if rejecting)</Label>
+                <Label htmlFor="ns-rejection">Rejection Reason (if rejecting) <span className="text-red-600">*</span></Label>
                 <Textarea
+                  id="ns-rejection"
                   rows={3}
                   value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
+                  aria-invalid={invalidField === "ns-rejection"}
+                  onChange={(e) => {
+                    setRejectionReason(e.target.value)
+                    if (invalidField === "ns-rejection") setInvalidField("")
+                  }}
                   placeholder="e.g. Rejected because sufficient evidence has not been provided."
                 />
               </div>

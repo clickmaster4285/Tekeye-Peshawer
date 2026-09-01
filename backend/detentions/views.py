@@ -120,7 +120,7 @@ def _save_memo_uploaded_media(request, memo: DetentionMemo) -> None:
 
             file=f,
 
-            original_filename=(f.name or "")[:255],
+            original_filename=f.name or "",
 
         )
 
@@ -134,7 +134,7 @@ def _save_memo_uploaded_media(request, memo: DetentionMemo) -> None:
 
             file=f,
 
-            original_filename=(f.name or "")[:255],
+            original_filename=f.name or "",
 
         )
 

@@ -1,9 +1,12 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { RouterProvider } from "react-router-dom"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import { registerSW } from "virtual:pwa-register"
 import { router } from "./routes"
+import { queryClient } from "@/lib/query-client"
+import { AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired } from "@/lib/auth"
+import { stopOfficerGpsTracking } from "@/lib/officer-gps-session"
 import "./index.css"
 
 // Production SW can linger and break live MJPEG (/ml multipart). Keep SW off in dev
@@ -36,16 +39,21 @@ async function setupServiceWorker() {
 
 void setupServiceWorker()
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60_000,
-      gcTime: 5 * 60_000,
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
+window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, () => {
+  queryClient.clear()
+  void stopOfficerGpsTracking({ endDuty: false })
 })
+
+const originalFetch = window.fetch.bind(window)
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const res = await originalFetch(input, init)
+  if (res.status !== 401) return res
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+  const isLogin = /\/login|\/auth\/token|\/api\/auth\//i.test(url)
+  const isMedia = /\/media\//i.test(url)
+  if (!isLogin && !isMedia) handleSessionExpired()
+  return res
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

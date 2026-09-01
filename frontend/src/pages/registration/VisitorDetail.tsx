@@ -2,11 +2,13 @@ import { useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { getVisitor } from "@/lib/visitor-api"
 import { getVisitorPhotoUrl } from "@/lib/image-match"
+import { VisitorFaceEnrollment } from "@/components/visitors/visitor-face-enrollment"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ROUTES } from "@/routes/config"
+import { ROUTES, getVisitorEditPath } from "@/routes/config"
 import {
   ArrowLeft,
+  Pencil,
   User,
   FileText,
   Image as ImageIcon,
@@ -311,8 +313,19 @@ export default function VisitorDetailPage() {
             </p>
           </div>
         </div>
- 
+        {id && (
+          <Button variant="outline" onClick={() => navigate(getVisitorEditPath(id))}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
+        )}
       </div>
+
+      {Number.isInteger(visitorId) ? (
+        <div className="mb-6">
+          <VisitorFaceEnrollment visitorId={visitorId} />
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard title="Basic information" icon={User}>

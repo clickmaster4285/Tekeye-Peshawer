@@ -47,7 +47,15 @@ import {
   type NoteSheetItem,
   type NoteSheetWritePayload,
 } from "@/lib/seizure-management-api"
-import { toast } from "@/components/ui/use-toast"
+import { toast } from "@/hooks/use-toast"
+import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
+import {
+  GoodsLineTextField,
+  goodsLineCellClass,
+  goodsPlaceholderClass,
+  goodsSelectTriggerClass,
+  goodsTableClass,
+} from "@/components/goods/goods-line-text-field"
 
 const NOTE_SHEET_APPROVER_LABEL =
   "Assistant Collector, Deputy Collector, Location Admin, Super Admin"
@@ -74,7 +82,7 @@ function newClientLineId(): string {
   return `gi-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-const getQrCodeUrl = (data: string, size = 56) =>
+const getQrCodeUrl = (data: string, size = 120) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`
 
 function emptyItem(): NoteSheetItem {
@@ -130,6 +138,7 @@ export default function NoteSheetCreatePage() {
 
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
+  const [invalidField, setInvalidField] = useState("")
   const [noteSheetNo, setNoteSheetNo] = useState("")
   const [status, setStatus] = useState<"Draft" | "Rejected">("Draft")
   const [existingAttachments, setExistingAttachments] = useState<
@@ -368,21 +377,43 @@ export default function NoteSheetCreatePage() {
 
   const handleSave = async (submit: boolean) => {
     const payload = buildPayload()
-    if (!payload.preparedBy?.trim()) {
-      toast({
-        title: "Preparing Officer is required",
-        description: "Log in again if officer details did not load.",
-        variant: "destructive",
-      })
+    const hasGoods = items.some((it) => it.product.trim())
+    const missing = firstMissingField([
+      { id: "ns-datetime", label: "Date & Time", missing: !dateTime.trim() },
+      { id: "ns-office", label: "Office / Region", missing: submit && !office.trim() },
+      { id: "ns-subject", label: "Subject", missing: submit && !subject.trim() },
+      {
+        id: "ns-prepared-by",
+        label: "Preparing Officer",
+        missing: !payload.preparedBy?.trim(),
+        message: "Log in again if officer details did not load.",
+      },
+      {
+        id: "ns-accused-name",
+        label: "Accused Name",
+        missing: submit && !accusedName.trim() && !businessName.trim(),
+        message: "Enter accused name or business name.",
+      },
+      {
+        id: "ns-goods",
+        label: "Description of Goods",
+        missing: submit && !hasGoods,
+        message: "Add at least one goods line with a description.",
+      },
+      { id: "ns-place", label: "Place of Inspection", missing: submit && !placeOfInspection.trim() },
+      {
+        id: "ns-grounds",
+        label: "Grounds of Suspicion",
+        missing: submit && !groundsOfSuspicion.trim() && !preliminaryFindings.trim(),
+        message: "Grounds of Suspicion or Preliminary Findings is required to submit.",
+      },
+    ])
+    if (missing) {
+      setInvalidField(missing.id)
+      reportMissingField(missing)
       return
     }
-    if (submit && !groundsOfSuspicion.trim() && !preliminaryFindings.trim()) {
-      toast({
-        title: "Grounds of Suspicion or Preliminary Findings required to submit",
-        variant: "destructive",
-      })
-      return
-    }
+    setInvalidField("")
 
     setSaving(true)
     try {
@@ -467,18 +498,28 @@ export default function NoteSheetCreatePage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Date &amp; Time</Label>
+                  <Label htmlFor="ns-datetime">Date &amp; Time <span className="text-red-600">*</span></Label>
                   <Input
+                    id="ns-datetime"
                     type="datetime-local"
                     value={dateTime}
-                    onChange={(e) => setDateTime(e.target.value)}
+                    aria-invalid={invalidField === "ns-datetime"}
+                    onChange={(e) => {
+                      setDateTime(e.target.value)
+                      if (invalidField === "ns-datetime") setInvalidField("")
+                    }}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Office / Region</Label>
+                  <Label htmlFor="ns-office">Office / Region <span className="text-red-600">*</span></Label>
                   <Input
+                    id="ns-office"
                     value={office}
-                    onChange={(e) => setOffice(e.target.value)}
+                    aria-invalid={invalidField === "ns-office"}
+                    onChange={(e) => {
+                      setOffice(e.target.value)
+                      if (invalidField === "ns-office") setInvalidField("")
+                    }}
                     placeholder="Customs office / station / region"
                   />
                 </div>
@@ -507,10 +548,15 @@ export default function NoteSheetCreatePage() {
                   <Input value={isEdit ? status : "Draft"} disabled readOnly />
                 </div>
                 <div className="grid gap-2 md:col-span-2">
-                  <Label>Subject</Label>
+                  <Label htmlFor="ns-subject">Subject <span className="text-red-600">*</span></Label>
                   <Input
+                    id="ns-subject"
                     value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
+                    aria-invalid={invalidField === "ns-subject"}
+                    onChange={(e) => {
+                      setSubject(e.target.value)
+                      if (invalidField === "ns-subject") setInvalidField("")
+                    }}
                     placeholder="Subject of the note sheet"
                   />
                 </div>
@@ -531,11 +577,13 @@ export default function NoteSheetCreatePage() {
             <CollapsibleContent>
               <CardContent className="pt-0 grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Preparing Officer *</Label>
+                  <Label htmlFor="ns-prepared-by">Preparing Officer <span className="text-red-600">*</span></Label>
                   <Input
+                    id="ns-prepared-by"
                     value={preparedBy}
                     readOnly
                     disabled
+                    aria-invalid={invalidField === "ns-prepared-by"}
                     className="bg-muted"
                     placeholder="Logged-in officer"
                   />
@@ -582,8 +630,16 @@ export default function NoteSheetCreatePage() {
             <CollapsibleContent>
               <CardContent className="pt-0 grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Name</Label>
-                  <Input value={accusedName} onChange={(e) => setAccusedName(e.target.value)} />
+                  <Label htmlFor="ns-accused-name">Name (or business) <span className="text-red-600">*</span></Label>
+                  <Input
+                    id="ns-accused-name"
+                    value={accusedName}
+                    aria-invalid={invalidField === "ns-accused-name"}
+                    onChange={(e) => {
+                      setAccusedName(e.target.value)
+                      if (invalidField === "ns-accused-name") setInvalidField("")
+                    }}
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label>Father Name</Label>
@@ -615,7 +671,13 @@ export default function NoteSheetCreatePage() {
                 </div>
                 <div className="grid gap-2">
                   <Label>Business Name (if any)</Label>
-                  <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+                  <Input
+                    value={businessName}
+                    onChange={(e) => {
+                      setBusinessName(e.target.value)
+                      if (invalidField === "ns-accused-name") setInvalidField("")
+                    }}
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label>NTN / STRN (optional)</Label>
@@ -636,31 +698,40 @@ export default function NoteSheetCreatePage() {
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <CardContent className="pt-0 space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  List of goods under suspicion. <strong>Each item gets a unique QR code</strong> for tracking.
+              <CardContent className="pt-0">
+                <p className="text-sm text-muted-foreground mb-4">
+                  List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning. Click the eye button to preview a larger QR code.
                 </p>
+                <div
+                  id="ns-goods"
+                  tabIndex={-1}
+                  className={
+                    invalidField === "ns-goods"
+                      ? "rounded-md ring-2 ring-red-500 ring-offset-2 outline-none"
+                      : undefined
+                  }
+                >
                 <div className="overflow-auto max-w-full">
-                  <Table>
+                  <Table className={goodsTableClass}>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[120px]">QR Code</TableHead>
-                        <TableHead className="min-w-[160px]">Description of Goods *</TableHead>
-                        <TableHead className="w-[120px]">Qty</TableHead>
-                        <TableHead className="w-[70px]">Unit</TableHead>
-                        <TableHead className="w-[120px]">Condition</TableHead>
-                        <TableHead className="w-[90px]">Perishable</TableHead>
-                        <TableHead className="min-w-[100px]">ID / Chassis No.</TableHead>
-                        <TableHead className="min-w-[140px]">Item Notes</TableHead>
-                        <TableHead className="w-[80px]">Images</TableHead>
-                        <TableHead className="w-[44px]" />
+                        <TableHead className="w-[180px]">QR Code</TableHead>
+                        <TableHead className="w-[240px]">Description of Goods <span className="text-red-600">*</span></TableHead>
+                        <TableHead className="w-[88px]">Qty</TableHead>
+                        <TableHead className="w-[110px]">Unit</TableHead>
+                        <TableHead className="w-[190px]">Condition</TableHead>
+                        <TableHead className="w-[92px]">Perishable</TableHead>
+                        <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
+                        <TableHead className="w-[220px]">Item Notes</TableHead>
+                        <TableHead className="w-[96px]">Images</TableHead>
+                        <TableHead className="w-[44px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {items.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={10} className="text-muted-foreground text-center py-6">
-                            No goods added. Click &quot;Add line&quot; to add seized/detained items.
+                            No goods added. Click "Add line" to add seized/detained items.
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -668,7 +739,7 @@ export default function NoteSheetCreatePage() {
                           <TableRow key={row.clientLineId || index} className={index % 2 === 1 ? "bg-muted/10" : ""}>
                             <TableCell className="align-middle">
                               <div className="flex flex-col gap-1 items-start">
-                                <span className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded truncate max-w-[100px]">
+                                <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded truncate max-w-[130px]">
                                   {row.qrCodeNumber}
                                 </span>
                                 <div className="flex gap-1">
@@ -676,52 +747,62 @@ export default function NoteSheetCreatePage() {
                                     type="button"
                                     variant="ghost"
                                     size="sm"
-                                    className="h-5 px-1 text-[10px]"
+                                    className="h-6 px-1 text-xs"
                                     onClick={() => copyToClipboard(row.qrCodeNumber)}
                                   >
-                                    <Copy className="h-3 w-3 mr-0.5" />
+                                    <Copy className="h-3 w-3 mr-1" />
                                     Copy
                                   </Button>
                                   <Button
                                     type="button"
                                     variant="ghost"
                                     size="sm"
-                                    className="h-5 px-1 text-[10px]"
+                                    className="h-6 px-1 text-xs"
                                     onClick={() => setPreviewQrData(row.qrCodeNumber)}
                                   >
-                                    <Eye className="h-3 w-3 mr-0.5" />
+                                    <Eye className="h-3 w-3 mr-1" />
                                     Preview
                                   </Button>
                                 </div>
                                 <img
-                                  src={getQrCodeUrl(row.qrCodeNumber, 56)}
+                                  src={getQrCodeUrl(row.qrCodeNumber, 100)}
                                   alt="QR Code"
-                                  width={56}
-                                  height={56}
-                                  className="mt-0.5 border border-gray-200 rounded-sm bg-white p-0.5"
+                                  width={100}
+                                  height={100}
+                                  className="mt-1 border border-gray-200 rounded-sm bg-white p-1"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f0f0f0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%23999' font-size='10'%3EQR Error%3C/text%3E%3C/svg%3E"
+                                  }}
                                 />
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <Input
+                            <TableCell className={goodsLineCellClass}>
+                              <GoodsLineTextField
                                 value={row.product}
-                                onChange={(e) => updateItem(index, "product", e.target.value)}
+                                onChange={(e) => {
+                                  updateItem(index, "product", e.target.value)
+                                  if (invalidField === "ns-goods") setInvalidField("")
+                                }}
                                 placeholder="Description of goods"
-                                className="min-w-[140px]"
+                                title="Description of goods"
+                                aria-invalid={invalidField === "ns-goods" && index === 0}
                               />
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-middle">
                               <Input
+                                type="text"
+                                inputMode="numeric"
                                 value={row.quantity}
                                 onChange={(e) => updateItem(index, "quantity", e.target.value)}
                                 placeholder="Qty"
-                                className="min-w-[100px] w-[120px]"
+                                title="Qty"
+                                className={goodsPlaceholderClass}
                               />
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-middle">
                               <Select value={row.unit} onValueChange={(v) => updateItem(index, "unit", v)}>
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
+                                  <SelectValue placeholder="Unit" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {GOODS_UNITS.map((u) => (
@@ -732,13 +813,13 @@ export default function NoteSheetCreatePage() {
                                 </SelectContent>
                               </Select>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-middle">
                               <Select
                                 value={row.condition}
                                 onValueChange={(v) => updateItem(index, "condition", v)}
                               >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
+                                  <SelectValue placeholder="Condition" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {GOODS_CONDITIONS.map((c) => (
@@ -749,24 +830,27 @@ export default function NoteSheetCreatePage() {
                                 </SelectContent>
                               </Select>
                             </TableCell>
-                            <TableCell className="text-center">
+                            <TableCell className="text-center align-middle">
                               <Checkbox
                                 checked={row.perishable}
                                 onCheckedChange={(checked) => updateItem(index, "perishable", !!checked)}
                               />
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-middle">
                               <Input
                                 value={row.identificationRef}
                                 onChange={(e) => updateItem(index, "identificationRef", e.target.value)}
                                 placeholder="Chassis / Serial"
+                                title="Chassis / Serial"
+                                className={goodsPlaceholderClass}
                               />
                             </TableCell>
-                            <TableCell>
-                              <Input
+                            <TableCell className={goodsLineCellClass}>
+                              <GoodsLineTextField
                                 value={row.remarks}
                                 onChange={(e) => updateItem(index, "remarks", e.target.value)}
                                 placeholder="Officer notes for this item"
+                                title="Officer notes for this item"
                               />
                             </TableCell>
                             <TableCell className="align-middle">
@@ -824,7 +908,8 @@ export default function NoteSheetCreatePage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="align-middle text-center">
+                              <div className="flex items-center justify-center">
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -835,6 +920,7 @@ export default function NoteSheetCreatePage() {
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))
@@ -846,11 +932,16 @@ export default function NoteSheetCreatePage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setItems((prev) => [...prev, emptyItem()])}
+                  className="mt-3"
+                  onClick={() => {
+                    setItems((prev) => [...prev, emptyItem()])
+                    if (invalidField === "ns-goods") setInvalidField("")
+                  }}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Add line
                 </Button>
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
@@ -868,10 +959,15 @@ export default function NoteSheetCreatePage() {
             <CollapsibleContent>
               <CardContent className="pt-0 grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Place of Inspection</Label>
+                  <Label htmlFor="ns-place">Place of Inspection <span className="text-red-600">*</span></Label>
                   <Input
+                    id="ns-place"
                     value={placeOfInspection}
-                    onChange={(e) => setPlaceOfInspection(e.target.value)}
+                    aria-invalid={invalidField === "ns-place"}
+                    onChange={(e) => {
+                      setPlaceOfInspection(e.target.value)
+                      if (invalidField === "ns-place") setInvalidField("")
+                    }}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -907,16 +1003,21 @@ export default function NoteSheetCreatePage() {
           <Card className="rounded-[10px] border-gray-200">
             <CollapsibleTrigger asChild>
               <CardHeader className="cursor-pointer flex flex-row items-center justify-between hover:bg-muted/50 rounded-t-lg">
-                <CardTitle className="text-base">6. Grounds of Suspicion</CardTitle>
+                <CardTitle className="text-base">6. Grounds of Suspicion <span className="text-red-600">*</span></CardTitle>
                 <ChevronDown className="h-4 w-4 shrink-0" />
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <Textarea
+                  id="ns-grounds"
                   rows={8}
                   value={groundsOfSuspicion}
-                  onChange={(e) => setGroundsOfSuspicion(e.target.value)}
+                  aria-invalid={invalidField === "ns-grounds"}
+                  onChange={(e) => {
+                    setGroundsOfSuspicion(e.target.value)
+                    if (invalidField === "ns-grounds") setInvalidField("")
+                  }}
                   placeholder={GROUNDS_PLACEHOLDER}
                 />
               </CardContent>
@@ -1011,16 +1112,21 @@ export default function NoteSheetCreatePage() {
           <Card className="rounded-[10px] border-gray-200">
             <CollapsibleTrigger asChild>
               <CardHeader className="cursor-pointer flex flex-row items-center justify-between hover:bg-muted/50 rounded-t-lg">
-                <CardTitle className="text-base">9. Preliminary Findings</CardTitle>
+                <CardTitle className="text-base">9. Preliminary Findings <span className="text-red-600">*</span></CardTitle>
                 <ChevronDown className="h-4 w-4 shrink-0" />
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <Textarea
+                  id="ns-findings"
                   rows={6}
                   value={preliminaryFindings}
-                  onChange={(e) => setPreliminaryFindings(e.target.value)}
+                  aria-invalid={invalidField === "ns-grounds"}
+                  onChange={(e) => {
+                    setPreliminaryFindings(e.target.value)
+                    if (invalidField === "ns-grounds") setInvalidField("")
+                  }}
                   placeholder={FINDINGS_PLACEHOLDER}
                 />
               </CardContent>
@@ -1120,24 +1226,42 @@ export default function NoteSheetCreatePage() {
         </div>
       </div>
 
-      <Dialog open={!!previewQrData} onOpenChange={(open) => !open && setPreviewQrData(null)}>
+      <Dialog open={!!previewQrData} onOpenChange={() => setPreviewQrData(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>QR Code Preview</DialogTitle>
-            <DialogDescription>Scan this QR code to identify the goods item.</DialogDescription>
+            <DialogDescription>
+              Scan this QR code to identify the detained goods item.
+            </DialogDescription>
           </DialogHeader>
-          {previewQrData && (
-            <div className="flex flex-col items-center gap-3 py-2">
-              <img
-                src={getQrCodeUrl(previewQrData, 280)}
-                alt="Large QR Code"
-                width={280}
-                height={280}
-                className="border rounded bg-white p-2"
-              />
-              <p className="font-mono text-sm break-all text-center">{previewQrData}</p>
-            </div>
-          )}
+          <div className="flex flex-col items-center gap-4 py-4">
+            {previewQrData && (
+              <>
+                <img
+                  src={getQrCodeUrl(previewQrData, 250)}
+                  alt="Large QR Code"
+                  width={250}
+                  height={250}
+                  className="border rounded-md p-2 bg-white"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='250' viewBox='0 0 250 250'%3E%3Crect width='250' height='250' fill='%23f0f0f0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%23999' font-size='16'%3EQR Error%3C/text%3E%3C/svg%3E"
+                  }}
+                />
+                <div className="text-center">
+                  <p className="font-mono text-sm bg-muted px-2 py-1 rounded break-all">{previewQrData}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => copyToClipboard(previewQrData)}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy Number
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </ModulePageLayout>

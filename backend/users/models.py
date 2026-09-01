@@ -26,6 +26,7 @@ class User(AbstractUser):
         ("STOCK_CONTROLLER", "Stock Controller"),
         ("IT_ADMIN", "IT Administrator"),
         ("AUDITOR", "Auditor"),
+        ("PRAL", "PRAL"),
         ("DETECTION_OFFICER", "Detection Officer"),
         ("FIR_OFFICER", "FIR Officer"),
         ("INVESTIGATION_OFFICER", "Investigation Officer"),
@@ -38,6 +39,7 @@ class User(AbstractUser):
         ("NOWSHERA", "Nowshera"),
         ("MARDAN", "Mardan"),
         ("DI_KHAN", "DI Khan"),
+        ("SWH_RATTA_KULACHI", "SWH Ratta Kulachi"),
     ]
 
     role = models.CharField(max_length=30, choices=ROLE_CHOICES)

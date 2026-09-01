@@ -281,7 +281,7 @@ def _resolve_location_code(memo: DetentionMemo, cameras: list[Camera]) -> str:
             return loc
     for field in (memo.location_of_detention, memo.where_deposited, memo.place_of_detention):
         text = (field or "").strip().upper().replace(" ", "_")
-        for choice in ("PESHAWAR", "KOHAT", "NOWSHERA", "MARDAN", "DI_KHAN"):
+        for choice in ("PESHAWAR", "KOHAT", "NOWSHERA", "MARDAN", "DI_KHAN", "SWH_RATTA_KULACHI"):
             if choice in text or choice.replace("_", " ") in (field or "").upper():
                 return choice
     return ""

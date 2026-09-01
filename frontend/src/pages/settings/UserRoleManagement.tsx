@@ -337,6 +337,7 @@ export default function UserRoleManagementPage() {
                       { name: "FIR Officer", desc: "FIR registration and records", role: "FIR_OFFICER" },
                       { name: "Investigation Officer", desc: "Case investigation workflow", role: "INVESTIGATION_OFFICER" },
                       { name: "Seizing Officer", desc: "Seizure and custody operations", role: "SEIZING_OFFICER" },
+                      { name: "PRAL", desc: "ASO portal, auction, and seizure data", role: "PRAL" },
                     ].map((row) => (
                       <TableRow key={row.role}>
                         <TableCell className="font-medium">{row.name}</TableCell>

@@ -1,7 +1,33 @@
 from django.db import migrations, models
 
 
+def _column_names(connection, table_name):
+    with connection.cursor() as cursor:
+        return {
+            col.name
+            for col in connection.introspection.get_table_description(cursor, table_name)
+        }
+
+
+def ensure_purposes_column(apps, schema_editor):
+    connection = schema_editor.connection
+    if "purposes" in _column_names(connection, "cameras_camera"):
+        return
+    with connection.cursor() as cursor:
+        if connection.vendor == "postgresql":
+            cursor.execute(
+                "ALTER TABLE cameras_camera "
+                "ADD COLUMN purposes jsonb NOT NULL DEFAULT '[]'::jsonb"
+            )
+        else:
+            cursor.execute(
+                "ALTER TABLE cameras_camera "
+                "ADD COLUMN purposes text NOT NULL DEFAULT '[]'"
+            )
+
+
 def copy_purpose_to_purposes(apps, schema_editor):
+    ensure_purposes_column(apps, schema_editor)
     Camera = apps.get_model("cameras", "Camera")
     for cam in Camera.objects.all().iterator():
         purpose = (cam.purpose or "surveillance").strip().lower() or "surveillance"
@@ -20,14 +46,21 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name="camera",
-            name="purposes",
-            field=models.JSONField(
-                blank=True,
-                default=list,
-                help_text="AI purposes enabled on this camera (multiple models allowed).",
-            ),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name="camera",
+                    name="purposes",
+                    field=models.JSONField(
+                        blank=True,
+                        default=list,
+                        help_text="AI purposes enabled on this camera (multiple models allowed).",
+                    ),
+                ),
+            ],
+            database_operations=[
+                migrations.RunPython(ensure_purposes_column, migrations.RunPython.noop),
+            ],
         ),
         migrations.AlterField(
             model_name="camera",

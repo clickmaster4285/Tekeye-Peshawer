@@ -26,6 +26,7 @@ export type RestrictedRole =
   | "STOCK_CONTROLLER"
   | "IT_ADMIN"
   | "AUDITOR"
+  | "PRAL"
   | "HR"
 
 export function normalizeRole(role: string | undefined | null): string {
@@ -47,6 +48,7 @@ export function getRestrictedRole(role: string | undefined | null): RestrictedRo
     normalized === "STOCK_CONTROLLER" ||
     normalized === "IT_ADMIN" ||
     normalized === "AUDITOR" ||
+    normalized === "PRAL" ||
     normalized === "HR"
   ) {
     return normalized as RestrictedRole
@@ -68,6 +70,19 @@ export function isWarehouseOfficerRole(role: string | undefined | null): boolean
 
 export function isHrRole(role: string | undefined | null): boolean {
   return normalizeRole(role) === "HR"
+}
+
+/** Collectorate officers — full app nav, location-scoped in APIs. Not Super Admin. */
+const SITE_FULL_ACCESS_ROLES = new Set([
+  "LOCATION_ADMIN",
+  "OPERATION_MANAGER",
+  "COLLECTOR",
+  "DEPUTY_COLLECTOR",
+  "ASSISTANT_COLLECTOR",
+])
+
+export function isSiteFullAccessRole(role: string | undefined | null): boolean {
+  return SITE_FULL_ACCESS_ROLES.has(normalizeRole(role))
 }
 
 type PathRule = { exact: string[]; patterns: RegExp[] }
@@ -111,6 +126,8 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.CONTRACTOR_PASSES,
       ROUTES.CARGO_DELIVERY_LOGS,
       ROUTES.INCIDENT_CREATION,
+      ROUTES.GUARD_RECEPTION_PANEL,
+      ROUTES.GPS_TRACKING,
     ],
     // allow any visitors path (list, filters, details, sub-pages)
     patterns: [/^\/visitors(\/.*)?$/],
@@ -154,6 +171,7 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.DASHBOARD,
       ROUTES.OPERATIONS_DASHBOARD,
       ROUTES.DETENTION_MEMO,
+      ROUTES.WAREHOUSE_DETENTION_MEMO,
       ROUTES.DEPOSIT_ACCOUNT_REGISTER,
       ROUTES.NEW_SEIZURE_ENTRY,
       ROUTES.GOODS_RECEIPT_HANDOVER,
@@ -248,6 +266,7 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.DASHBOARD,
       ROUTES.OPERATIONS_DASHBOARD,
       ROUTES.DETENTION_MEMO,
+      ROUTES.WAREHOUSE_DETENTION_MEMO,
       ROUTES.SEIZURE_REGISTER,
       ROUTES.INVENTORY_VALUATION,
       ROUTES.ITEM_VALUATION,
@@ -284,6 +303,7 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.DASHBOARD,
       ROUTES.OPERATIONS_DASHBOARD,
       ROUTES.DETENTION_MEMO,
+      ROUTES.WAREHOUSE_DETENTION_MEMO,
       ROUTES.DEPOSIT_ACCOUNT_REGISTER,
       ROUTES.NEW_SEIZURE_ENTRY,
       ROUTES.GOODS_RECEIPT_HANDOVER,
@@ -359,7 +379,7 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.EDIT_USER,
       ROUTES.LOGS,
       ROUTES.ACTIVITY_LOGS,
-      // Attendance APIs use IsAdminOrHR (includes IT_ADMIN)
+      // Attendance APIs use IsAdminOrHR (IT_ADMIN + collectorate officers + HR module grants)
       ROUTES.ATTENDANCE,
       ROUTES.FACE_ENROLLMENT,
       ROUTES.ATTENDANCE_MONITOR,
@@ -382,6 +402,7 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.CARGO_DELIVERY_LOGS,
       ROUTES.OPERATIONS_DASHBOARD,
       ROUTES.DETENTION_MEMO,
+      ROUTES.WAREHOUSE_DETENTION_MEMO,
       ROUTES.SEIZURE_REGISTER,
       ROUTES.GOODS_RECEIPT,
       ROUTES.INVENTORY_VALUATION,
@@ -410,6 +431,34 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       /^\/cycle-counting-audit\/[^/]+$/,
       /^\/inventory-valuation\/[^/]+$/,
       /^\/visitors\/[^/]+$/,
+      SEIZURE_MGMT_PATH_PATTERN,
+    ],
+  },
+  PRAL: {
+    exact: [
+      ROUTES.OPERATIONS_DASHBOARD,
+      ROUTES.DETENTION_MEMO,
+      ROUTES.WAREHOUSE_DETENTION_MEMO,
+      ROUTES.SEIZURE_REGISTER,
+      ROUTES.GOODS_RECEIPT,
+      ROUTES.INVENTORY_VALUATION,
+      ROUTES.ITEM_VALUATION,
+      ROUTES.STOCK_MANAGEMENT,
+      ROUTES.ASO_PORTAL_SYNC,
+      ROUTES.BIDDING_MANAGEMENT,
+      ROUTES.SALE_COMPLETION,
+      ROUTES.REVENUE_REPORTS,
+      ROUTES.LOGS,
+      ROUTES.ACTIVITY_LOGS,
+      ...SEIZURE_MGMT_EXACT_PATHS,
+    ],
+    patterns: [
+      /^\/detention-memo\/[^/]+$/,
+      /^\/seizure-management\/detention-memo\/[^/]+$/,
+      /^\/seized-inventory\/[^/]+$/,
+      /^\/goods-receipt\/[^/]+$/,
+      /^\/stock-management\/[^/]+$/,
+      /^\/inventory-valuation\/[^/]+$/,
       SEIZURE_MGMT_PATH_PATTERN,
     ],
   },
@@ -460,15 +509,18 @@ export function isPathAllowedForRole(
     const path = normalizePathname(pathname)
     return (
       path === ROUTES.OPS_CENTRAL ||
-      path.startsWith(`${ROUTES.OPS_CENTRAL}/`) ||
-      path === ROUTES.ALL_CITIES_CAMERAS ||
-      path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`)
+      path.startsWith(`${ROUTES.OPS_CENTRAL}/`)
     )
   }
 
   const path = normalizePathname(pathname)
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   const restricted = getRestrictedRole(role)
+
+  if (isSiteFullAccessRole(role)) {
+    if (path === ROUTES.OPS_CENTRAL || path.startsWith(`${ROUTES.OPS_CENTRAL}/`)) return false
+    return true
+  }
 
   // Main `/` dashboard: Super Admin only (handled above). Restricted / granted users
   // go to their module home. Unconfigured users (no template, no grants) may use `/`
@@ -514,6 +566,7 @@ export function getHomeRouteForRole(
   const normalized = normalizeRole(role)
   if (normalized === "ADMIN") return ROUTES.DASHBOARD
   if (normalized === "IT_SUPERADMIN") return ROUTES.OPS_CENTRAL
+  if (isSiteFullAccessRole(role)) return ROUTES.DASHBOARD
 
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   if (modules.length > 0) {
@@ -539,6 +592,7 @@ export function getHomeRouteForRole(
   }
   if (restricted === "IT_ADMIN") return ROUTES.ATTENDANCE_DASHBOARD
   if (restricted === "HR") return ROUTES.EMPLOYEES
+  if (restricted === "PRAL") return ROUTES.ASO_PORTAL_SYNC
 
   // Unconfigured role with no grants — temporary until modules are assigned.
   return ROUTES.DASHBOARD
@@ -565,6 +619,7 @@ export function getRoleDisplayLabel(role: string | undefined | null): string {
   if (normalized === "LOCATION_ADMIN") return "Location Administrator"
   if (normalized === "HR") return "Human Resource"
   if (normalized === "AUDITOR") return "Auditor"
+  if (normalized === "PRAL") return "PRAL"
   if (!normalized) return "User"
   return normalized
     .split("_")

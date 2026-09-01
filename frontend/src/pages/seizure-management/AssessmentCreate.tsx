@@ -35,6 +35,7 @@ import {
 } from "@/lib/seizure-management-api"
 import { getStoredUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
 import { DetentionMemoReadOnlyView } from "@/pages/seizure-management/DetentionMemoReadOnlyView"
 
 type GoodsValuationRow = AssessmentGoodsValuation & {
@@ -57,6 +58,7 @@ export default function AssessmentCreatePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   const [detentionMemoId, setDetentionMemoId] = useState(memoFromQuery)
   const [assessmentDate, setAssessmentDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -236,24 +238,24 @@ export default function AssessmentCreatePage() {
 
   const handleSave = async (andSubmit: boolean) => {
     setFormError("")
-    if (!detentionMemoId) {
-      const msg = "Select a detention memo."
-      setFormError(msg)
-      toast({ title: "Detention memo required", description: msg, variant: "destructive" })
+    const missing = firstMissingField([
+      { id: "as-memo", label: "Detention Memo", missing: !detentionMemoId },
+      { id: "as-officer", label: "Examining Officer", missing: !examiningOfficer.trim() },
+      { id: "as-findings", label: "Findings", missing: andSubmit && !findings.trim() },
+      {
+        id: "as-relevance",
+        label: "Document Relevance",
+        missing: andSubmit && documentRelevance === "Pending",
+        message: "Set document relevance to Relevant or Not Relevant before sending for approval.",
+      },
+    ])
+    if (missing) {
+      setInvalidField(missing.id)
+      setFormError(missing.message ?? `${missing.label} is required`)
+      reportMissingField(missing)
       return
     }
-    if (!examiningOfficer.trim()) {
-      const msg = "Examining officer is required."
-      setFormError(msg)
-      toast({ title: "Missing officer", description: msg, variant: "destructive" })
-      return
-    }
-    if (andSubmit && documentRelevance === "Pending") {
-      const msg = "Set document relevance to Relevant or Not Relevant before sending for approval."
-      setFormError(msg)
-      toast({ title: "Document relevance required", description: msg, variant: "destructive" })
-      return
-    }
+    setInvalidField("")
 
     setSaving(true)
     try {
@@ -309,13 +311,16 @@ export default function AssessmentCreatePage() {
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2 md:col-span-2">
-              <Label>Detention Memo *</Label>
+              <Label htmlFor="as-memo">Detention Memo <span className="text-red-600">*</span></Label>
               <Select
                 value={detentionMemoId || undefined}
-                onValueChange={setDetentionMemoId}
+                onValueChange={(v) => {
+                  setDetentionMemoId(v)
+                  if (invalidField === "as-memo") setInvalidField("")
+                }}
                 disabled={isEdit || loading}
               >
-                <SelectTrigger>
+                <SelectTrigger id="as-memo" className="w-full" aria-invalid={invalidField === "as-memo"}>
                   <SelectValue placeholder={loading ? "Loading…" : "Select detention memo"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -341,10 +346,15 @@ export default function AssessmentCreatePage() {
               <Input type="date" value={assessmentDate} onChange={(e) => setAssessmentDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label>Examining Officer *</Label>
+              <Label htmlFor="as-officer">Examining Officer <span className="text-red-600">*</span></Label>
               <Input
+                id="as-officer"
                 value={examiningOfficer}
-                onChange={(e) => setExaminingOfficer(e.target.value)}
+                aria-invalid={invalidField === "as-officer"}
+                onChange={(e) => {
+                  setExaminingOfficer(e.target.value)
+                  if (invalidField === "as-officer") setInvalidField("")
+                }}
                 placeholder="Officer name"
               />
             </div>
@@ -453,21 +463,29 @@ export default function AssessmentCreatePage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label>Findings</Label>
+              <Label htmlFor="as-findings">Findings <span className="text-red-600">*</span></Label>
               <Textarea
+                id="as-findings"
                 value={findings}
-                onChange={(e) => setFindings(e.target.value)}
+                aria-invalid={invalidField === "as-findings"}
+                onChange={(e) => {
+                  setFindings(e.target.value)
+                  if (invalidField === "as-findings") setInvalidField("")
+                }}
                 rows={4}
                 placeholder="Examination findings"
               />
             </div>
             <div className="grid gap-2 max-w-md">
-              <Label>Document Relevance *</Label>
+              <Label htmlFor="as-relevance">Document Relevance <span className="text-red-600">*</span></Label>
               <Select
                 value={documentRelevance}
-                onValueChange={(v) => setDocumentRelevance(v as DocumentRelevance)}
+                onValueChange={(v) => {
+                  setDocumentRelevance(v as DocumentRelevance)
+                  if (invalidField === "as-relevance") setInvalidField("")
+                }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="as-relevance" className="w-full" aria-invalid={invalidField === "as-relevance"}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

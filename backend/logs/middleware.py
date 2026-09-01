@@ -1,10 +1,24 @@
-import requests
-from user_agents import parse
 from .models import UserActivityLog
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+try:
+    from user_agents import parse as parse_user_agent
+except ImportError:
+    parse_user_agent = None
 
 
 # Paths we don't log (e.g. report endpoint to avoid duplicate entries, or health checks)
-SKIP_LOG_PATHS = ("/api/activity-logs/report/", "/api/activity-logs/report", "/favicon.ico")
+SKIP_LOG_PATHS = (
+    "/api/activity-logs/report/",
+    "/api/activity-logs/report",
+    "/api/mobile-sessions/",
+    "/favicon.ico",
+    "/media/",
+)
 
 
 def get_ip(request):
@@ -16,7 +30,9 @@ def get_ip(request):
 
 def get_device_info(request):
     user_agent = request.META.get("HTTP_USER_AGENT", "")
-    parsed = parse(user_agent)
+    if parse_user_agent is None:
+        return "PC", "", (user_agent or "")[:50]
+    parsed = parse_user_agent(user_agent)
     device = "Mobile" if parsed.is_mobile else "PC"
     os_str = parsed.os.family or ""
     browser = parsed.browser.family or ""
@@ -26,6 +42,8 @@ def get_device_info(request):
 def get_geo(ip):
     if not ip or ip in ("127.0.0.1", "127.0.1", "localhost"):
         return "Pakistan", "Local"
+    if requests is None:
+        return None, None
     try:
         r = requests.get(f"http://ip-api.com/json/{ip}", timeout=2)
         if r.ok:
@@ -36,7 +54,7 @@ def get_geo(ip):
     return None, None
 
 
-def create_activity_log(user, request, action):
+def create_activity_log(user, request, action, source="web"):
     ip = get_ip(request)
     device, os_str, browser = get_device_info(request)
     country, city = get_geo(ip)
@@ -49,6 +67,7 @@ def create_activity_log(user, request, action):
         os=os_str,
         browser=browser,
         action=action[:255],
+        source=source or "web",
     )
 
 

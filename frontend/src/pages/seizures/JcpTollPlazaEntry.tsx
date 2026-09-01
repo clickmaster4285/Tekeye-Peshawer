@@ -57,6 +57,7 @@ const LOCATIONS = [
   { id: "peshawar", name: "Peshawar", lat: 34.0151, lng: 71.5249, tolls: ["Ring Road Toll", "GT Road Toll", "University Road Checkpost"] },
   { id: "yarik", name: "Yarik", lat: 34.0151, lng: 71.5249, tolls: ["Yarik Plaza", "North Entry", "Yarik Bridge"] },
   { id: "di-khan", name: "DI Khan", lat: 31.8178, lng: 70.9324, tolls: ["DI Khan South", "Main Entry", "Industrial Area Gate"] },
+  { id: "swh-ratta-kulachi", name: "SWH Ratta Kulachi", lat: 31.8620, lng: 70.8980, tolls: ["SWH Gate", "Main Entry", "Warehouse Yard"] },
   { id: "kohat", name: "Kohat", lat: 33.5828, lng: 71.4373, tolls: ["Kohat Tunnel", "City Entry", "Kohat University Gate"] },
   { id: "mardan", name: "Mardan", lat: 34.1989, lng: 72.0231, tolls: ["Mardan Toll Plaza", "Industrial Area", "Charsadda Road"] },
   { id: "nowshera", name: "Nowshera", lat: 33.9907, lng: 71.9981, tolls: ["Nowshera Bridge", "Khattak Toll", "Motorway Interchange"] },

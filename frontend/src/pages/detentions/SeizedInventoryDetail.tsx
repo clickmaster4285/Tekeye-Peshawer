@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table"
 import { DestructionRecordsPanel } from "@/components/warehouse/destruction-records-panel"
 import { ROUTES, getDetentionMemoDetailPath } from "@/routes/config"
+import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
 
 const STORAGE_KEY = "wms_seized_inventory"
 
@@ -203,11 +204,11 @@ export default function SeizedInventoryDetailPage() {
                 Goods Information
               </h4>
               <div className="rounded-lg border overflow-hidden">
-                <Table>
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow>
                       <TableHead> QR Code</TableHead>
-                      <TableHead>Description</TableHead>
+                      <TableHead className="w-[22%]">Description</TableHead>
                       <TableHead>PCT</TableHead>
                       <TableHead>Qty</TableHead>
                       <TableHead>Unit</TableHead>
@@ -215,14 +216,16 @@ export default function SeizedInventoryDetailPage() {
                       <TableHead>Assessable</TableHead>
                       <TableHead>Perishable</TableHead>
                       <TableHead>ID / Chassis</TableHead>
-                      <TableHead>Item Notes</TableHead>
+                      <TableHead className="w-[16%]">Item Notes</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {row.goodsItems.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="font-mono text-xs">{item.qrCodeNumber || "—"}</TableCell>
-                        <TableCell className="font-medium">{item.description || "—"}</TableCell>
+                        <TableCell className={`${goodsLineCellClass} font-medium`}>
+                          <GoodsLineText>{item.description || "—"}</GoodsLineText>
+                        </TableCell>
                         <TableCell className="font-mono">{item.pctCode || "—"}</TableCell>
                         <TableCell>{item.quantity || "—"}</TableCell>
                         <TableCell>{item.unit || "—"}</TableCell>
@@ -230,7 +233,9 @@ export default function SeizedInventoryDetailPage() {
                         <TableCell>{item.assessableValuePkr || "—"}</TableCell>
                         <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
                         <TableCell>{item.identificationRef || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground max-w-[200px] truncate">{item.itemNotes || "—"}</TableCell>
+                        <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                          <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

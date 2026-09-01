@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { AlertTriangle, BookOpen, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, Package, Plus, Printer, Search, CheckCircle, Clock, Edit2, Trash2 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
+import { TableActionGroup, TableActionIcon } from "@/components/seizure/table-action-icon"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,11 +33,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ROUTES, getDetentionMemoDetailPath } from "@/routes/config"
+import { ROUTES, getDetentionMemoCreatePath, getDetentionMemoDetailPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { fetchDetentionMemos, deleteDetentionMemo, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { createDepositAccountEntry, fetchDepositAccounts } from "@/lib/deposit-account-api"
 import { promoteDetentionToSeizedAndInventory } from "@/lib/wms-stock-storage"
 import { toast } from "@/components/ui/use-toast"
+import { ExportMenu } from "@/components/seizure/export-menu"
+import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
+import { downloadDetentionMemoCsv } from "@/lib/detention-memo-csv"
+import { useBatchPdfExport } from "@/hooks/use-batch-pdf-export"
+import { PdfExportHost } from "@/components/seizure/pdf-export-host"
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 const DEFAULT_PAGE_SIZE = 10
 const DETENTION_ALERT_DAYS = 60
@@ -65,18 +71,21 @@ function isDetentionOverTwoMonths(dateTimeDetention: string): boolean {
   }
 }
 
-function printMemo(id: string) {
-  const reportUrl = `${getDetentionMemoDetailPath(id)}?print=full&autoprint=1`
+function printMemo(id: string, pathname?: string) {
+  const reportUrl = `${getDetentionMemoDetailPath(id, pathname)}?print=full&autoprint=1`
   window.location.assign(reportUrl)
 }
 
-function printQr(id: string) {
-  const reportUrl = `${getDetentionMemoDetailPath(id)}?print=qr&autoprint=1`
+function printQr(id: string, pathname?: string) {
+  const reportUrl = `${getDetentionMemoDetailPath(id, pathname)}?print=qr&autoprint=1`
   window.location.assign(reportUrl)
 }
 
 export default function DetentionMemoPage() {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const listSection = getDetentionMemoSectionCrumb(pathname)
+  const createPath = getDetentionMemoCreatePath(pathname)
   const [rows, setRows] = useState<DetentionMemoRow[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -139,7 +148,13 @@ export default function DetentionMemoPage() {
 
   const handleSearch = () => setPage(1)
   const handleClear = () => { setCaseNumberSearch(""); setPage(1) }
-  
+
+  const pdf = useBatchPdfExport<DetentionMemoRow>(`detention-memos-${new Date().toISOString().slice(0, 10)}.pdf`)
+
+  const exportCsv = () => {
+    downloadDetentionMemoCsv(`detention-memos-${new Date().toISOString().slice(0, 10)}.csv`, filteredRows)
+  }
+
   const handleSeize = async (row: DetentionMemoRow) => {
     const ok = await promoteDetentionToSeizedAndInventory(row)
     if (ok) {
@@ -210,7 +225,7 @@ export default function DetentionMemoPage() {
   }
 
   const handleEdit = (row: DetentionMemoRow) => {
-    navigate(getDetentionMemoDetailPath(row.id))
+    navigate(getDetentionMemoDetailPath(row.id, pathname))
   }
 
   return (
@@ -218,7 +233,7 @@ export default function DetentionMemoPage() {
       title="Detention Memo"
       description="Create, view, and print detention memo records with QR-enabled report access. Deposit is available once per memo (disabled after a linked Deposit Account Register entry exists)."
       breadcrumbs={[
-        { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
+        listSection,
         { label: "Detention Memo" },
       ]}
     >
@@ -243,7 +258,7 @@ export default function DetentionMemoPage() {
                   </Link>
                 </Button>
                 <Button variant="outline" asChild>
-                  <Link to={ROUTES.DETENTION_MEMO_CREATE}>
+                  <Link to={createPath}>
                     Create Detention Memo
                   </Link>
                 </Button>
@@ -281,6 +296,13 @@ export default function DetentionMemoPage() {
               <Button variant="outline" onClick={handleClear} className="w-full gap-2 sm:w-auto">
                 Clear
               </Button>
+              <div className="sm:ml-auto">
+                <ExportMenu
+                  disabled={filteredRows.length === 0}
+                  onExportCsv={exportCsv}
+                  onExportPdf={() => pdf.start(filteredRows)}
+                />
+              </div>
             </div>
 
             {/* Mobile list */}
@@ -348,42 +370,37 @@ export default function DetentionMemoPage() {
                         </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <Button variant="ghost" size="sm" asChild className="h-8 px-2">
-                          <Link to={getDetentionMemoDetailPath(row.id)}>
-                            <Eye className="mr-1 h-3.5 w-3.5" /> View
-                          </Link>
-                        </Button>
+                      <div className="mt-3 flex flex-wrap justify-end gap-0.5">
+                        <TableActionIcon label="View" to={getDetentionMemoDetailPath(row.id, pathname)}>
+                          <Eye className="h-4 w-4" />
+                        </TableActionIcon>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" className="h-8 px-2">
-                              <Printer className="mr-1 h-3.5 w-3.5" /> Print
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Print" aria-label="Print">
+                              <Printer className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => printQr(row.id)}>Print QR Code</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => printMemo(row.id)}>Print Full Report</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => printQr(row.id, pathname)}>Print QR Code</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => printMemo(row.id, pathname)}>Print Full Report</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                        <Button
-                          variant="outline"
-                          size="sm"
+                        <TableActionIcon
+                          label={memoIdsWithDeposit.has(row.id) ? "Already deposited" : "Add to Deposit Account"}
                           disabled={memoIdsWithDeposit.has(row.id)}
-                          title={memoIdsWithDeposit.has(row.id) ? "Already deposited — open Deposit Account Register for this memo" : "Add to Deposit Account Register"}
                           onClick={() => void handleDeposit(row)}
-                          className="h-8 px-2"
                         >
-                          <BookOpen className="mr-1 h-3.5 w-3.5" /> Deposit
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => void handleSeize(row)} className="h-8 px-2">
-                          <Package className="mr-1 h-3.5 w-3.5" /> Seize
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleEdit(row)} className="h-8 px-2">
-                          <Edit2 className="mr-1 h-3.5 w-3.5" /> Edit
-                        </Button>
-                        <Button variant="destructive" size="sm" onClick={() => handleDeleteClick(row)} className="h-8 px-2">
-                          <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
-                        </Button>
+                          <BookOpen className="h-4 w-4" />
+                        </TableActionIcon>
+                        <TableActionIcon label="Seize" onClick={() => void handleSeize(row)}>
+                          <Package className="h-4 w-4" />
+                        </TableActionIcon>
+                        <TableActionIcon label="Edit" onClick={() => handleEdit(row)}>
+                          <Edit2 className="h-4 w-4" />
+                        </TableActionIcon>
+                        <TableActionIcon label="Delete" destructive onClick={() => handleDeleteClick(row)}>
+                          <Trash2 className="h-4 w-4" />
+                        </TableActionIcon>
                       </div>
                     </div>
                   )
@@ -392,21 +409,21 @@ export default function DetentionMemoPage() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden w-full min-w-0 overflow-hidden rounded-lg border bg-background md:block">
-              <div className="max-h-[65vh] w-full max-w-full overflow-x-auto overflow-y-auto pb-2">
-                <Table className="min-w-[1400px]">
+            <div className="hidden w-full min-w-0 rounded-lg border bg-background md:block">
+              <div className="max-h-[65vh] w-full overflow-y-auto">
+                <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
                   <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur-sm">
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[80px] font-semibold">Sr.No</TableHead>
-                      <TableHead className="font-semibold">Case Number</TableHead>
-                      <TableHead className="font-semibold">Detention Memo No</TableHead>
-                      <TableHead className="font-semibold">Detention Date/Time</TableHead>
-                      <TableHead className="font-semibold">Status</TableHead>
-                      <TableHead className="font-semibold">Posting Date</TableHead>
-                      <TableHead className="font-semibold">Updation Date</TableHead>
-                      <TableHead className="font-semibold">Alert</TableHead>
-                      <TableHead className="font-semibold">created by </TableHead>
-                      <TableHead className="text-right font-semibold">Actions</TableHead>
+                      <TableHead className="w-[7%] font-semibold">Sr.No</TableHead>
+                      <TableHead className="w-[12%] font-semibold">Case Number</TableHead>
+                      <TableHead className="w-[14%] font-semibold">Detention Memo No</TableHead>
+                      <TableHead className="w-[13%] font-semibold">Detention Date/Time</TableHead>
+                      <TableHead className="w-[10%] font-semibold">Status</TableHead>
+                      <TableHead className="w-[11%] font-semibold">Posting Date</TableHead>
+                      <TableHead className="w-[11%] font-semibold">Updation Date</TableHead>
+                      <TableHead className="w-[7%] font-semibold">Alert</TableHead>
+                      <TableHead className="w-[9%] font-semibold">Created by</TableHead>
+                      <TableHead className="w-[7.5rem] text-right font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -423,12 +440,12 @@ export default function DetentionMemoPage() {
                         const isAlert = isDetentionOverTwoMonths(row.dateTimeDetention)
                         return (
                           <TableRow key={row.id} className="hover:bg-muted/40 transition-colors">
-                            <TableCell className="font-mono text-xs">
+                            <TableCell className="font-mono text-xs truncate">
                               {serialInfo ? `${serialInfo.serialNo}/${serialInfo.year}` : row.serialNo ?? index + 1}
                             </TableCell>
-                            <TableCell className="font-medium">{row.caseNo}</TableCell>
-                            <TableCell className="font-mono text-xs">{row.referenceNumber || "—"}</TableCell>
-                            <TableCell className="whitespace-nowrap text-sm">{row.dateTimeDetention || "—"}</TableCell>
+                            <TableCell className="font-medium truncate" title={row.caseNo}>{row.caseNo}</TableCell>
+                            <TableCell className="font-mono text-xs truncate" title={row.referenceNumber || ""}>{row.referenceNumber || "—"}</TableCell>
+                            <TableCell className="truncate text-sm">{row.dateTimeDetention || "—"}</TableCell>
                             <TableCell>
                               {row.verificationStatus === "Verified" ? (
                                 <Badge className="bg-green-100 text-green-800 hover:bg-green-100 gap-1">
@@ -440,62 +457,51 @@ export default function DetentionMemoPage() {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell className="text-sm">{row.createdAt || "—"}</TableCell>
-                            <TableCell className="text-sm">{row.updatedAt ?? row.createdAt ?? "—"}</TableCell>
+                            <TableCell className="text-sm truncate">{row.createdAt || "—"}</TableCell>
+                            <TableCell className="text-sm truncate">{row.updatedAt ?? row.createdAt ?? "—"}</TableCell>
                             <TableCell>
                               {isAlert ? (
-                                <div className="group relative inline-block">
-                                  <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 text-xs font-medium px-2.5 py-1 rounded-full border border-amber-200">
-                                    <AlertTriangle className="h-3.5 w-3.5" />
-                                    <span>Over 60 days</span>
-                                  </span>
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10">
-                                    Transfer to Seizure Register if applicable
-                                  </div>
-                                </div>
+                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs font-medium px-2 py-1 rounded-full border border-amber-200" title="Transfer to Seizure Register if applicable">
+                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                </span>
                               ) : (
                                 <span className="text-muted-foreground text-sm">—</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-sm">{row.createdBy || "ASO Portal"}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex flex-wrap justify-end gap-1">
-                                <Button variant="ghost" size="sm" asChild className="h-8 px-2">
-                                  <Link to={getDetentionMemoDetailPath(row.id)}>
-                                    <Eye className="h-3.5 w-3.5 mr-1" /> View
-                                  </Link>
-                                </Button>
+                            <TableCell className="text-sm truncate" title={row.createdBy || "ASO Portal"}>{row.createdBy || "ASO Portal"}</TableCell>
+                            <TableCell className="overflow-visible whitespace-normal p-2 text-right align-middle">
+                              <TableActionGroup>
+                                <TableActionIcon label="View" to={getDetentionMemoDetailPath(row.id, pathname)}>
+                                  <Eye className="h-4 w-4" />
+                                </TableActionIcon>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm" className="h-8 px-2">
-                                      <Printer className="h-3.5 w-3.5 mr-1" /> Print
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" title="Print" aria-label="Print">
+                                      <Printer className="h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => printQr(row.id)}>Print QR Code</DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => printMemo(row.id)}>Print Full Report</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => printQr(row.id, pathname)}>Print QR Code</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => printMemo(row.id, pathname)}>Print Full Report</DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
+                                <TableActionIcon
+                                  label={memoIdsWithDeposit.has(row.id) ? "Already deposited" : "Add to Deposit Account"}
                                   disabled={memoIdsWithDeposit.has(row.id)}
-                                  title={memoIdsWithDeposit.has(row.id) ? "Already deposited — open Deposit Account Register for this memo" : "Add to Deposit Account Register"}
                                   onClick={() => void handleDeposit(row)}
-                                  className="h-8 px-2"
                                 >
-                                  <BookOpen className="h-3.5 w-3.5 mr-1" /> Deposit
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => void handleSeize(row)} className="h-8 px-2">
-                                  <Package className="h-3.5 w-3.5 mr-1" /> Seize
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => handleEdit(row)} className="h-8 px-2">
-                                  <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
-                                </Button>
-                                <Button variant="destructive" size="sm" onClick={() => handleDeleteClick(row)} className="h-8 px-2">
-                                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-                                </Button>
-                              </div>
+                                  <BookOpen className="h-4 w-4" />
+                                </TableActionIcon>
+                                <TableActionIcon label="Seize" onClick={() => void handleSeize(row)}>
+                                  <Package className="h-4 w-4" />
+                                </TableActionIcon>
+                                <TableActionIcon label="Edit" onClick={() => handleEdit(row)}>
+                                  <Edit2 className="h-4 w-4" />
+                                </TableActionIcon>
+                                <TableActionIcon label="Delete" destructive onClick={() => handleDeleteClick(row)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </TableActionIcon>
+                              </TableActionGroup>
                             </TableCell>
                           </TableRow>
                         )
@@ -600,6 +606,11 @@ export default function DetentionMemoPage() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
+      <PdfExportHost hostRef={pdf.hostRef}>
+        {pdf.items?.map((row) => (
+          <DetentionMemoReportPrint key={row.id} row={row} embedded />
+        ))}
+      </PdfExportHost>
     </ModulePageLayout>
   )
 }

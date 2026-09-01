@@ -77,45 +77,44 @@ class NoteSheet(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # 1. Basic Information
-    note_sheet_no = models.CharField(max_length=80, blank=True, db_index=True)
-    date_time = models.CharField(max_length=80, blank=True)
-    office = models.CharField(max_length=500, blank=True)
-    case_no = models.CharField(max_length=120, blank=True, db_index=True)
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL)
-    status = models.CharField(max_length=40, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
-    subject = models.CharField(max_length=400, blank=True)
+    note_sheet_no = models.TextField(blank=True, db_index=True)
+    date_time = models.TextField(blank=True)
+    office = models.TextField(blank=True)
+    case_no = models.TextField(blank=True, db_index=True)
+    priority = models.TextField(choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL)
+    status = models.TextField(choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    subject = models.TextField(blank=True)
 
     # Legacy alias fields kept in sync for older clients
-    reference_number = models.CharField(max_length=200, blank=True, db_index=True)
+    reference_number = models.TextField(blank=True, db_index=True)
 
     # 2. Officer Information
-    prepared_by = models.CharField(max_length=500, blank=True)
-    badge_id = models.CharField(max_length=80, blank=True)
-    designation = models.CharField(max_length=200, blank=True)
-    department = models.CharField(max_length=500, blank=True)
-    officer_contact = models.CharField(max_length=80, blank=True)
+    prepared_by = models.TextField(blank=True)
+    badge_id = models.TextField(blank=True)
+    designation = models.TextField(blank=True)
+    department = models.TextField(blank=True)
+    officer_contact = models.TextField(blank=True)
 
     # 3. Suspect / Accused
-    accused_name = models.CharField(max_length=500, blank=True)
-    accused_father_name = models.CharField(max_length=500, blank=True)
-    accused_cnic = models.CharField(max_length=40, blank=True)
-    accused_mobile = models.CharField(max_length=50, blank=True)
+    accused_name = models.TextField(blank=True)
+    accused_father_name = models.TextField(blank=True)
+    accused_cnic = models.TextField(blank=True)
+    accused_mobile = models.TextField(blank=True)
     accused_address = models.TextField(blank=True)
-    business_name = models.CharField(max_length=500, blank=True)
-    ntn_strn = models.CharField(max_length=80, blank=True)
+    business_name = models.TextField(blank=True)
+    ntn_strn = models.TextField(blank=True)
 
     # 5. Location
-    place_of_inspection = models.CharField(max_length=500, blank=True)
-    warehouse_shop = models.CharField(max_length=500, blank=True)
-    gps_location = models.CharField(max_length=120, blank=True)
-    inspection_date = models.CharField(max_length=80, blank=True)
+    place_of_inspection = models.TextField(blank=True)
+    warehouse_shop = models.TextField(blank=True)
+    gps_location = models.TextField(blank=True)
+    inspection_date = models.TextField(blank=True)
 
     # 6–9 Narrative
     grounds_of_suspicion = models.TextField(blank=True)
     evidence_collected = models.JSONField(default=list, blank=True)
     preliminary_findings = models.TextField(blank=True)
-    recommendation = models.CharField(
-        max_length=60,
+    recommendation = models.TextField(
         choices=RECOMMENDATION_CHOICES,
         default=RECOMMENDATION_DETENTION,
         blank=True,
@@ -125,11 +124,11 @@ class NoteSheet(models.Model):
     content = models.TextField(blank=True)
 
     # 11–12 Approval
-    prepared_signature = models.CharField(max_length=500, blank=True)
-    prepared_date = models.CharField(max_length=80, blank=True)
-    forward_to = models.CharField(max_length=500, blank=True)
+    prepared_signature = models.TextField(blank=True)
+    prepared_date = models.TextField(blank=True)
+    forward_to = models.TextField(blank=True)
     forward_to_user_id = models.IntegerField(null=True, blank=True, db_index=True)
-    approved_by = models.CharField(max_length=500, blank=True)
+    approved_by = models.TextField(blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     approval_remarks = models.TextField(blank=True)
     rejection_reason = models.TextField(blank=True)
@@ -138,8 +137,8 @@ class NoteSheet(models.Model):
     viewed_at = models.DateTimeField(null=True, blank=True)
 
     # Audit
-    created_by = models.CharField(max_length=150, blank=True)
-    updated_by = models.CharField(max_length=150, blank=True)
+    created_by = models.TextField(blank=True)
+    updated_by = models.TextField(blank=True)
 
     detention_memo = models.OneToOneField(
         "detentions.DetentionMemo",
@@ -173,17 +172,17 @@ class NoteSheetItem(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     note_sheet = models.ForeignKey(NoteSheet, on_delete=models.CASCADE, related_name="items")
-    client_line_id = models.CharField(max_length=80, blank=True, db_index=True)
-    qr_code_number = models.CharField(max_length=160, blank=True)
-    product = models.CharField(max_length=300, blank=True)  # Description of Goods
-    pct_code = models.CharField(max_length=40, blank=True)
-    quantity = models.CharField(max_length=80, blank=True)
-    unit = models.CharField(max_length=80, blank=True)
-    condition = models.CharField(max_length=80, blank=True)
-    estimated_value = models.CharField(max_length=120, blank=True)  # Assessable Value (PKR)
+    client_line_id = models.TextField(blank=True, db_index=True)
+    qr_code_number = models.TextField(blank=True)
+    product = models.TextField(blank=True)  # Description of Goods
+    pct_code = models.TextField(blank=True)
+    quantity = models.TextField(blank=True)
+    unit = models.TextField(blank=True)
+    condition = models.TextField(blank=True)
+    estimated_value = models.TextField(blank=True)  # Assessable Value (PKR)
     perishable = models.BooleanField(default=False)
-    identification_ref = models.CharField(max_length=500, blank=True)  # ID / Chassis No.
-    remarks = models.CharField(max_length=400, blank=True)  # Item Notes
+    identification_ref = models.TextField(blank=True)  # ID / Chassis No.
+    remarks = models.TextField(blank=True)  # Item Notes
     sort_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -199,7 +198,7 @@ class NoteSheetItemImage(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     item = models.ForeignKey(NoteSheetItem, on_delete=models.CASCADE, related_name="images")
-    image = models.FileField(upload_to=note_sheet_item_image_path, max_length=500)
+    image = models.FileField(upload_to=note_sheet_item_image_path, max_length=1024)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -233,9 +232,9 @@ class NoteSheetAttachment(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     note_sheet = models.ForeignKey(NoteSheet, on_delete=models.CASCADE, related_name="attachments")
-    file = models.FileField(upload_to=note_sheet_attachment_path, max_length=500)
-    file_type = models.CharField(max_length=40, choices=TYPE_CHOICES, default=TYPE_OTHER)
-    original_filename = models.CharField(max_length=255, blank=True)
+    file = models.FileField(upload_to=note_sheet_attachment_path, max_length=1024)
+    file_type = models.TextField(choices=TYPE_CHOICES, default=TYPE_OTHER)
+    original_filename = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -255,7 +254,7 @@ class NoteSheetNotification(models.Model):
         on_delete=models.CASCADE,
         related_name="notifications",
     )
-    title = models.CharField(max_length=255)
+    title = models.TextField(blank=True)
     message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -302,29 +301,28 @@ class DetentionAssessment(models.Model):
         on_delete=models.CASCADE,
         related_name="assessments",
     )
-    assessment_date = models.CharField(max_length=40, blank=True)
-    examining_officer = models.CharField(max_length=200, blank=True)
-    goods_condition = models.CharField(max_length=400, blank=True)
+    assessment_date = models.TextField(blank=True)
+    examining_officer = models.TextField(blank=True)
+    goods_condition = models.TextField(blank=True)
     valuation_notes = models.TextField(blank=True)
     findings = models.TextField(blank=True)
-    document_relevance = models.CharField(
-        max_length=40,
+    document_relevance = models.TextField(
         choices=RELEVANCE_CHOICES,
         default=RELEVANCE_PENDING,
         db_index=True,
     )
-    status = models.CharField(max_length=40, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    status = models.TextField(choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
 
     # Approval (same pattern as note sheet)
-    approved_by = models.CharField(max_length=500, blank=True)
+    approved_by = models.TextField(blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     approval_remarks = models.TextField(blank=True)
     rejection_reason = models.TextField(blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     viewed_at = models.DateTimeField(null=True, blank=True)
 
-    created_by = models.CharField(max_length=150, blank=True)
-    updated_by = models.CharField(max_length=150, blank=True)
+    created_by = models.TextField(blank=True)
+    updated_by = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -364,9 +362,9 @@ class DetentionAssessmentAttachment(models.Model):
         on_delete=models.CASCADE,
         related_name="attachments",
     )
-    file = models.FileField(upload_to=assessment_attachment_path, max_length=500)
-    file_type = models.CharField(max_length=40, choices=TYPE_CHOICES, default=TYPE_OTHER)
-    original_filename = models.CharField(max_length=255, blank=True)
+    file = models.FileField(upload_to=assessment_attachment_path, max_length=1024)
+    file_type = models.TextField(choices=TYPE_CHOICES, default=TYPE_OTHER)
+    original_filename = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -386,7 +384,7 @@ class AssessmentNotification(models.Model):
         on_delete=models.CASCADE,
         related_name="notifications",
     )
-    title = models.CharField(max_length=255)
+    title = models.TextField(blank=True)
     message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -437,19 +435,18 @@ class RecoveryMemo(models.Model):
         blank=True,
         related_name="recovery_memos",
     )
-    category = models.CharField(max_length=40, choices=CATEGORY_CHOICES, default=CATEGORY_OTHER)
-    recovery_date = models.CharField(max_length=40, blank=True)
-    recovery_officer = models.CharField(max_length=200, blank=True)
+    category = models.TextField(choices=CATEGORY_CHOICES, default=CATEGORY_OTHER)
+    recovery_date = models.TextField(blank=True)
+    recovery_officer = models.TextField(blank=True)
     goods_description = models.TextField(blank=True)
-    quantity = models.CharField(max_length=120, blank=True)
+    quantity = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
-    approval_status = models.CharField(
-        max_length=40,
+    approval_status = models.TextField(
         choices=STATUS_CHOICES,
         default=STATUS_DRAFT,
         db_index=True,
     )
-    approved_by = models.CharField(max_length=200, blank=True)
+    approved_by = models.TextField(blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
     approval_remarks = models.TextField(blank=True)
@@ -464,8 +461,8 @@ class RecoveryMemo(models.Model):
         related_name="recovery_memos",
     )
 
-    created_by = models.CharField(max_length=150, blank=True)
-    updated_by = models.CharField(max_length=150, blank=True)
+    created_by = models.TextField(blank=True)
+    updated_by = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -486,7 +483,7 @@ class RecoveryNotification(models.Model):
         on_delete=models.CASCADE,
         related_name="notifications",
     )
-    title = models.CharField(max_length=255)
+    title = models.TextField(blank=True)
     message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -531,11 +528,11 @@ class SeizureReport(models.Model):
         blank=True,
         related_name="seizure_reports",
     )
-    report_date = models.CharField(max_length=40, blank=True)
-    prepared_by = models.CharField(max_length=200, blank=True)
+    report_date = models.TextField(blank=True)
+    prepared_by = models.TextField(blank=True)
     summary = models.TextField(blank=True)
     recovery_assessment_notes = models.TextField(blank=True)
-    status = models.CharField(max_length=40, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    status = models.TextField(choices=STATUS_CHOICES, default=STATUS_DRAFT)
     submitted_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

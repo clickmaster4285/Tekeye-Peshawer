@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react"
-import { useParams, Link, useSearchParams } from "react-router-dom"
-import { ArrowLeft, FileText, Package, QrCode, Printer, FileOutput, Users, Paperclip } from "lucide-react"
+import { useParams, Link, useSearchParams, useLocation } from "react-router-dom"
+import { ArrowLeft, FileText, Package, QrCode, Users, Paperclip } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { PrintMenu } from "@/components/seizure/print-menu"
 import {
   Table,
   TableBody,
@@ -13,13 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ROUTES, getDetentionMemoDetailPath } from "@/routes/config"
+import { ROUTES, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
 import DetentionMemoQRPrint from "@/components/detention/DetentionMemoQRPrint"
 import { DestructionRecordsPanel } from "@/components/warehouse/destruction-records-panel"
 import { WmsFlowOverviewPanel } from "@/components/warehouse/wms-flow-overview-panel"
 import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
+import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
 
 type GoodsLineItem = {
   id: string
@@ -34,38 +36,6 @@ type GoodsLineItem = {
   itemNotes: string
   perishable?: boolean
   images?: string[]
-}
-
-type DetentionMemoRow = {
-  [key: string]: unknown
-  id: string
-  caseNo: string
-  firNumber?: string
-  referenceNumber: string
-  dateTimeOccurrence: string
-  placeOfOccurrence: string
-  dateTimeDetention: string
-  placeOfDetention: string
-  detentionType: string
-  directorate: string
-  reasonForDetention: string
-  whereDeposited: string
-  settlementStatus: string
-  verificationStatus: string
-  briefFacts?: string
-  forwardingOfficerRemarks?: string
-  accusedName?: string
-  accusedCnic?: string
-  accusedAddress?: string
-  goodsItems?: GoodsLineItem[]
-  seizingOfficerNotes?: string
-  examiningOfficerNotes?: string
-  detentionNotes?: string
-  createdAt: string
-  updatedAt?: string
-  createdBy?: string
-  memoQrCodeNumber?: string
-  memoQrCodePayload?: string
 }
 
 function DetailRow({ label, value }: { label: string; value: string | undefined }) {
@@ -151,14 +121,14 @@ function GoodsInformationBlock({
                   </div>
                 </div>
                 <div className="space-y-2 text-sm">
-                  <div><span className="text-muted-foreground">Description: </span><span className="break-words font-medium">{item.description || "—"}</span></div>
+                  <div><span className="text-muted-foreground">Description: </span><GoodsLineText className="inline-block align-top max-h-20 font-medium">{item.description || "—"}</GoodsLineText></div>
                   <div><span className="text-muted-foreground">PCT Code: </span>{item.pctCode?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">Qty/Unit: </span>{item.quantity || "—"} / {item.unit || "—"}</div>
                   <div><span className="text-muted-foreground">Condition: </span>{item.condition || "—"}</div>
                   <div><span className="text-muted-foreground">Assessable Value (PKR): </span>{item.assessableValuePkr?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">Perishable: </span>{item.perishable ? "Yes" : "No"}</div>
                   <div><span className="text-muted-foreground">ID/Chassis: </span><span className="break-words">{item.identificationRef || "—"}</span></div>
-                  <div><span className="text-muted-foreground">Notes: </span><span className="break-words">{item.itemNotes || "—"}</span></div>
+                  <div><span className="text-muted-foreground">Notes: </span><GoodsLineText className="inline-block align-top max-h-20">{item.itemNotes || "—"}</GoodsLineText></div>
                 </div>
                 <div className="mt-3">
                   <p className="mb-1 text-xs text-muted-foreground">Images</p>
@@ -184,11 +154,11 @@ function GoodsInformationBlock({
 
         <div className="hidden overflow-x-auto sm:block">
           <ScrollArea className="w-full">
-            <Table>
+            <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
                   <TableHead> QR Code</TableHead>
-                  <TableHead>Description</TableHead>
+                  <TableHead className="w-[22%]">Description</TableHead>
                   <TableHead>PCT Code</TableHead>
                   <TableHead>Qty</TableHead>
                   <TableHead>Unit</TableHead>
@@ -196,7 +166,7 @@ function GoodsInformationBlock({
                   <TableHead>Assessable Value (PKR)</TableHead>
                   <TableHead>Perishable</TableHead>
                   <TableHead>ID / Chassis</TableHead>
-                  <TableHead>Item Notes</TableHead>
+                  <TableHead className="w-[16%]">Item Notes</TableHead>
                   <TableHead>Images</TableHead>
                 </TableRow>
               </TableHeader>
@@ -223,7 +193,9 @@ function GoodsInformationBlock({
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium break-words min-w-[120px]">{item.description || "—"}</TableCell>
+                      <TableCell className={`${goodsLineCellClass} font-medium`}>
+                        <GoodsLineText>{item.description || "—"}</GoodsLineText>
+                      </TableCell>
                       <TableCell className="font-mono break-words">{item.pctCode?.trim() || "—"}</TableCell>
                       <TableCell>{item.quantity || "—"}</TableCell>
                       <TableCell>{item.unit || "—"}</TableCell>
@@ -231,7 +203,9 @@ function GoodsInformationBlock({
                       <TableCell className="break-words min-w-[80px]">{item.assessableValuePkr?.trim() || "—"}</TableCell>
                       <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
                       <TableCell className="break-words min-w-[100px]">{item.identificationRef || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-[150px] sm:max-w-[200px] truncate">{item.itemNotes || "—"}</TableCell>
+                      <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                        <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
+                      </TableCell>
                       <TableCell>
                         {item.images && item.images.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
@@ -262,10 +236,14 @@ function GoodsInformationBlock({
 
 export default function DetentionMemoDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { pathname } = useLocation()
+  const listPath = getDetentionMemoListPath(pathname)
+  const listSection = getDetentionMemoSectionCrumb(pathname)
   const [searchParams] = useSearchParams()
   const [row, setRow] = useState<DetentionMemoApiRecord | null | undefined>(undefined)
   const printMode = searchParams.get("print")
   const autoPrint = searchParams.get("autoprint") === "1"
+  const autoSavePdf = searchParams.get("savepdf") === "1"
   const isPrintMode = printMode === "qr" || printMode === "full"
   const goodsQrFilter = searchParams.get("goodsQr")?.trim() || ""
   const goodsOnlyView = searchParams.get("view") === "goods" && !!goodsQrFilter
@@ -302,8 +280,8 @@ export default function DetentionMemoDetailPage() {
         title="Detention Memo Not Found"
         description="The requested record could not be found."
         breadcrumbs={[
-          { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-          { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+          listSection,
+          { label: "Detention Memo", href: listPath },
           { label: "Detail" },
         ]}
       >
@@ -311,7 +289,7 @@ export default function DetentionMemoDetailPage() {
           <CardContent className="pt-6">
             <p className="text-muted-foreground mb-4">Record not found or has been removed.</p>
             <Button asChild variant="outline">
-              <Link to={ROUTES.DETENTION_MEMO}>
+              <Link to={listPath}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Detention Memo
               </Link>
@@ -328,8 +306,8 @@ export default function DetentionMemoDetailPage() {
         title="Detention Memo"
         description="Loading record…"
         breadcrumbs={[
-          { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-          { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+          listSection,
+          { label: "Detention Memo", href: listPath },
           { label: "Detail" },
         ]}
       >
@@ -348,8 +326,8 @@ export default function DetentionMemoDetailPage() {
         title="Detention Memo Not Found"
         description="The requested record could not be found."
         breadcrumbs={[
-          { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-          { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+          listSection,
+          { label: "Detention Memo", href: listPath },
           { label: "Detail" },
         ]}
       >
@@ -357,7 +335,7 @@ export default function DetentionMemoDetailPage() {
           <CardContent className="pt-6">
             <p className="text-muted-foreground mb-4">Record not found or has been removed.</p>
             <Button asChild variant="outline">
-              <Link to={ROUTES.DETENTION_MEMO}>
+              <Link to={listPath}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Detention Memo
               </Link>
@@ -370,7 +348,6 @@ export default function DetentionMemoDetailPage() {
 
   const qrPayload = row.memoQrCodePayload || `${window.location.origin}${getDetentionMemoDetailPath(row.id)}?print=full`
   const qrNumber = row.memoQrCodeNumber || `DM-${row.caseNo}`
-  const reportRow = row as unknown as DetentionMemoRow
 
   if (printMode === "qr") {
     return (
@@ -388,9 +365,10 @@ export default function DetentionMemoDetailPage() {
   if (printMode === "full") {
     return (
       <DetentionMemoReportPrint
-        row={reportRow}
+        row={row}
         qrPayload={qrPayload}
         qrNumber={qrNumber}
+        autoSavePdf={autoSavePdf}
       />
     )
   }
@@ -409,22 +387,22 @@ export default function DetentionMemoDetailPage() {
         title={`Goods: ${goodsLabel}`}
         description={`Goods line from detention memo ${row.caseNo}.`}
         breadcrumbs={[
-          { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-          { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
-          { label: row.caseNo, href: `${ROUTES.DETENTION_MEMO}/${encodeURIComponent(row.id)}` },
+          listSection,
+          { label: "Detention Memo", href: listPath },
+          { label: row.caseNo, href: `${listPath}/${encodeURIComponent(row.id)}` },
           { label: "Goods" },
         ]}
       >
         <div className="grid gap-4 sm:gap-6">
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" size="sm">
-              <Link to={ROUTES.DETENTION_MEMO}>
+              <Link to={listPath}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to list
               </Link>
             </Button>
             <Button asChild variant="outline" size="sm">
-              <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(row.id)}`}>
+              <Link to={`${listPath}/${encodeURIComponent(row.id)}`}>
                 <FileText className="h-4 w-4 mr-2" />
                 View full memo
               </Link>
@@ -450,8 +428,8 @@ export default function DetentionMemoDetailPage() {
           : "Pakistan Customs detention memo details. Data from the database."
       }
       breadcrumbs={[
-        { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-        { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+        listSection,
+        { label: "Detention Memo", href: listPath },
         { label: row.caseNo },
       ]}
     >
@@ -487,22 +465,14 @@ export default function DetentionMemoDetailPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-auto">
               <Badge variant={row.verificationStatus === "Verified" ? "default" : "secondary"} className="w-fit">
                 {row.verificationStatus}
               </Badge>
-              <Button variant="outline" asChild size="sm" className="w-full sm:w-auto">
-                <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(row.id)}?print=full`}>
-                  <Printer className="h-4 w-4 mr-2" />
-                  Print Report
-                </Link>
-              </Button>
-              <Button variant="default" asChild size="sm" className="w-full sm:w-auto">
-                <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(row.id)}?print=full`}>
-                  <FileOutput className="h-4 w-4 mr-2" />
-                  Save as PDF
-                </Link>
-              </Button>
+              <PrintMenu
+                printHref={`${listPath}/${encodeURIComponent(row.id)}?print=full`}
+                pdfHref={`${listPath}/${encodeURIComponent(row.id)}?print=full&savepdf=1`}
+              />
             </div>
           </CardHeader>
           <CardContent className="space-y-4 sm:space-y-6 px-4 sm:px-6">
@@ -513,6 +483,7 @@ export default function DetentionMemoDetailPage() {
                   <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
                     <DetailRow label="Case No." value={row.caseNo} />
                     <DetailRow label="Detention Memo No." value={row.referenceNumber || "—"} />
+                    <DetailRow label="FIR Number" value={row.firNumber} />
                     <DetailRow label="Date/Time of occurrence" value={row.dateTimeOccurrence} />
                     <DetailRow label="Place of occurrence" value={row.placeOfOccurrence} />
                     <DetailRow label="Date/Time of detention" value={row.dateTimeDetention} />
@@ -520,6 +491,12 @@ export default function DetentionMemoDetailPage() {
                     <DetailRow label="Detention Type" value={row.detentionType} />
                     <DetailRow label="Directorate" value={row.directorate} />
                     <DetailRow label="Reason for detention" value={row.reasonForDetention} />
+                    <DetailRow label="Location of Detention" value={row.locationOfDetention} />
+                    <DetailRow label="Search / Chassis Number" value={row.searchChassisNumber} />
+                    <DetailRow label="Receipt Officer" value={row.receiptOfficer} />
+                    <DetailRow label="GD Number" value={row.gdNumber} />
+                    <DetailRow label="GD Number 2" value={row.gdNumber2} />
+                    <DetailRow label="Disposition Status" value={row.dispositionStatus} />
                   </div>
                 </CardContent>
               </Card>
@@ -527,15 +504,15 @@ export default function DetentionMemoDetailPage() {
                 <CardContent className="pt-5">
                   <h4 className="text-sm font-semibold mb-3 flex items-center gap-2"><QrCode className="h-4 w-4" /> Memo QR</h4>
                   <div className="flex justify-center">
-                    <img 
-                      src={getQrCodeUrl(qrPayload, typeof window !== 'undefined' && window.innerWidth < 640 ? 150 : 180)} 
-                      alt="Memo QR code" 
-                      className="border rounded-lg p-2 bg-white max-w-full h-auto" 
+                    <img
+                      src={getQrCodeUrl(qrPayload, typeof window !== 'undefined' && window.innerWidth < 640 ? 150 : 180)}
+                      alt="Memo QR code"
+                      className="border rounded-lg p-2 bg-white max-w-full h-auto"
                     />
                   </div>
                   <p className="text-xs text-muted-foreground mt-3 break-all">{qrNumber}</p>
                   <Button variant="outline" size="sm" className="w-full mt-3" asChild>
-                    <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(row.id)}?print=qr`}>
+                    <Link to={`${listPath}/${encodeURIComponent(row.id)}?print=qr`}>
                       Print QR
                     </Link>
                   </Button>
@@ -549,6 +526,7 @@ export default function DetentionMemoDetailPage() {
                 <DetailRow label="Goods detained at" value={row.whereDeposited} />
                 <DetailRow label="Settlement Status" value={row.settlementStatus} />
                 <DetailRow label="Verification Status" value={row.verificationStatus} />
+                <DetailRow label="Memo QR Number" value={row.memoQrCodeNumber || qrNumber} />
               </CardContent>
             </Card>
 
@@ -587,70 +565,64 @@ export default function DetentionMemoDetailPage() {
               </CardContent>
             </Card>
 
-            {(row.owner?.name || row.owner?.cnic || row.owner?.contact || row.owner?.picture) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Owner
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
-                    <DetailRow label="Name" value={row.owner?.name} />
-                    <DetailRow label="CNIC" value={row.owner?.cnic} />
-                    <DetailRow label="Contact" value={row.owner?.contact} />
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Owner
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+                  <DetailRow label="Name" value={row.owner?.name} />
+                  <DetailRow label="CNIC" value={row.owner?.cnic} />
+                  <DetailRow label="Contact" value={row.owner?.contact} />
+                </div>
+                {row.owner?.picture && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Photo</p>
+                    <img
+                      src={row.owner.picture}
+                      alt="Owner"
+                      className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
+                    />
                   </div>
-                  {row.owner?.picture && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Photo</p>
-                      <img
-                        src={row.owner.picture}
-                        alt="Owner"
-                        className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
-                      />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                )}
+              </CardContent>
+            </Card>
 
-            {(row.driver?.name || row.driver?.cnic || row.driver?.contact || row.driver?.picture) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Driver
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
-                    <DetailRow label="Name" value={row.driver?.name} />
-                    <DetailRow label="CNIC" value={row.driver?.cnic} />
-                    <DetailRow label="Contact" value={row.driver?.contact} />
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Driver
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+                  <DetailRow label="Name" value={row.driver?.name} />
+                  <DetailRow label="CNIC" value={row.driver?.cnic} />
+                  <DetailRow label="Contact" value={row.driver?.contact} />
+                </div>
+                {row.driver?.picture && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Photo</p>
+                    <img
+                      src={row.driver.picture}
+                      alt="Driver"
+                      className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
+                    />
                   </div>
-                  {row.driver?.picture && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Photo</p>
-                      <img
-                        src={row.driver.picture}
-                        alt="Driver"
-                        className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
-                      />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                )}
+              </CardContent>
+            </Card>
 
-            {row.purposeOfDetention && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Purpose of Detention</CardTitle></CardHeader>
-                <CardContent className="rounded-lg border p-4">
-                  <p className="text-sm whitespace-pre-wrap break-words">{row.purposeOfDetention}</p>
-                </CardContent>
-              </Card>
-            )}
+            <Card>
+              <CardHeader><CardTitle className="text-base">Purpose of Detention</CardTitle></CardHeader>
+              <CardContent className="rounded-lg border p-4">
+                <p className="text-sm whitespace-pre-wrap break-words">{row.purposeOfDetention || "—"}</p>
+              </CardContent>
+            </Card>
 
             {row.mediaAttachments && row.mediaAttachments.length > 0 && (
               <Card>
@@ -686,14 +658,12 @@ export default function DetentionMemoDetailPage() {
               </Card>
             )}
 
-            {row.briefFacts && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Memo Description</CardTitle></CardHeader>
-                <CardContent className="rounded-lg border p-4">
-                  <p className="text-sm whitespace-pre-wrap break-words">{row.briefFacts}</p>
-                </CardContent>
-              </Card>
-            )}
+            <Card>
+              <CardHeader><CardTitle className="text-base">Memo Description</CardTitle></CardHeader>
+              <CardContent className="rounded-lg border p-4">
+                <p className="text-sm whitespace-pre-wrap break-words">{row.briefFacts || "—"}</p>
+              </CardContent>
+            </Card>
 
             {row.goodsItems && row.goodsItems.length > 0 && (
               <GoodsInformationBlock memoId={row.id} items={row.goodsItems} />
@@ -708,40 +678,30 @@ export default function DetentionMemoDetailPage() {
               description="All warehouse destruction sessions for this detention — view detailed reports with camera evidence and inventory deductions."
             />
 
-            {(row.seizingOfficerNotes || row.examiningOfficerNotes || row.detentionNotes || row.forwardingOfficerRemarks) && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Additional Information</CardTitle></CardHeader>
-                <CardContent className="rounded-lg border p-4 space-y-4">
-                  {row.seizingOfficerNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Seizing Officer Notes</p>
-                      <p className="text-sm whitespace-pre-wrap break-words">{row.seizingOfficerNotes}</p>
-                    </div>
-                  )}
-                  {row.examiningOfficerNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Examining Officer Notes</p>
-                      <p className="text-sm whitespace-pre-wrap break-words">{row.examiningOfficerNotes}</p>
-                    </div>
-                  )}
-                  {row.detentionNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Detention / Customs Clarification Notes</p>
-                      <p className="text-sm whitespace-pre-wrap break-words">{row.detentionNotes}</p>
-                    </div>
-                  )}
-                  {row.forwardingOfficerRemarks && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Forwarding Officer Remarks</p>
-                      <p className="text-sm whitespace-pre-wrap break-words">{row.forwardingOfficerRemarks}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+            <Card>
+              <CardHeader><CardTitle className="text-base">Additional Information</CardTitle></CardHeader>
+              <CardContent className="rounded-lg border p-4 space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Seizing Officer Notes</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{row.seizingOfficerNotes || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Examining Officer Notes</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{row.examiningOfficerNotes || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Detention / Customs Clarification Notes</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{row.detentionNotes || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Forwarding Officer Remarks</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{row.forwardingOfficerRemarks || "—"}</p>
+                </div>
+              </CardContent>
+            </Card>
 
             <Button asChild variant="outline" className="w-full sm:w-auto">
-              <Link to={ROUTES.DETENTION_MEMO}>
+              <Link to={listPath}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to list
               </Link>
