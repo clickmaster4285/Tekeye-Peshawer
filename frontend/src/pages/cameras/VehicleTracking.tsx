@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "react-router-dom"
 import {
   Car,
   ChevronLeft,
@@ -7,10 +8,12 @@ import {
   FileText,
   Filter,
   RefreshCw,
+  Route,
   Search,
   Settings2,
   X,
 } from "lucide-react"
+import { getVehicleJourneyPath, ROUTES } from "@/routes/config"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -119,7 +122,7 @@ export default function VehicleTrackingPage() {
         plate_number: applied.plate_number || undefined,
         date_from: applied.date_from || undefined,
         date_to: applied.date_to || undefined,
-        cleanup: true,
+        cleanup: false,
       }),
     refetchInterval: 8_000,
     placeholderData: (prev) => prev,
@@ -129,7 +132,6 @@ export default function VehicleTrackingPage() {
   const results = data?.results ?? []
   const total = data?.count ?? 0
   const totalPages = data?.total_pages ?? 1
-  const cleanup = data?.cleanup
 
   const updateFilters = (patch: Partial<AppliedFilters>) => {
     setFilters((f) => ({ ...f, ...patch }))
@@ -151,7 +153,7 @@ export default function VehicleTrackingPage() {
   return (
     <ModulePageLayout
       title="Number Plate Tracking"
-      description="Unique ANPR plate reads with crop and scene images. Filter by plate number and date/time."
+      description="Saved ANPR detections with plate crop, scene image, and licence plate number. Filter by plate number and date/time. Open Vehicle Journey to see the same plate across cameras and repeat passes."
       breadcrumbs={[{ label: "AI Computer Vision" }, { label: "Number Plate Tracking" }]}
     >
       <div className="grid gap-6">
@@ -168,7 +170,7 @@ export default function VehicleTrackingPage() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Unique plates</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Saved records</CardTitle>
               <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -187,7 +189,7 @@ export default function VehicleTrackingPage() {
               <div className="text-2xl font-bold">
                 {summary ? `${summary.match_rate}%` : "—"}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Valid plates kept after dedupe</p>
+              <p className="mt-1 text-xs text-muted-foreground">Pakistan-format plates among saved reads</p>
             </CardContent>
           </Card>
         </div>
@@ -250,23 +252,28 @@ export default function VehicleTrackingPage() {
             <div>
               <CardTitle>Plate Captures</CardTitle>
               <CardDescription>
-                One row per plate number (best OCR). Duplicate numbers and images are removed.
-                {cleanup && (cleanup.removed_rows > 0 || cleanup.deleted_files > 0)
-                  ? ` Cleaned ${cleanup.removed_rows} rows · ${cleanup.deleted_files} files.`
-                  : ""}{" "}
+                Each detection is saved with a plate crop, scene image, and OCR licence plate number.
                 Showing {results.length} of {total}
                 {hasActiveFilters ? " (filtered)" : ""}
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="gap-2"
-            >
-              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild variant="outline" className="gap-2">
+                <Link to={ROUTES.VEHICLE_JOURNEY}>
+                  <Route className="h-4 w-4" />
+                  Vehicle Journey
+                </Link>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {error ? (
@@ -280,7 +287,7 @@ export default function VehicleTrackingPage() {
               <p className="text-sm text-muted-foreground">
                 {hasActiveFilters
                   ? "No plate captures match your filters."
-                  : "No unique plate captures yet. Run an ANPR camera stream so plates are saved under media."}
+                  : "No plate records yet. Run an ANPR camera stream so each detection is saved with crop, scene, and plate number."}
               </p>
             ) : (
               <>
@@ -315,7 +322,17 @@ export default function VehicleTrackingPage() {
                             />
                           </TableCell>
                           <TableCell className="font-semibold tracking-wide">
-                            {row.plate_number || "—"}
+                            {row.plate_number ? (
+                              <Link
+                                to={getVehicleJourneyPath(row.plate_number)}
+                                className="hover:underline"
+                                title="Open vehicle journey"
+                              >
+                                {row.plate_number}
+                              </Link>
+                            ) : (
+                              "—"
+                            )}
                           </TableCell>
                           <TableCell>{row.camera_key || "—"}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -366,31 +383,31 @@ export default function VehicleTrackingPage() {
       </div>
 
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[92vh] w-[min(96vw,88rem)] max-w-none overflow-y-auto sm:max-w-[88rem]">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="pr-8 text-xl">
               {preview?.plate_number || "Plate"} · {preview?.camera_key}
             </DialogTitle>
           </DialogHeader>
           {preview ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-5 lg:grid-cols-2">
               <div>
-                <p className="mb-2 text-xs text-muted-foreground">Plate crop</p>
+                <p className="mb-2 text-sm text-muted-foreground">Plate crop</p>
                 <img
                   src={resolveMediaUrl(preview.plate_image)}
                   alt="plate"
-                  className="max-h-64 w-full rounded border object-contain bg-black"
+                  className="max-h-[70vh] min-h-[18rem] w-full rounded-lg border bg-black object-contain"
                 />
               </div>
               <div>
-                <p className="mb-2 text-xs text-muted-foreground">Full frame</p>
+                <p className="mb-2 text-sm text-muted-foreground">Full frame</p>
                 <img
                   src={resolveMediaUrl(preview.frame_image)}
                   alt="frame"
-                  className="max-h-64 w-full rounded border object-contain bg-black"
+                  className="max-h-[70vh] min-h-[18rem] w-full rounded-lg border bg-black object-contain"
                 />
               </div>
-              <p className="text-sm text-muted-foreground sm:col-span-2">
+              <p className="text-sm text-muted-foreground lg:col-span-2">
                 {formatTime(preview.timestamp)} · det {(preview.det_conf * 100).toFixed(0)}% · ocr{" "}
                 {(preview.ocr_conf * 100).toFixed(0)}%
               </p>

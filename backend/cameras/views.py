@@ -347,7 +347,7 @@ class CameraViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="plate-captures")
     def plate_captures(self, request):
-        """Unique ANPR plate reads (deduped); deletes duplicate media files."""
+        """Saved ANPR plate records: crop image, scene image, and OCR plate number."""
         import inspect
 
         from .plate_captures import load_plate_captures, plate_capture_summary
@@ -365,7 +365,7 @@ class CameraViewSet(viewsets.ModelViewSet):
         plate_number = (request.query_params.get("plate_number") or "").strip()
         date_from = (request.query_params.get("date_from") or "").strip()
         date_to = (request.query_params.get("date_to") or "").strip()
-        cleanup = str(request.query_params.get("cleanup", "true")).lower() in ("1", "true", "yes")
+        cleanup = str(request.query_params.get("cleanup", "false")).lower() in ("1", "true", "yes")
 
         # Pass only kwargs supported by the installed load_plate_captures()
         # (avoids 500 if an older plate_captures.py is still on the server).
@@ -390,6 +390,49 @@ class CameraViewSet(viewsets.ModelViewSet):
                 "summary": plate_capture_summary(),
             }
         )
+
+    @action(detail=False, methods=["get"], url_path="vehicle-journeys")
+    def vehicle_journeys(self, request):
+        """Vehicles grouped by plate: cameras, pass count, and last seen."""
+        from .plate_captures import load_vehicle_journeys
+
+        try:
+            page = int(request.query_params.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size") or request.query_params.get("limit") or 25)
+        except (TypeError, ValueError):
+            page_size = 25
+        try:
+            min_passes = int(request.query_params.get("min_passes", 2))
+        except (TypeError, ValueError):
+            min_passes = 2
+        q = (request.query_params.get("q") or request.query_params.get("plate_number") or "").strip()
+        date_from = (request.query_params.get("date_from") or "").strip()
+        date_to = (request.query_params.get("date_to") or "").strip()
+        include_path = str(request.query_params.get("include_path", "false")).lower() in ("1", "true", "yes")
+        return Response(
+            load_vehicle_journeys(
+                page=page,
+                page_size=page_size,
+                q=q,
+                min_passes=min_passes,
+                date_from=date_from,
+                date_to=date_to,
+                include_path=include_path,
+            )
+        )
+
+    @action(detail=False, methods=["get"], url_path=r"vehicle-journeys/(?P<plate_key>[^/]+)")
+    def vehicle_journey_detail(self, request, plate_key=None):
+        """Full sighting timeline for one number plate (including OCR variants)."""
+        from .plate_captures import load_vehicle_journey
+
+        data = load_vehicle_journey(plate_key or "")
+        if not data:
+            return Response({"detail": "No journey found for this plate."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(data)
 
     @action(detail=True, methods=["get"], url_path="ml-live/detections")
     def ml_live_detections_action(self, request, pk=None):
@@ -535,11 +578,13 @@ class CameraStreamListView(APIView):
                     "ml_stream_key": cam.stream_key,
                     "ml_live_stream_url": ml_live_mjpeg_public_url(
                         cam.stream_key,
+                        rtsp_url=cam.effective_stream_url(),
                         purpose=cam.purpose,
                         purposes=cam.purpose_list(),
                     ),
                     "raw_stream_url": ml_live_mjpeg_raw_public_url(
                         cam.stream_key,
+                        rtsp_url=cam.effective_stream_url(),
                         purpose=cam.purpose,
                         purposes=cam.purpose_list(),
                     ),

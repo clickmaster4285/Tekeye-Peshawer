@@ -147,6 +147,7 @@ export const CUSTOMS_STATIONS = [
   // "Customs Faisalabad",
   "Yarik",
   "DI Khan",
+  "SWH Ratta Kulachi",
   "Peshawar",
   // "Customs Quetta",
   "Nowshera",

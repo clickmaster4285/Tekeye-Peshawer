@@ -13,6 +13,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDetentionMemoDetailPath, ROUTES } from "@/routes/config"
 import type { DetentionMemoApiRecord } from "@/lib/detention-memo-api"
+import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
 
 function DetailRow({ label, value }: { label: string; value: string | undefined }) {
   return (
@@ -52,6 +53,7 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
             <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
               <DetailRow label="Case No." value={memo.caseNo} />
               <DetailRow label="Detention Memo No." value={memo.referenceNumber || "—"} />
+              <DetailRow label="FIR Number" value={memo.firNumber} />
               <DetailRow label="Date/Time of occurrence" value={memo.dateTimeOccurrence} />
               <DetailRow label="Place of occurrence" value={memo.placeOfOccurrence} />
               <DetailRow label="Date/Time of detention" value={memo.dateTimeDetention} />
@@ -59,6 +61,12 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
               <DetailRow label="Detention Type" value={memo.detentionType} />
               <DetailRow label="Directorate" value={memo.directorate} />
               <DetailRow label="Reason for detention" value={memo.reasonForDetention} />
+              <DetailRow label="Location of Detention" value={memo.locationOfDetention} />
+              <DetailRow label="Search / Chassis Number" value={memo.searchChassisNumber} />
+              <DetailRow label="Receipt Officer" value={memo.receiptOfficer} />
+              <DetailRow label="GD Number" value={memo.gdNumber} />
+              <DetailRow label="GD Number 2" value={memo.gdNumber2} />
+              <DetailRow label="Disposition Status" value={memo.dispositionStatus} />
             </div>
           </CardContent>
         </Card>
@@ -95,69 +103,64 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
           <DetailRow label="Goods detained at" value={memo.whereDeposited} />
           <DetailRow label="Settlement Status" value={memo.settlementStatus} />
           <DetailRow label="Verification Status" value={memo.verificationStatus} />
+          <DetailRow label="Memo QR Number" value={memo.memoQrCodeNumber || qrNumber} />
         </CardContent>
       </Card>
 
-      {(memo.owner?.name || memo.owner?.cnic || memo.owner?.contact || memo.owner?.picture) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Owner
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
-              <DetailRow label="Name" value={memo.owner?.name} />
-              <DetailRow label="CNIC" value={memo.owner?.cnic} />
-              <DetailRow label="Contact" value={memo.owner?.contact} />
-            </div>
-            {memo.owner?.picture && (
-              <img
-                src={memo.owner.picture}
-                alt="Owner"
-                className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            Owner
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+            <DetailRow label="Name" value={memo.owner?.name} />
+            <DetailRow label="CNIC" value={memo.owner?.cnic} />
+            <DetailRow label="Contact" value={memo.owner?.contact} />
+          </div>
+          {memo.owner?.picture && (
+            <img
+              src={memo.owner.picture}
+              alt="Owner"
+              className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
+            />
+          )}
+        </CardContent>
+      </Card>
 
-      {(memo.driver?.name || memo.driver?.cnic || memo.driver?.contact || memo.driver?.picture) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Driver
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
-              <DetailRow label="Name" value={memo.driver?.name} />
-              <DetailRow label="CNIC" value={memo.driver?.cnic} />
-              <DetailRow label="Contact" value={memo.driver?.contact} />
-            </div>
-            {memo.driver?.picture && (
-              <img
-                src={memo.driver.picture}
-                alt="Driver"
-                className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            Driver
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+            <DetailRow label="Name" value={memo.driver?.name} />
+            <DetailRow label="CNIC" value={memo.driver?.cnic} />
+            <DetailRow label="Contact" value={memo.driver?.contact} />
+          </div>
+          {memo.driver?.picture && (
+            <img
+              src={memo.driver.picture}
+              alt="Driver"
+              className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
+            />
+          )}
+        </CardContent>
+      </Card>
 
-      {memo.purposeOfDetention && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Purpose of Detention</CardTitle>
-          </CardHeader>
-          <CardContent className="rounded-lg border p-4">
-            <p className="text-sm whitespace-pre-wrap break-words">{memo.purposeOfDetention}</p>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Purpose of Detention</CardTitle>
+        </CardHeader>
+        <CardContent className="rounded-lg border p-4">
+          <p className="text-sm whitespace-pre-wrap break-words">{memo.purposeOfDetention || "—"}</p>
+        </CardContent>
+      </Card>
 
       {memo.mediaAttachments && memo.mediaAttachments.length > 0 && (
         <Card>
@@ -199,16 +202,14 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
         </Card>
       )}
 
-      {memo.briefFacts && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Memo Description</CardTitle>
-          </CardHeader>
-          <CardContent className="rounded-lg border p-4">
-            <p className="text-sm whitespace-pre-wrap break-words">{memo.briefFacts}</p>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Memo Description</CardTitle>
+        </CardHeader>
+        <CardContent className="rounded-lg border p-4">
+          <p className="text-sm whitespace-pre-wrap break-words">{memo.briefFacts || "—"}</p>
+        </CardContent>
+      </Card>
 
       {memo.goodsItems && memo.goodsItems.length > 0 && (
         <Card>
@@ -221,11 +222,11 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
           <CardContent className="rounded-lg border p-0">
             <div className="overflow-x-auto">
               <ScrollArea className="w-full">
-                <Table>
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow>
                       <TableHead>QR Code</TableHead>
-                      <TableHead>Description</TableHead>
+                      <TableHead className="w-[22%]">Description</TableHead>
                       <TableHead>PCT Code</TableHead>
                       <TableHead>Qty</TableHead>
                       <TableHead>Unit</TableHead>
@@ -233,7 +234,7 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
                       <TableHead>Assessable Value (PKR)</TableHead>
                       <TableHead>Perishable</TableHead>
                       <TableHead>ID / Chassis</TableHead>
-                      <TableHead>Item Notes</TableHead>
+                      <TableHead className="w-[16%]">Item Notes</TableHead>
                       <TableHead>Images</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -252,8 +253,8 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium break-words min-w-[120px]">
-                          {item.description || "—"}
+                        <TableCell className={`${goodsLineCellClass} font-medium`}>
+                          <GoodsLineText>{item.description || "—"}</GoodsLineText>
                         </TableCell>
                         <TableCell className="font-mono">{item.pctCode?.trim() || "—"}</TableCell>
                         <TableCell>{item.quantity || "—"}</TableCell>
@@ -262,8 +263,8 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
                         <TableCell>{item.assessableValuePkr?.trim() || "—"}</TableCell>
                         <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
                         <TableCell>{item.identificationRef || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                          {item.itemNotes || "—"}
+                        <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                          <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                         </TableCell>
                         <TableCell>
                           {item.images && item.images.length > 0 ? (
@@ -291,54 +292,37 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
         </Card>
       )}
 
-      {(memo.seizingOfficerNotes ||
-        memo.examiningOfficerNotes ||
-        memo.detentionNotes ||
-        memo.forwardingOfficerRemarks) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Additional Information</CardTitle>
-          </CardHeader>
-          <CardContent className="rounded-lg border p-4 space-y-4">
-            {memo.seizingOfficerNotes && (
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                  Seizing Officer Notes
-                </p>
-                <p className="text-sm whitespace-pre-wrap break-words">{memo.seizingOfficerNotes}</p>
-              </div>
-            )}
-            {memo.examiningOfficerNotes && (
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                  Examining Officer Notes
-                </p>
-                <p className="text-sm whitespace-pre-wrap break-words">
-                  {memo.examiningOfficerNotes}
-                </p>
-              </div>
-            )}
-            {memo.detentionNotes && (
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                  Detention / Customs Clarification Notes
-                </p>
-                <p className="text-sm whitespace-pre-wrap break-words">{memo.detentionNotes}</p>
-              </div>
-            )}
-            {memo.forwardingOfficerRemarks && (
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                  Forwarding Officer Remarks
-                </p>
-                <p className="text-sm whitespace-pre-wrap break-words">
-                  {memo.forwardingOfficerRemarks}
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Additional Information</CardTitle>
+        </CardHeader>
+        <CardContent className="rounded-lg border p-4 space-y-4">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Seizing Officer Notes
+            </p>
+            <p className="text-sm whitespace-pre-wrap break-words">{memo.seizingOfficerNotes || "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Examining Officer Notes
+            </p>
+            <p className="text-sm whitespace-pre-wrap break-words">{memo.examiningOfficerNotes || "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Detention / Customs Clarification Notes
+            </p>
+            <p className="text-sm whitespace-pre-wrap break-words">{memo.detentionNotes || "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Forwarding Officer Remarks
+            </p>
+            <p className="text-sm whitespace-pre-wrap break-words">{memo.forwardingOfficerRemarks || "—"}</p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

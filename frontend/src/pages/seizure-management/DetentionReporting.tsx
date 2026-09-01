@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
-import { AlertTriangle, Download, Search } from "lucide-react"
+import { AlertTriangle, Eye, Search } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
+import { TableActionGroup, TableActionIcon } from "@/components/seizure/table-action-icon"
 import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ExportMenu } from "@/components/seizure/export-menu"
+import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
+import { downloadDetentionMemoCsv } from "@/lib/detention-memo-csv"
+import { useBatchPdfExport } from "@/hooks/use-batch-pdf-export"
+import { PdfExportHost } from "@/components/seizure/pdf-export-host"
 import {
   Table,
   TableBody,
@@ -68,32 +72,20 @@ export default function DetentionReportingPage() {
     return { total: rows.length, overdue, withAssessment }
   }, [rows, assessedMemoIds])
 
+  const pdf = useBatchPdfExport<DetentionMemoApiRecord>(`detention-report-${new Date().toISOString().slice(0, 10)}.pdf`)
+
   const exportCsv = () => {
-    const header = ["Case No", "Detention Date", "Place", "Verification", "Days", "Assessment", "60-Day Status"]
-    const lines = filtered.map((r) => {
-      const days = daysSinceDetention(r.dateTimeDetention)
-      const hasAssessment = assessedMemoIds.has(r.id)
-      const windowStatus =
-        days === null ? "" : days > DETENTION_WINDOW_DAYS ? "Overdue" : "Within window"
-      return [
-        r.caseNo,
-        r.dateTimeDetention,
-        r.placeOfDetention,
-        r.verificationStatus ?? "",
-        days ?? "",
-        hasAssessment ? "Yes" : "No",
-        windowStatus,
-      ]
-        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-        .join(",")
+    downloadDetentionMemoCsv(`detention-report-${new Date().toISOString().slice(0, 10)}.csv`, filtered, {
+      headers: ["Days Since Detention", "Assessment", "60-Day Status"],
+      values: (r) => {
+        const days = daysSinceDetention(r.dateTimeDetention)
+        return [
+          days ?? "",
+          assessedMemoIds.has(r.id) ? "Yes" : "No",
+          days === null ? "" : days > DETENTION_WINDOW_DAYS ? "Overdue" : "Within window",
+        ]
+      },
     })
-    const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `detention-report-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   return (
@@ -139,22 +131,25 @@ export default function DetentionReportingPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button variant="outline" onClick={exportCsv} disabled={filtered.length === 0}>
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
+            <div className="shrink-0 sm:ml-auto">
+              <ExportMenu
+                disabled={filtered.length === 0}
+                onExportCsv={exportCsv}
+                onExportPdf={() => pdf.start(filtered)}
+              />
+            </div>
           </div>
 
-          <Table>
+          <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
             <TableHeader>
               <TableRow>
-                <TableHead>Case No</TableHead>
-                <TableHead>Detention Date</TableHead>
-                <TableHead>Place</TableHead>
-                <TableHead>Days</TableHead>
-                <TableHead>Assessment</TableHead>
-                <TableHead>Window</TableHead>
-                <TableHead className="text-right">Memo</TableHead>
+                <TableHead className="w-[16%]">Case No</TableHead>
+                <TableHead className="w-[14%]">Detention Date</TableHead>
+                <TableHead className="w-[22%]">Place</TableHead>
+                <TableHead className="w-[8%]">Days</TableHead>
+                <TableHead className="w-[12%]">Assessment</TableHead>
+                <TableHead className="w-[14%]">Window</TableHead>
+                <TableHead className="w-[7.5rem] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -177,9 +172,9 @@ export default function DetentionReportingPage() {
                   const hasAssessment = assessedMemoIds.has(row.id)
                   return (
                     <TableRow key={row.id}>
-                      <TableCell className="font-medium">{row.caseNo}</TableCell>
-                      <TableCell>{row.dateTimeDetention?.slice(0, 10) ?? "—"}</TableCell>
-                      <TableCell>{row.placeOfDetention}</TableCell>
+                      <TableCell className="font-medium truncate" title={row.caseNo}>{row.caseNo}</TableCell>
+                      <TableCell className="truncate">{row.dateTimeDetention?.slice(0, 10) ?? "—"}</TableCell>
+                      <TableCell className="truncate" title={row.placeOfDetention}>{row.placeOfDetention}</TableCell>
                       <TableCell>{days ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant={hasAssessment ? "default" : "outline"}>
@@ -196,10 +191,12 @@ export default function DetentionReportingPage() {
                           <Badge variant="secondary">OK</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="link" size="sm" asChild>
-                          <Link to={getDetentionMemoDetailPath(row.id)}>View</Link>
-                        </Button>
+                      <TableCell className="overflow-visible p-2 text-right align-middle">
+                        <TableActionGroup>
+                          <TableActionIcon label="View memo" to={getDetentionMemoDetailPath(row.id)}>
+                            <Eye className="h-4 w-4" />
+                          </TableActionIcon>
+                        </TableActionGroup>
                       </TableCell>
                     </TableRow>
                   )
@@ -209,6 +206,11 @@ export default function DetentionReportingPage() {
           </Table>
         </CardContent>
       </Card>
+      <PdfExportHost hostRef={pdf.hostRef}>
+        {pdf.items?.map((row) => (
+          <DetentionMemoReportPrint key={row.id} row={row} embedded />
+        ))}
+      </PdfExportHost>
     </ModulePageLayout>
   )
 }

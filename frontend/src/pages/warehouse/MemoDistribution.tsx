@@ -438,7 +438,7 @@ export default function MemoDistributionPage() {
                     Selected item quantities will be subtracted from stock on completion when matched.
                   </p>
                   <Button variant="link" className="h-auto p-0 text-xs" asChild>
-                    <Link to={ROUTES.DETENTION_MEMO}>View detention memos</Link>
+                    <Link to={ROUTES.WAREHOUSE_DETENTION_MEMO}>View detention memos</Link>
                   </Button>
                 </div>
               )}

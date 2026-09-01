@@ -65,6 +65,7 @@ export function rolesAvailableToLocationAdmin(): string[] {
     "STOCK_CONTROLLER",
     "IT_ADMIN",
     "AUDITOR",
+    "PRAL",
     "DETECTION_OFFICER",
     "FIR_OFFICER",
     "INVESTIGATION_OFFICER",

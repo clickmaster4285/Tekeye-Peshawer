@@ -9,4 +9,8 @@ declare module "qrcode" {
     text: string,
     options?: QRCodeToDataURLOptions
   ): Promise<string>
+  const QRCode: {
+    toDataURL: typeof toDataURL
+  }
+  export default QRCode
 }

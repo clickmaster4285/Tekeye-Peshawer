@@ -33,7 +33,7 @@ type MlCameraFeedProps = {
   onScanStart?: () => void
 }
 
-const TEKEYE_LOGO_SRC = "/pakistan-customs-logo.png"
+const TEKEYE_LOGO_SRC = "/custom-logo.jpeg"
 
 function StreamBrandMarks() {
   return (
@@ -53,7 +53,7 @@ function StreamBrandMarks() {
         aria-hidden
       >
         <span className="text-xl font-extrabold uppercase tracking-[0.16em] text-white sm:text-2xl">
-          TekEye
+          CIIS
         </span>
       </div>
     </>
@@ -75,12 +75,21 @@ export function MlCameraFeed({
   const [streamError, setStreamError] = useState<string | null>(null)
   const [streamRetry, setStreamRetry] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible"
+  )
   const retryTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    const onVis = () => setPageVisible(document.visibilityState === "visible")
+    document.addEventListener("visibilitychange", onVis)
+    return () => document.removeEventListener("visibilitychange", onVis)
+  }, [])
 
   const mlLiveSrc = getMlLiveMultipartUrl(camera)
   const rawMjpegSrc = !mlLiveSrc && camera.is_rtsp ? getRawMjpegUrl(camera) : null
   const streamSrcBase = mlLiveSrc || rawMjpegSrc
-  const streamSrc = streamSrcBase
+  const streamSrc = streamSrcBase && pageVisible
     ? `${streamSrcBase}${streamSrcBase.includes("?") ? "&" : "?"}r=${streamRetry}`
     : null
 
@@ -94,7 +103,7 @@ export function MlCameraFeed({
 
   useEffect(() => {
     // Detection JSON is optional — the live MJPEG already includes overlays.
-    if (!pollMl || !mlLiveSrc) return
+    if (!pollMl || !mlLiveSrc || !pageVisible) return
     let cancelled = false
 
     const run = async () => {
@@ -126,7 +135,7 @@ export function MlCameraFeed({
       cancelled = true
       window.clearInterval(id)
     }
-  }, [camera.id, mlLiveSrc, pollMl, pollIntervalMs, onDetections, onMlError, onScanStart])
+  }, [camera.id, mlLiveSrc, pollMl, pollIntervalMs, onDetections, onMlError, onScanStart, pageVisible])
 
   useEffect(() => {
     if (!isFullscreen) return

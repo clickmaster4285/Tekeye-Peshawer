@@ -15,6 +15,7 @@ export const PAGE_LOADERS = {
   PreRegistration: () => import("@/pages/registration/PreRegistration").then((m) => ({ default: m.default })),
   WalkInRegistration: () => import("@/pages/registration/WalkInRegistration").then((m) => ({ default: m.default })),
   VisitorDetail: () => import("@/pages/registration/VisitorDetail").then((m) => ({ default: m.default })),
+  VisitorEdit: () => import("@/pages/registration/VisitorEdit").then((m) => ({ default: m.default })),
   StreamedUpload: () => import("@/pages/registration/StreamedUpload").then((m) => ({ default: m.default })),
   PhotoCapture: () => import("@/pages/registration/PhotoCapture").then((m) => ({ default: m.default })),
   QRCodeGeneration: () => import("@/pages/registration/QRCodeGeneration").then((m) => ({ default: m.default })),
@@ -160,9 +161,15 @@ export const PAGE_LOADERS = {
   PersonJourney: () => import("@/pages/operations/PersonJourney").then((m) => ({ default: m.default })),
   PersonJourneyDetail: () =>
     import("@/pages/operations/PersonJourneyDetail").then((m) => ({ default: m.default })),
+  GpsTracking: () => import("@/pages/operations/GpsTracking").then((m) => ({ default: m.default })),
+  VideoRecovery: () =>
+    import("@/pages/video-recovery/VideoRecovery").then((m) => ({ default: m.default })),
   AnprSettings: () => import("@/pages/cameras/AnprSettings").then((m) => ({ default: m.default })),
   AnprVehicleTracking: () =>
     import("@/pages/cameras/VehicleTracking").then((m) => ({ default: m.default })),
+  VehicleJourney: () => import("@/pages/cameras/VehicleJourney").then((m) => ({ default: m.default })),
+  VehicleJourneyDetail: () =>
+    import("@/pages/cameras/VehicleJourneyDetail").then((m) => ({ default: m.default })),
   NumberPlateDetection: () =>
     import("@/pages/cameras/NumberPlateDetection").then((m) => ({ default: m.default })),
   AnomalyDetection: () => import("@/pages/cameras/AnomalyDetection").then((m) => ({ default: m.default })),
@@ -170,6 +177,7 @@ export const PAGE_LOADERS = {
   PredictiveInsights: () => import("@/pages/reports/PredictiveInsights").then((m) => ({ default: m.default })),
   DataVisualization: () => import("@/pages/reports/DataVisualization").then((m) => ({ default: m.default })),
   Employees: () => import("@/pages/hr/Employees").then((m) => ({ default: m.default })),
+  Recruitment: () => import("@/pages/hr/Recruitment").then((m) => ({ default: m.default })),
   AddStaff: () => import("@/pages/hr/AddStaff").then((m) => ({ default: m.default })),
   EmployeeDetail: () => import("@/pages/hr/EmployeeDetail").then((m) => ({ default: m.default })),
   EmployeeEdit: () => import("@/pages/hr/EmployeeEdit").then((m) => ({ default: m.default })),
@@ -191,6 +199,7 @@ export const PAGE_LOADERS = {
   ActivityLogDetail: () => import("@/pages/settings/ActivityLogDetail").then((m) => ({ default: m.default })),
   TableOfContents: () => import("@/pages/TableOfContents").then((m) => ({ default: m.default })),
   PlaybackSearch: () => import("@/pages/operations/PlaybackSearch").then((m) => ({ default: m.default })),
+  VideoImageSearch: () => import("@/pages/operations/VideoImageSearch").then((m) => ({ default: m.default })),
   ThermalImaging: () => import("@/pages/operations/ThermalImaging").then((m) => ({ default: m.default })),
   AlertsNotifications: () => import("@/pages/operations/AlertsNotifications").then((m) => ({ default: m.default })),
   IncidentManagement: () => import("@/pages/operations/IncidentManagement").then((m) => ({ default: m.default })),

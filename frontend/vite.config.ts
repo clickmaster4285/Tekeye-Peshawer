@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite"
 import react from "@vitejs/plugin-react"
+import basicSsl from "@vitejs/plugin-basic-ssl"
 import { VitePWA } from "vite-plugin-pwa"
 import * as path from "path"
 import * as fs from "fs"
@@ -38,11 +39,12 @@ export default defineConfig(({ mode }) => {
     publicDir: path.join(projectRoot, "public"),
     plugins: [
       ensureDistIconPlugin(),
+      basicSsl(),
       react(),
       VitePWA({
         registerType: "autoUpdate",
         includeAssets: [
-          "pakistan-customs-logo.png",
+          "custom-logo.jpeg",
           "icon.svg",
           "models/blazeface/model.json",
           "models/blazeface/group1-shard1of1.bin",
@@ -62,15 +64,15 @@ export default defineConfig(({ mode }) => {
           dir: "ltr",
           icons: [
             {
-              src: "pakistan-customs-logo.png",
+              src: "custom-logo.jpeg",
               sizes: "512x512",
-              type: "image/png",
+              type: "image/jpeg",
               purpose: "any",
             },
             {
-              src: "pakistan-customs-logo.png",
+              src: "custom-logo.jpeg",
               sizes: "192x192",
-              type: "image/png",
+              type: "image/jpeg",
               purpose: "any",
             },
           ],
@@ -96,7 +98,15 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     optimizeDeps: {
-      include: ["qrcode"],
+      include: [
+        "qrcode",
+        "react",
+        "react-dom",
+        "react-router-dom",
+        "@tanstack/react-query",
+        "formik",
+        "yup",
+      ],
     },
     build: {
       commonjsOptions: {
@@ -111,6 +121,18 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 3000,
+      warmup: {
+        clientFiles: [
+          "./src/main.tsx",
+          "./src/routes.tsx",
+          "./src/components/dashboard-layout.tsx",
+          "./src/components/dashboard/sidebar.tsx",
+          "./src/pages/dashboard/Dashboard.tsx",
+          "./src/pages/registration/WalkInRegistration.tsx",
+          "./src/pages/registration/PreRegistration.tsx",
+          "./src/pages/vms/VisitorManagementOverview.tsx",
+        ],
+      },
       ...(useDevProxy
         ? {
             proxy: {
@@ -142,6 +164,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       port: 3000,
+      host: true,
     },
   }
 })

@@ -15,6 +15,7 @@ Pipeline (decoupled — capture / infer / render never block each other):
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -99,6 +100,22 @@ def _boot_camera_ips() -> list[str]:
     if not raw:
         return []
     return [ip.strip() for ip in raw.split(",") if ip.strip()]
+
+
+_CAM_KEY_RE = re.compile(r"^cam-\d+$", re.IGNORECASE)
+_IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def _key_may_be_rtsp_host(key: str) -> bool:
+    """True only when the stream key looks like an IP / hostname, not cam-{id}."""
+    text = (key or "").strip()
+    if not text or _CAM_KEY_RE.match(text):
+        return False
+    if _IPV4_RE.match(text):
+        return True
+    if "." in text and not text.startswith("cam-"):
+        return True
+    return text in _boot_camera_ips()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -223,6 +240,7 @@ class CameraStream:
     def __init__(self, rtsp_url: str, label: str, drain_reads: int = 2):
         self.rtsp_url = rtsp_url
         self.label = label
+        self.keep_native = False
         self.drain_reads = max(1, drain_reads)
         self.lock = threading.Lock()
         self.frame: np.ndarray | None = None
@@ -356,10 +374,11 @@ class FfmpegCameraStream:
         → MJPEG pipe → Latest Frame Buffer → YOLO / Render / Browser
     """
 
-    def __init__(self, rtsp_url: str, label: str, ffmpeg_path: str):
+    def __init__(self, rtsp_url: str, label: str, ffmpeg_path: str, keep_native: bool = False):
         self.rtsp_url = rtsp_url
         self.label = label
         self.ffmpeg_path = ffmpeg_path
+        self.keep_native = bool(keep_native)
         self.lock = threading.Lock()
         self.frame: np.ndarray | None = None
         self.frame_seq = 0
@@ -373,14 +392,16 @@ class FfmpegCameraStream:
         self._logged_res = False
         self._use_nvdec = _use_nvdec(ffmpeg_path)
         # Prefer GPU scale when NVDEC is on; fall back to CPU scale on ffmpeg errors.
-        self._use_cuda_scale = self._use_nvdec
+        # Native/4K ANPR path skips FFmpeg scale entirely.
+        self._use_cuda_scale = self._use_nvdec and not self.keep_native
         self._last_stderr = ""
         self.thread = threading.Thread(target=self._run, daemon=True, name=f"cam-{label}")
 
     def _ffmpeg_cmd(self) -> list[str]:
         """
-        Decode with NVDEC when available, scale to 1080p in FFmpeg, then MJPEG pipe.
-        Browser/YOLO never see full 4K frames on this path.
+        Decode with NVDEC when available.
+        Default: scale to 1080p in FFmpeg, then MJPEG pipe.
+        ANPR (keep_native): leave the original 4K frame in the buffer.
         """
         cmd: list[str] = [
             self.ffmpeg_path,
@@ -396,7 +417,11 @@ class FfmpegCameraStream:
                 "-hwaccel_device",
                 _cuda_device_index(),
             ]
-            if self._use_cuda_scale and _rtsp_scale_filter(True):
+            if (
+                not self.keep_native
+                and self._use_cuda_scale
+                and _rtsp_scale_filter(True)
+            ):
                 # Keep frames on GPU until after scale_cuda.
                 cmd += ["-hwaccel_output_format", "cuda"]
 
@@ -412,7 +437,9 @@ class FfmpegCameraStream:
             "-an",
         ]
 
-        vf = _rtsp_scale_filter(use_cuda_scale=bool(self._use_nvdec and self._use_cuda_scale))
+        vf = None
+        if not self.keep_native:
+            vf = _rtsp_scale_filter(use_cuda_scale=bool(self._use_nvdec and self._use_cuda_scale))
         if vf:
             cmd += ["-vf", vf]
 
@@ -420,7 +447,7 @@ class FfmpegCameraStream:
             "-f",
             "mjpeg",
             "-q:v",
-            "5",
+            "2" if self.keep_native else "5",
             "-",
         ]
         return cmd
@@ -496,7 +523,10 @@ class FfmpegCameraStream:
 
     def _run(self) -> None:
         sw, sh = _rtsp_scale_size()
-        scale_note = f"scale={sw}x{sh}" if (sw or sh) else "native"
+        if self.keep_native:
+            scale_note = "native-4K"
+        else:
+            scale_note = f"scale={sw}x{sh}" if (sw or sh) else "native"
         if self._use_nvdec:
             print(
                 f"[live] {self.label} opening GPU NVDEC + FFmpeg {scale_note} "
@@ -514,7 +544,9 @@ class FfmpegCameraStream:
             if not self._use_nvdec:
                 self._use_cuda_scale = False
             decode_tag = "ffmpeg+nvdec" if self._use_nvdec else "ffmpeg"
-            if self._use_nvdec and self._use_cuda_scale:
+            if self.keep_native:
+                decode_tag += "+native"
+            elif self._use_nvdec and self._use_cuda_scale:
                 decode_tag += "+scale_cuda"
             elif sw or sh:
                 decode_tag += "+scale"
@@ -603,16 +635,24 @@ class FfmpegCameraStream:
         self.thread.join(timeout=2.0)
 
 
-def create_camera_stream(rtsp_url: str, label: str) -> CameraStream | FfmpegCameraStream:
+def create_camera_stream(
+    rtsp_url: str,
+    label: str,
+    keep_native: bool = False,
+) -> CameraStream | FfmpegCameraStream:
     # GPU NVDEC requires the ffmpeg path — skip OpenCV when NVDEC is requested.
     backend = _rtsp_decode_backend()
     ffmpeg = _resolve_ffmpeg_path()
     if backend == "opencv" and not _nvdec_requested():
-        return CameraStream(rtsp_url, label)
+        stream = CameraStream(rtsp_url, label)
+        stream.keep_native = bool(keep_native)
+        return stream
     if ffmpeg:
-        return FfmpegCameraStream(rtsp_url, label, ffmpeg)
+        return FfmpegCameraStream(rtsp_url, label, ffmpeg, keep_native=keep_native)
     print(f"[live] ffmpeg not found — falling back to OpenCV for {label}")
-    return CameraStream(rtsp_url, label)
+    stream = CameraStream(rtsp_url, label)
+    stream.keep_native = bool(keep_native)
+    return stream
 
 
 def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_scale: float = 0.55) -> np.ndarray:
@@ -626,10 +666,16 @@ def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_s
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     for det in detections:
-        name = str(det.get("label", ""))
+        display_id = str(det.get("display_id") or det.get("global_object_id") or "").strip()
+        name = str(det.get("label") or det.get("class_name") or "")
         conf = float(det.get("confidence", 0))
         x1, y1, x2, y2 = det.get("bbox", [0, 0, 0, 0])
-        is_unknown = name.lower() == "unknown" or name.lower().startswith("unknown:")
+        is_unknown = (
+            bool(det.get("is_unknown"))
+            or name.lower() == "unknown"
+            or name.lower().startswith("unknown")
+            or bool(_OBJECT_ID_LABEL.match(name))
+        )
         is_alert = bool(det.get("alert"))
         if is_alert:
             color = (0, 0, 255)
@@ -638,7 +684,11 @@ def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_s
         else:
             color = (0, 220, 0)
         cv2.rectangle(output, (int(x1), int(y1)), (int(x2), int(y2)), color, box_thickness)
-        label = f"{name} {conf:.2f}"
+        if display_id and display_id.lower() not in name.lower():
+            name = f"{display_id} {name}".strip()
+        elif display_id and not name:
+            name = display_id
+        label = f"{name} {conf:.2f}".strip()
         (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
         text_x = int(x1)
         text_y = max(text_h + 4, int(y1) - 4)
@@ -654,13 +704,37 @@ def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_s
 
 
 _GENERIC_FACE_LABELS = frozenset({"", "unknown", "person", "face"})
+_OBJECT_ID_LABEL = re.compile(r"^(?:gp|go|gv|t)\d+$", re.IGNORECASE)
 
 
 def _is_generic_face_label(label: str) -> bool:
     value = (label or "").strip().lower()
     if not value or value in _GENERIC_FACE_LABELS:
         return True
-    return value.startswith("unknown:")
+    if value.startswith("unknown") or value.startswith("face:unknown"):
+        return True
+    return bool(_OBJECT_ID_LABEL.match(value))
+
+
+def assign_overlay_ids(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Put a stable ID on every live box: GP/GO/GV from identity, else ByteTrack T#."""
+    for det in detections or []:
+        gid = str(det.get("global_object_id") or "").strip()
+        tid = det.get("track_id")
+        try:
+            track_no = int(tid) if tid is not None else None
+        except (TypeError, ValueError):
+            track_no = None
+        display_id = gid or (f"T{track_no}" if track_no is not None else "")
+        if display_id:
+            det["display_id"] = display_id
+
+        cls = str(det.get("class_name") or "").strip().lower()
+        label = str(det.get("label") or "").strip()
+        if cls in ("person", "face") and _is_generic_face_label(label):
+            det["is_unknown"] = True
+            det["label"] = display_id or "Unknown"
+    return detections
 
 
 def filter_enrolled_staff_detections(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -990,6 +1064,9 @@ class LiveStreamManager:
             return registered
         if not key:
             return None
+        # Never treat Django stream keys (cam-11) as RTSP hostnames.
+        if not _key_may_be_rtsp_host(key):
+            return None
         cfg = _rtsp_config()
         return build_rtsp_url(key, cfg["user"], cfg["password"], cfg["port"], cfg["path"])
 
@@ -1009,8 +1086,11 @@ class LiveStreamManager:
             self._registry[key] = url
             self._purposes[key] = purpose_list
             existing = self._sessions.get(key)
-            if existing is not None and existing.rtsp_url != url:
-                self._close_session(key)
+            if existing is not None:
+                native_mismatch = bool(getattr(existing.stream, "keep_native", False)) != self._want_native_frame(key)
+                if existing.rtsp_url != url or native_mismatch:
+                    self._close_session(key)
+                    self._open_session_locked(key, url)
         return True
 
     def set_camera_purposes(
@@ -1028,6 +1108,12 @@ class LiveStreamManager:
         with self._lock:
             if purpose_list:
                 self._purposes[key] = purpose_list
+            existing = self._sessions.get(key)
+            if existing is not None:
+                native_mismatch = bool(getattr(existing.stream, "keep_native", False)) != self._want_native_frame(key)
+                if native_mismatch:
+                    self._close_session(key)
+                    self._open_session_locked(key, existing.rtsp_url)
             return list(self._purposes.get(key) or [])
 
     @staticmethod
@@ -1073,6 +1159,49 @@ class LiveStreamManager:
             return None
         return session.stream.get_frame()
 
+    def is_ready(self) -> bool:
+        """True after YOLO infer loops have started. Raw RTSP can run before this."""
+        return bool(self._running)
+
+    def get_raw_jpeg_bytes(self, key: str, *, target_width: int | None = None) -> bytes | None:
+        """Encode the latest raw RTSP frame (does not wait for YOLO)."""
+        raw = self.get_raw_frame(key)
+        if raw is None:
+            return None
+        if target_width:
+            prepared = self._prepare_attendance_frame(raw, int(target_width))
+            quality = 98 if int(target_width) >= 2560 else max(90, min(self._jpeg_quality, 98))
+            return encode_jpeg(prepared, quality)
+        quality = max(70, min(self._jpeg_quality, 98))
+        return encode_jpeg(self._limit_size(raw), quality)
+
+    def wait_for_raw_jpeg(
+        self,
+        key: str,
+        *,
+        timeout_sec: float = 6.0,
+        target_width: int | None = None,
+    ) -> bytes | None:
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        while time.monotonic() < deadline:
+            jpeg = self.get_raw_jpeg_bytes(key, target_width=target_width)
+            if jpeg:
+                return jpeg
+            time.sleep(0.05)
+        return None
+
+    def wait_for_preview_jpeg(self, key: str, *, timeout_sec: float = 2.5) -> bytes | None:
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        while time.monotonic() < deadline:
+            frame = self.get_preview_jpeg(key)
+            if frame:
+                return frame
+            jpeg = self.get_raw_jpeg_bytes(key)
+            if jpeg:
+                return jpeg
+            time.sleep(0.05)
+        return None
+
     def ensure_started(self) -> bool:
         """Start infer/render threads if YOLO is available but loops are not running."""
         self.start()
@@ -1102,12 +1231,11 @@ class LiveStreamManager:
                 # (encoding / param order). That caused Opening storms + perpetual 503.
                 if url and existing.rtsp_url != url:
                     self._registry[key] = url
-                return True
-            stream = create_camera_stream(url, key)
-            stream.thread.start()
-            self._sessions[key] = _CameraSession(key, stream, url)
-            self._detections[key] = []
-            print(f"[live] Opening: {key}")
+                native_mismatch = bool(getattr(existing.stream, "keep_native", False)) != self._want_native_frame(key)
+                if not native_mismatch:
+                    return True
+                self._close_session(key)
+            self._open_session_locked(key, url)
             return True
 
     def get_preview_jpeg(self, key: str) -> bytes | None:
@@ -1336,8 +1464,40 @@ class LiveStreamManager:
             time.sleep(self._frame_interval)
 
     def _prepare_frame(self, frame: np.ndarray):
-        """Keep full resolution; YOLO letterboxes via imgsz."""
-        return frame, 1.0, 1.0
+        """
+        Other YOLO models stay on the live AI size (~1080p).
+        Native/4K ANPR buffers are scaled here; boxes map back via sx/sy.
+        """
+        h, w = frame.shape[:2]
+        max_w, max_h = _rtsp_scale_size()
+        if max_w <= 0 and max_h <= 0:
+            return frame, 1.0, 1.0
+        if max_w <= 0:
+            max_w = w
+        if max_h <= 0:
+            max_h = h
+        if w <= max_w and h <= max_h:
+            return frame, 1.0, 1.0
+        scale = min(max_w / float(w), max_h / float(h))
+        dw = max(2, int(w * scale) // 2 * 2)
+        dh = max(2, int(h * scale) // 2 * 2)
+        small = cv2.resize(frame, (dw, dh), interpolation=cv2.INTER_AREA)
+        return small, w / float(dw), h / float(dh)
+
+    def _want_native_frame(self, camera_key: str) -> bool:
+        """Keep the original 4K RTSP frame only for ANPR cameras."""
+        if self._plate_on_all:
+            return True
+        return "anpr" in self._purposes_for(camera_key)
+
+    def _open_session_locked(self, key: str, url: str) -> None:
+        keep_native = self._want_native_frame(key)
+        stream = create_camera_stream(url, key, keep_native=keep_native)
+        stream.thread.start()
+        self._sessions[key] = _CameraSession(key, stream, url)
+        self._detections[key] = []
+        tag = "native-4K" if keep_native else "scaled"
+        print(f"[live] Opening: {key} ({tag})")
 
     def _predict(self, model, frame: np.ndarray, *, min_conf: float | None = None, classes=None):
         use_half = self._device != "cpu"
@@ -1579,6 +1739,7 @@ class LiveStreamManager:
             detections,
             face_db=self._face_db,
         )
+        detections = assign_overlay_ids(detections)
         return detections
 
     def _publish_results(self, camera_key: str, detections: list[dict[str, Any]]) -> None:

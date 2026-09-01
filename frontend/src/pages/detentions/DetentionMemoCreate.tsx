@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ChevronDown, Plus, Trash2, Copy, Eye, Camera, X } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,9 +32,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { ROUTES } from "@/routes/config"
+import { ROUTES, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { CUSTOMS_STATIONS } from "@/lib/case-fir-spec"
 import { toast } from "@/hooks/use-toast"
+import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
+import {
+  GoodsLineTextField,
+  goodsLineCellClass,
+  goodsPlaceholderClass,
+  goodsSelectTriggerClass,
+  goodsTableClass,
+} from "@/components/goods/goods-line-text-field"
 import { getStoredUser } from "@/lib/auth"
 import { createDetentionMemo } from "@/lib/detention-memo-api"
 import {
@@ -150,6 +158,9 @@ function goodsFromNoteSheet(ns: NoteSheetRecord): GoodsLineItem[] {
 
 export default function DetentionMemoCreatePage() {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const listPath = getDetentionMemoListPath(pathname)
+  const listSection = getDetentionMemoSectionCrumb(pathname)
   const [searchParams] = useSearchParams()
   const noteSheetIdParam = searchParams.get("noteSheetId")?.trim() || ""
   const [noteSheetId, setNoteSheetId] = useState(noteSheetIdParam)
@@ -206,6 +217,7 @@ export default function DetentionMemoCreatePage() {
   const [previewQrData, setPreviewQrData] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   useEffect(() => {
     return () => {
@@ -310,36 +322,56 @@ export default function DetentionMemoCreatePage() {
     setFormError("")
     const normalizedOwnerCnic = ownerCnic.trim()
     const normalizedDriverCnic = driverCnic.trim()
-    if (!noteSheetId) {
-      const msg = "Select an approved note sheet before creating the detention memo."
-      setFormError(msg)
-      toast({
-        title: "Approved note sheet required",
-        description: msg,
-        variant: "destructive",
-      })
-      return
-    }
-    if (normalizedOwnerCnic && !isValidCnic(normalizedOwnerCnic)) {
-      const msg = "Owner CNIC must be exactly 13 digits (without dashes)."
-      setFormError(msg)
-      toast({
+    const missing = firstMissingField([
+      {
+        id: "dm-note-sheet",
+        label: "Approved Note Sheet",
+        missing: !noteSheetId,
+        message: "Select an approved note sheet before creating the detention memo.",
+      },
+      {
+        id: "dm-datetime-detention",
+        label: "Date/time of detention",
+        missing: !dateTimeDetention.trim(),
+      },
+      {
+        id: "dm-place-detention",
+        label: "Place of detention",
+        missing: !placeOfDetention.trim(),
+      },
+      {
+        id: "dm-reason",
+        label: "Reason for detention",
+        missing: !reasonForDetention.trim(),
+      },
+      {
+        id: "dm-owner-cnic",
+        label: "Owner CNIC",
         title: "Invalid Owner CNIC",
-        description: msg,
-        variant: "destructive",
-      })
-      return
-    }
-    if (normalizedDriverCnic && !isValidCnic(normalizedDriverCnic)) {
-      const msg = "Driver CNIC must be exactly 13 digits (without dashes)."
-      setFormError(msg)
-      toast({
+        missing: Boolean(normalizedOwnerCnic) && !isValidCnic(normalizedOwnerCnic),
+        message: "Owner CNIC must be exactly 13 digits (without dashes).",
+      },
+      {
+        id: "dm-driver-cnic",
+        label: "Driver CNIC",
         title: "Invalid Driver CNIC",
-        description: msg,
-        variant: "destructive",
-      })
+        missing: Boolean(normalizedDriverCnic) && !isValidCnic(normalizedDriverCnic),
+        message: "Driver CNIC must be exactly 13 digits (without dashes).",
+      },
+      {
+        id: "dm-goods",
+        label: "Description of Goods",
+        missing: !goodsItems.some((g) => g.description.trim()),
+        message: "Add at least one goods line with a description.",
+      },
+    ])
+    if (missing) {
+      setInvalidField(missing.id)
+      setFormError(missing.message ?? `${missing.label} is required`)
+      reportMissingField(missing)
       return
     }
+    setInvalidField("")
 
     const currentUser = getStoredUser()
     const memoQrCodeNumber = generateMemoQrCodeNumber()
@@ -420,11 +452,11 @@ export default function DetentionMemoCreatePage() {
           description: msg,
           variant: "destructive",
         })
-        navigate(ROUTES.DETENTION_MEMO)
+        navigate(listPath)
         return
       }
       toast({ title: "Saved", description: "Detention memo saved and linked to approved note sheet." })
-      navigate(ROUTES.DETENTION_MEMO)
+      navigate(listPath)
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not save detention memo."
       console.error("Detention memo save failed", e)
@@ -448,15 +480,15 @@ export default function DetentionMemoCreatePage() {
       title="Detention Memo / Create"
       description="Add a new detention memo (prepared after the detention). All fields as per Pakistan Customs detention memo. Data is saved to the server database."
       breadcrumbs={[
-        { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT },
-        { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+        listSection,
+        { label: "Detention Memo", href: listPath },
         { label: "Create" },
       ]}
     >
       <div className="w-full min-h-[calc(100vh-12rem)] overflow-y-auto">
         <div className="mb-4 flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link to={ROUTES.DETENTION_MEMO}>
+            <Link to={listPath}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to list
             </Link>
@@ -468,11 +500,12 @@ export default function DetentionMemoCreatePage() {
 
         <Card className="mb-6 border-blue-100 bg-blue-50/40">
           <CardContent className="pt-6 space-y-3">
-            <Label>Approved Note Sheet *</Label>
+            <Label htmlFor="dm-note-sheet">Approved Note Sheet <span className="text-red-600">*</span></Label>
             <Select
               value={noteSheetId || undefined}
               onValueChange={(v) => {
                 setFormError("")
+                if (invalidField === "dm-note-sheet") setInvalidField("")
                 const ns =
                   availableNoteSheets.find((n) => n.id === v) ||
                   (linkedNoteSheet?.id === v ? linkedNoteSheet : null)
@@ -486,7 +519,11 @@ export default function DetentionMemoCreatePage() {
                 }
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="dm-note-sheet"
+                className="w-full"
+                aria-invalid={invalidField === "dm-note-sheet"}
+              >
                 <SelectValue placeholder="Select approved note sheet" />
               </SelectTrigger>
               <SelectContent>
@@ -547,17 +584,30 @@ export default function DetentionMemoCreatePage() {
                     <Input value={placeOfOccurrence} onChange={(e) => setPlaceOfOccurrence(e.target.value)} placeholder="Place of occurrence" />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Date/time of detention</Label>
+                    <Label htmlFor="dm-datetime-detention">Date/time of detention <span className="text-red-600">*</span></Label>
                     <Input
+                      id="dm-datetime-detention"
                       type="datetime-local"
                       value={dateTimeDetention.replace(" ", "T")}
-                      onChange={(e) => setDateTimeDetention(e.target.value.replace("T", " "))}
+                      aria-invalid={invalidField === "dm-datetime-detention"}
+                      onChange={(e) => {
+                        setDateTimeDetention(e.target.value.replace("T", " "))
+                        if (invalidField === "dm-datetime-detention") setInvalidField("")
+                      }}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Place of detention</Label>
-                    <Select value={placeOfDetention} onValueChange={setPlaceOfDetention}>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                    <Label htmlFor="dm-place-detention">Place of detention <span className="text-red-600">*</span></Label>
+                    <Select
+                      value={placeOfDetention}
+                      onValueChange={(v) => {
+                        setPlaceOfDetention(v)
+                        if (invalidField === "dm-place-detention") setInvalidField("")
+                      }}
+                    >
+                      <SelectTrigger id="dm-place-detention" className="w-full" aria-invalid={invalidField === "dm-place-detention"}>
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
                       <SelectContent>
                         {CUSTOMS_STATIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                       </SelectContent>
@@ -599,8 +649,13 @@ export default function DetentionMemoCreatePage() {
                       <div className="grid gap-2">
                         <Label>CNIC</Label>
                         <Input
+                          id="dm-owner-cnic"
                           value={ownerCnic}
-                          onChange={(e) => setOwnerCnic(sanitizeCnicInput(e.target.value))}
+                          aria-invalid={invalidField === "dm-owner-cnic"}
+                          onChange={(e) => {
+                            setOwnerCnic(sanitizeCnicInput(e.target.value))
+                            if (invalidField === "dm-owner-cnic") setInvalidField("")
+                          }}
                           placeholder="13 digits (e.g. 1234512345671)"
                           inputMode="numeric"
                           maxLength={13}
@@ -633,8 +688,13 @@ export default function DetentionMemoCreatePage() {
                       <div className="grid gap-2">
                         <Label>CNIC</Label>
                         <Input
+                          id="dm-driver-cnic"
                           value={driverCnic}
-                          onChange={(e) => setDriverCnic(sanitizeCnicInput(e.target.value))}
+                          aria-invalid={invalidField === "dm-driver-cnic"}
+                          onChange={(e) => {
+                            setDriverCnic(sanitizeCnicInput(e.target.value))
+                            if (invalidField === "dm-driver-cnic") setInvalidField("")
+                          }}
                           placeholder="13 digits (e.g. 1234512345671)"
                           inputMode="numeric"
                           maxLength={13}
@@ -673,7 +733,7 @@ export default function DetentionMemoCreatePage() {
               <CollapsibleContent>
                 <CardContent className="pt-0 grid gap-4 md:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label>Directorate *</Label>
+                    <Label>Directorate <span className="text-red-600">*</span></Label>
                     <Select value={directorate} onValueChange={setDirectorate}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -682,12 +742,17 @@ export default function DetentionMemoCreatePage() {
                     </Select>
                   </div>
                   <div className="grid gap-2">
-                    <Label>Reason for detention *</Label>
+                    <Label htmlFor="dm-reason">Reason for detention <span className="text-red-600">*</span></Label>
                     <Select
                       value={reasonForDetention || undefined}
-                      onValueChange={setReasonForDetention}
+                      onValueChange={(v) => {
+                        setReasonForDetention(v)
+                        if (invalidField === "dm-reason") setInvalidField("")
+                      }}
                     >
-                      <SelectTrigger><SelectValue placeholder="Select Reason" /></SelectTrigger>
+                      <SelectTrigger id="dm-reason" className="w-full" aria-invalid={invalidField === "dm-reason"}>
+                        <SelectValue placeholder="Select Reason" />
+                      </SelectTrigger>
                       <SelectContent>
                         {REASONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                       </SelectContent>
@@ -720,7 +785,7 @@ export default function DetentionMemoCreatePage() {
                     </div>
                   </div>
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Receipt Officer receiving Detained Goods *</Label>
+                    <Label>Receipt Officer receiving Detained Goods <span className="text-red-600">*</span></Label>
                     <Input value={receiptOfficer} onChange={(e) => setReceiptOfficer(e.target.value)} placeholder="Officer name" />
                   </div>
                   <div className="grid gap-2">
@@ -769,7 +834,7 @@ export default function DetentionMemoCreatePage() {
                     </RadioGroup>
                   </div>
                   <div className="grid gap-2 md:col-span-2">
-                    <Label>Brief Facts *</Label>
+                    <Label>Brief Facts <span className="text-red-600">*</span></Label>
                     <Textarea value={briefFacts} onChange={(e) => setBriefFacts(e.target.value)} placeholder="Brief facts of detention" rows={4} />
                   </div>
                 </CardContent>
@@ -820,19 +885,28 @@ export default function DetentionMemoCreatePage() {
                   <p className="text-sm text-muted-foreground mb-4">
                     List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning. Click the eye button to preview a larger QR code.
                   </p>
+                  <div
+                    id="dm-goods"
+                    tabIndex={-1}
+                    className={
+                      invalidField === "dm-goods"
+                        ? "rounded-md ring-2 ring-red-500 ring-offset-2 outline-none"
+                        : undefined
+                    }
+                  >
                   <div className="overflow-auto max-w-full">
-                    <Table>
+                    <Table className={goodsTableClass}>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[200px]">QR Code</TableHead>
-                          <TableHead className="min-w-[160px]">Description of Goods *</TableHead>
-                          <TableHead className="w-[80px]">Qty</TableHead>
-                          <TableHead className="w-[70px]">Unit</TableHead>
-                          <TableHead className="w-[120px]">Condition</TableHead>
-                          <TableHead className="w-[90px]">Perishable</TableHead>
-                          <TableHead className="min-w-[100px]">ID / Chassis No.</TableHead>
-                          <TableHead className="min-w-[140px]">Item Notes</TableHead>
-                          <TableHead className="w-[80px]">Images</TableHead>
+                          <TableHead className="w-[180px]">QR Code</TableHead>
+                          <TableHead className="w-[240px]">Description of Goods <span className="text-red-600">*</span></TableHead>
+                          <TableHead className="w-[88px]">Qty</TableHead>
+                          <TableHead className="w-[110px]">Unit</TableHead>
+                          <TableHead className="w-[190px]">Condition</TableHead>
+                          <TableHead className="w-[92px]">Perishable</TableHead>
+                          <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
+                          <TableHead className="w-[220px]">Item Notes</TableHead>
+                          <TableHead className="w-[96px]">Images</TableHead>
                           <TableHead className="w-[44px]"></TableHead>
                         </TableRow>
                       </TableHeader>
@@ -883,26 +957,34 @@ export default function DetentionMemoCreatePage() {
                                   />
                                 </div>
                               </TableCell>
-                              <TableCell>
-                                <Input
+                              <TableCell className={goodsLineCellClass}>
+                                <GoodsLineTextField
                                   value={item.description}
-                                  onChange={(e) => updateGoodsLine(item.id, "description", e.target.value)}
+                                  onChange={(e) => {
+                                    updateGoodsLine(item.id, "description", e.target.value)
+                                    if (invalidField === "dm-goods") setInvalidField("")
+                                  }}
                                   placeholder="Description of goods"
-                                  className="min-w-[140px]"
+                                  title="Description of goods"
+                                  aria-invalid={invalidField === "dm-goods" && idx === 0}
                                 />
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="align-middle">
                                 <Input
                                   type="text"
                                   inputMode="numeric"
                                   value={item.quantity}
                                   onChange={(e) => updateGoodsLine(item.id, "quantity", e.target.value)}
                                   placeholder="Qty"
+                                  title="Qty"
+                                  className={goodsPlaceholderClass}
                                 />
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="align-middle">
                                 <Select value={item.unit} onValueChange={(v) => updateGoodsLine(item.id, "unit", v)}>
-                                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
+                                    <SelectValue placeholder="Unit" />
+                                  </SelectTrigger>
                                   <SelectContent>
                                     {GOODS_UNITS.map((u) => (
                                       <SelectItem key={u} value={u}>{u}</SelectItem>
@@ -910,9 +992,11 @@ export default function DetentionMemoCreatePage() {
                                   </SelectContent>
                                 </Select>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="align-middle">
                                 <Select value={item.condition} onValueChange={(v) => updateGoodsLine(item.id, "condition", v)}>
-                                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
+                                    <SelectValue placeholder="Condition" />
+                                  </SelectTrigger>
                                   <SelectContent>
                                     {GOODS_CONDITIONS.map((c) => (
                                       <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -920,24 +1004,27 @@ export default function DetentionMemoCreatePage() {
                                   </SelectContent>
                                 </Select>
                               </TableCell>
-                              <TableCell className="text-center">
+                              <TableCell className="text-center align-middle">
                                 <Checkbox
                                   checked={item.perishable}
                                   onCheckedChange={(checked) => updateGoodsLine(item.id, "perishable", !!checked)}
                                 />
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="align-middle">
                                 <Input
                                   value={item.identificationRef}
                                   onChange={(e) => updateGoodsLine(item.id, "identificationRef", e.target.value)}
                                   placeholder="Chassis / Serial"
+                                  title="Chassis / Serial"
+                                  className={goodsPlaceholderClass}
                                 />
                               </TableCell>
-                              <TableCell>
-                                <Input
+                              <TableCell className={goodsLineCellClass}>
+                                <GoodsLineTextField
                                   value={item.itemNotes}
                                   onChange={(e) => updateGoodsLine(item.id, "itemNotes", e.target.value)}
                                   placeholder="Officer notes for this item"
+                                  title="Officer notes for this item"
                                 />
                               </TableCell>
                               <TableCell className="align-middle">
@@ -986,10 +1073,12 @@ export default function DetentionMemoCreatePage() {
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="align-middle text-center">
+                                <div className="flex items-center justify-center">
                                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeGoodsLine(item.id)} aria-label="Remove line">
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))
@@ -997,10 +1086,20 @@ export default function DetentionMemoCreatePage() {
                       </TableBody>
                     </Table>
                   </div>
-                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addGoodsLine}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => {
+                      addGoodsLine()
+                      if (invalidField === "dm-goods") setInvalidField("")
+                    }}
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     Add line
                   </Button>
+                  </div>
                 </CardContent>
               </CollapsibleContent>
             </Card>
@@ -1064,7 +1163,7 @@ export default function DetentionMemoCreatePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-2">
-                <Label>Seizing Officer Notes *</Label>
+                <Label>Seizing Officer Notes <span className="text-red-600">*</span></Label>
                 <Textarea
                   value={seizingOfficerNotes}
                   onChange={(e) => setSeizingOfficerNotes(e.target.value)}
@@ -1091,7 +1190,7 @@ export default function DetentionMemoCreatePage() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Forwarding Officer Remarks *</Label>
+                <Label>Forwarding Officer Remarks <span className="text-red-600">*</span></Label>
                 <Textarea
                   value={forwardingOfficerRemarks}
                   onChange={(e) => setForwardingOfficerRemarks(e.target.value)}
@@ -1152,7 +1251,7 @@ export default function DetentionMemoCreatePage() {
                 {saving ? "Saving…" : "Submit"}
               </Button>
               <Button variant="outline" asChild>
-                <Link to={ROUTES.DETENTION_MEMO}>Cancel</Link>
+                <Link to={listPath}>Cancel</Link>
               </Button>
             </div>
           </div>

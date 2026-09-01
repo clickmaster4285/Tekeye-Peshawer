@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   CheckCircle,
   ClipboardCheck,
-  FileOutput,
   FileText,
   Package,
   Paperclip,
-  Printer,
   QrCode,
   Send,
   Users,
@@ -18,6 +16,7 @@ import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { PrintMenu } from "@/components/seizure/print-menu"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -32,6 +31,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   ROUTES,
   getDetentionMemoDetailPath,
+  getSeizureMgmtAssessmentDetailPath,
   getSeizureMgmtAssessmentEditPath,
 } from "@/routes/config"
 import {
@@ -42,6 +42,9 @@ import {
 import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { getStoredUser, type AuthUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { reportMissingField } from "@/lib/form-missing-field"
+import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import AssessmentReportPrint from "@/components/seizure/AssessmentReportPrint"
 
 const APPROVER_ROLES = new Set([
   "ADMIN",
@@ -87,12 +90,17 @@ function statusBadge(status: string) {
 
 export default function AssessmentDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  const printMode = searchParams.get("print")
+  const autoPrint = searchParams.get("autoprint") === "1"
+  const autoSavePdf = searchParams.get("savepdf") === "1"
   const [row, setRow] = useState<DetentionAssessmentRecord | null>(null)
   const [memo, setMemo] = useState<DetentionMemoApiRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [approvalRemarks, setApprovalRemarks] = useState("")
   const [rejectionReason, setRejectionReason] = useState("")
+  const [invalidField, setInvalidField] = useState("")
   const [currentUser] = useState<AuthUser | null>(() => getStoredUser())
 
   useEffect(() => {
@@ -113,6 +121,13 @@ export default function AssessmentDetailPage() {
       })
       .finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    if (printMode === "full" && autoPrint && row && memo) {
+      const timer = window.setTimeout(() => window.print(), 350)
+      return () => window.clearTimeout(timer)
+    }
+  }, [printMode, autoPrint, row, memo])
 
   if (loading) {
     return (
@@ -154,6 +169,10 @@ export default function AssessmentDetailPage() {
     )
   }
 
+  if (printMode === "full") {
+    return <AssessmentReportPrint row={row} memo={memo} autoSavePdf={autoSavePdf} />
+  }
+
   const canAssess = row.status === "Draft" || row.status === "Rejected"
   const canApprove = canUserApproveAssessment(row, currentUser)
   const qrPayload =
@@ -163,9 +182,11 @@ export default function AssessmentDetailPage() {
 
   const runApproval = async (action: "submit" | "approve" | "reject") => {
     if (action === "reject" && !rejectionReason.trim()) {
-      toast({ title: "Rejection reason is required", variant: "destructive" })
+      setInvalidField("as-rejection")
+      reportMissingField({ id: "as-rejection", label: "Rejection Reason" })
       return
     }
+    setInvalidField("")
     setActing(true)
     try {
       const updated = await assessmentApproval(row.id, action, {
@@ -225,7 +246,7 @@ export default function AssessmentDetailPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-auto">
               {statusBadge(row.status)}
               <Badge
                 variant={memo.verificationStatus === "Verified" ? "default" : "secondary"}
@@ -241,18 +262,10 @@ export default function AssessmentDetailPage() {
                   </Link>
                 </Button>
               )}
-              <Button variant="outline" asChild size="sm" className="w-full sm:w-auto">
-                <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(memo.id)}?print=full`}>
-                  <Printer className="h-4 w-4 mr-2" />
-                  Print Report
-                </Link>
-              </Button>
-              <Button variant="outline" asChild size="sm" className="w-full sm:w-auto">
-                <Link to={`${ROUTES.DETENTION_MEMO}/${encodeURIComponent(memo.id)}?print=full`}>
-                  <FileOutput className="h-4 w-4 mr-2" />
-                  Save as PDF
-                </Link>
-              </Button>
+              <PrintMenu
+                printHref={`${getSeizureMgmtAssessmentDetailPath(row.id)}?print=full`}
+                pdfHref={`${getSeizureMgmtAssessmentDetailPath(row.id)}?print=full&savepdf=1`}
+              />
             </div>
           </CardHeader>
 
@@ -344,34 +357,34 @@ export default function AssessmentDetailPage() {
               memo.driver?.cnic ||
               memo.driver?.contact ||
               memo.driver?.picture) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Driver
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
-                    <DetailRow label="Name" value={memo.driver?.name} />
-                    <DetailRow label="CNIC" value={memo.driver?.cnic} />
-                    <DetailRow label="Contact" value={memo.driver?.contact} />
-                  </div>
-                  {memo.driver?.picture && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                        Photo
-                      </p>
-                      <img
-                        src={memo.driver.picture}
-                        alt="Driver"
-                        className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
-                      />
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Driver
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+                      <DetailRow label="Name" value={memo.driver?.name} />
+                      <DetailRow label="CNIC" value={memo.driver?.cnic} />
+                      <DetailRow label="Contact" value={memo.driver?.contact} />
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                    {memo.driver?.picture && (
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                          Photo
+                        </p>
+                        <img
+                          src={memo.driver.picture}
+                          alt="Driver"
+                          className="max-h-48 rounded-lg border object-contain bg-muted/30 w-full sm:w-auto"
+                        />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
             {memo.purposeOfDetention && (
               <Card>
@@ -446,11 +459,11 @@ export default function AssessmentDetailPage() {
                 <CardContent className="rounded-lg border p-0">
                   <div className="overflow-x-auto">
                     <ScrollArea className="w-full">
-                      <Table>
+                      <Table className="table-fixed w-full">
                         <TableHeader>
                           <TableRow>
                             <TableHead>QR Code</TableHead>
-                            <TableHead>Description</TableHead>
+                            <TableHead className="w-[22%]">Description</TableHead>
                             <TableHead>PCT</TableHead>
                             <TableHead>Qty</TableHead>
                             <TableHead>Unit</TableHead>
@@ -458,7 +471,7 @@ export default function AssessmentDetailPage() {
                             <TableHead>Assessable</TableHead>
                             <TableHead>Perishable</TableHead>
                             <TableHead>ID / Chassis</TableHead>
-                            <TableHead>Item Notes</TableHead>
+                            <TableHead className="w-[16%]">Item Notes</TableHead>
                             <TableHead>Images</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -477,8 +490,8 @@ export default function AssessmentDetailPage() {
                                   </span>
                                 </div>
                               </TableCell>
-                              <TableCell className="font-medium break-words min-w-[120px]">
-                                {item.description || "—"}
+                              <TableCell className={`${goodsLineCellClass} font-medium`}>
+                                <GoodsLineText>{item.description || "—"}</GoodsLineText>
                               </TableCell>
                               <TableCell className="font-mono">{item.pctCode || "—"}</TableCell>
                               <TableCell>{item.quantity || "—"}</TableCell>
@@ -487,8 +500,8 @@ export default function AssessmentDetailPage() {
                               <TableCell>{item.assessableValuePkr || "—"}</TableCell>
                               <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
                               <TableCell>{item.identificationRef || "—"}</TableCell>
-                              <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                                {item.itemNotes || "—"}
+                              <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                                <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                               </TableCell>
                               <TableCell>
                                 {item.images && item.images.length > 0 ? (
@@ -520,52 +533,52 @@ export default function AssessmentDetailPage() {
               memo.examiningOfficerNotes ||
               memo.detentionNotes ||
               memo.forwardingOfficerRemarks) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Additional Information</CardTitle>
-                </CardHeader>
-                <CardContent className="rounded-lg border p-4 space-y-4">
-                  {memo.seizingOfficerNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                        Seizing Officer Notes
-                      </p>
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {memo.seizingOfficerNotes}
-                      </p>
-                    </div>
-                  )}
-                  {memo.examiningOfficerNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                        Examining Officer Notes
-                      </p>
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {memo.examiningOfficerNotes}
-                      </p>
-                    </div>
-                  )}
-                  {memo.detentionNotes && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                        Detention / Customs Clarification Notes
-                      </p>
-                      <p className="text-sm whitespace-pre-wrap break-words">{memo.detentionNotes}</p>
-                    </div>
-                  )}
-                  {memo.forwardingOfficerRemarks && (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                        Forwarding Officer Remarks
-                      </p>
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {memo.forwardingOfficerRemarks}
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Additional Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="rounded-lg border p-4 space-y-4">
+                    {memo.seizingOfficerNotes && (
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                          Seizing Officer Notes
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {memo.seizingOfficerNotes}
+                        </p>
+                      </div>
+                    )}
+                    {memo.examiningOfficerNotes && (
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                          Examining Officer Notes
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {memo.examiningOfficerNotes}
+                        </p>
+                      </div>
+                    )}
+                    {memo.detentionNotes && (
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                          Detention / Customs Clarification Notes
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap break-words">{memo.detentionNotes}</p>
+                      </div>
+                    )}
+                    {memo.forwardingOfficerRemarks && (
+                      <div>
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                          Forwarding Officer Remarks
+                        </p>
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {memo.forwardingOfficerRemarks}
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
             {/* Assessment findings (only fields needed for assessment workflow) */}
             <Card>
@@ -645,10 +658,15 @@ export default function AssessmentDetailPage() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Rejection reason</Label>
+                    <Label htmlFor="as-rejection">Rejection reason <span className="text-red-600">*</span></Label>
                     <Textarea
+                      id="as-rejection"
                       value={rejectionReason}
-                      onChange={(e) => setRejectionReason(e.target.value)}
+                      aria-invalid={invalidField === "as-rejection"}
+                      onChange={(e) => {
+                        setRejectionReason(e.target.value)
+                        if (invalidField === "as-rejection") setInvalidField("")
+                      }}
                       rows={2}
                     />
                   </div>

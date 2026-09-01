@@ -322,23 +322,23 @@ def apply_partial_to_deposit_entry(entry: DepositAccountEntry, data: dict) -> No
         raw = (data.get("detentionMemoId") or "").strip()
         entry.detention_memo = DetentionMemo.objects.filter(pk=raw).first() if raw else None
     if _present("treasuryChallanNo"):
-        entry.treasury_challan_no = (data.get("treasuryChallanNo") or "")[:120]
+        entry.treasury_challan_no = data.get("treasuryChallanNo") or ""
     if _present("depositType"):
-        entry.deposit_type = (data.get("depositType") or "")[:80]
+        entry.deposit_type = data.get("depositType") or ""
     if _present("caseSeizureRef"):
-        entry.case_seizure_ref = (data.get("caseSeizureRef") or "")[:200]
+        entry.case_seizure_ref = data.get("caseSeizureRef") or ""
     if _present("firNo"):
-        entry.fir_no = (data.get("firNo") or "")[:120]
+        entry.fir_no = data.get("firNo") or ""
     if _present("customsStation"):
-        entry.customs_station = (data.get("customsStation") or "")[:200]
+        entry.customs_station = data.get("customsStation") or ""
     if _present("amount"):
-        entry.amount = (data.get("amount") or "")[:120]
+        entry.amount = data.get("amount") or ""
     if _present("depositDate"):
-        entry.deposit_date = (data.get("depositDate") or "")[:40]
+        entry.deposit_date = data.get("depositDate") or ""
     if _present("bankTreasuryName"):
-        entry.bank_treasury_name = (data.get("bankTreasuryName") or "")[:255]
+        entry.bank_treasury_name = data.get("bankTreasuryName") or ""
     if _present("status"):
-        entry.status = (data.get("status") or "")[:80]
+        entry.status = data.get("status") or ""
     if _present("remarks"):
         entry.remarks = data.get("remarks") or ""
 
@@ -351,15 +351,15 @@ def create_deposit_account_entry(validated_data: dict) -> DepositAccountEntry:
 
     return DepositAccountEntry.objects.create(
         detention_memo=memo,
-        treasury_challan_no=(validated_data.get("treasuryChallanNo") or "")[:120],
-        deposit_type=(validated_data.get("depositType") or "")[:80],
-        case_seizure_ref=(validated_data.get("caseSeizureRef") or "")[:200],
-        fir_no=(validated_data.get("firNo") or "")[:120],
-        customs_station=(validated_data.get("customsStation") or "")[:200],
-        amount=(validated_data.get("amount") or "")[:120],
-        deposit_date=(validated_data.get("depositDate") or "")[:40],
-        bank_treasury_name=(validated_data.get("bankTreasuryName") or "")[:255],
-        status=(validated_data.get("status") or "")[:80],
+        treasury_challan_no=validated_data.get("treasuryChallanNo") or "",
+        deposit_type=validated_data.get("depositType") or "",
+        case_seizure_ref=validated_data.get("caseSeizureRef") or "",
+        fir_no=validated_data.get("firNo") or "",
+        customs_station=validated_data.get("customsStation") or "",
+        amount=validated_data.get("amount") or "",
+        deposit_date=validated_data.get("depositDate") or "",
+        bank_treasury_name=validated_data.get("bankTreasuryName") or "",
+        status=validated_data.get("status") or "",
         remarks=validated_data.get("remarks") or "",
     )
 

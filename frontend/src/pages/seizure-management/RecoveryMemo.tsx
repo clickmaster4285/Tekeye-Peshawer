@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Loader2, Plus, Search } from "lucide-react"
+import { Loader2, Plus, Search, Eye } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
+import { TableActionGroup, TableActionIcon } from "@/components/seizure/table-action-icon"
+import { ExportMenu } from "@/components/seizure/export-menu"
+import RecoveryMemoReportPrint from "@/components/seizure/RecoveryMemoReportPrint"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,6 +19,9 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { ROUTES, getSeizureMgmtRecoveryMemoDetailPath } from "@/routes/config"
 import { fetchRecoveryMemos, type RecoveryMemoRecord } from "@/lib/seizure-management-api"
+import { downloadCsv } from "@/lib/csv-export"
+import { useBatchPdfExport } from "@/hooks/use-batch-pdf-export"
+import { PdfExportHost } from "@/components/seizure/pdf-export-host"
 
 function approvalBadge(status: RecoveryMemoRecord["approvalStatus"]) {
   if (status === "Approved") return <Badge>Approved</Badge>
@@ -49,6 +55,50 @@ export default function RecoveryMemoPage() {
     )
   }, [rows, search])
 
+  const pdf = useBatchPdfExport<RecoveryMemoRecord>(`recovery-memos-${new Date().toISOString().slice(0, 10)}.pdf`)
+
+  const exportCsv = () => {
+    downloadCsv(`recovery-memos-${new Date().toISOString().slice(0, 10)}.csv`, [
+      "Recovery Memo No",
+      "Case No",
+      "Category",
+      "Recovery Date",
+      "Recovery Officer",
+      "Goods Description",
+      "Quantity",
+      "Remarks",
+      "Approval Status",
+      "Approved By",
+      "Approved At",
+      "Approval Remarks",
+      "Rejection Reason",
+      "Submitted At",
+      "Created By",
+      "Updated By",
+      "Created At",
+      "Updated At",
+    ], filtered.map((r) => [
+      r.referenceNumber,
+      r.caseNo,
+      r.category,
+      r.recoveryDate,
+      r.recoveryOfficer,
+      r.goodsDescription,
+      r.quantity,
+      r.remarks,
+      r.approvalStatus,
+      r.approvedBy,
+      r.approvedAt,
+      r.approvalRemarks,
+      r.rejectionReason,
+      r.submittedAt,
+      r.createdBy,
+      r.updatedBy,
+      r.createdAt,
+      r.updatedAt,
+    ]))
+  }
+
   return (
     <ModulePageLayout
       title="Recovery Memo"
@@ -71,23 +121,30 @@ export default function RecoveryMemoPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button asChild>
-              <Link to={ROUTES.SEIZURE_MGMT_RECOVERY_MEMO_CREATE}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Recovery Memo
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ml-auto">
+              <Button asChild>
+                <Link to={ROUTES.SEIZURE_MGMT_RECOVERY_MEMO_CREATE}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Recovery Memo
+                </Link>
+              </Button>
+              <ExportMenu
+                disabled={filtered.length === 0}
+                onExportCsv={exportCsv}
+                onExportPdf={() => pdf.start(filtered)}
+              />
+            </div>
           </div>
 
-          <Table>
+          <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
             <TableHeader>
               <TableRow>
-                <TableHead>Case No</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Recovery Date</TableHead>
-                <TableHead>Officer</TableHead>
-                <TableHead>Approval</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-[18%]">Case No</TableHead>
+                <TableHead className="w-[18%]">Category</TableHead>
+                <TableHead className="w-[16%]">Recovery Date</TableHead>
+                <TableHead className="w-[22%]">Officer</TableHead>
+                <TableHead className="w-[16%]">Approval</TableHead>
+                <TableHead className="w-[7.5rem] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -107,19 +164,20 @@ export default function RecoveryMemoPage() {
               ) : (
                 filtered.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="font-medium">{row.caseNo}</TableCell>
-                    <TableCell>{row.category}</TableCell>
-                    <TableCell>{row.recoveryDate}</TableCell>
-                    <TableCell>{row.recoveryOfficer}</TableCell>
+                    <TableCell className="font-medium truncate" title={row.caseNo}>{row.caseNo}</TableCell>
+                    <TableCell className="truncate" title={row.category}>{row.category}</TableCell>
+                    <TableCell className="truncate">{row.recoveryDate}</TableCell>
+                    <TableCell className="truncate" title={row.recoveryOfficer}>{row.recoveryOfficer}</TableCell>
                     <TableCell>{approvalBadge(row.approvalStatus)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate(getSeizureMgmtRecoveryMemoDetailPath(row.id))}
-                      >
-                        View
-                      </Button>
+                    <TableCell className="overflow-visible p-2 text-right align-middle">
+                      <TableActionGroup>
+                        <TableActionIcon
+                          label="View"
+                          onClick={() => navigate(getSeizureMgmtRecoveryMemoDetailPath(row.id))}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </TableActionIcon>
+                      </TableActionGroup>
                     </TableCell>
                   </TableRow>
                 ))
@@ -128,6 +186,11 @@ export default function RecoveryMemoPage() {
           </Table>
         </CardContent>
       </Card>
+      <PdfExportHost hostRef={pdf.hostRef}>
+        {pdf.items?.map((row) => (
+          <RecoveryMemoReportPrint key={row.id} row={row} embedded />
+        ))}
+      </PdfExportHost>
     </ModulePageLayout>
   )
 }

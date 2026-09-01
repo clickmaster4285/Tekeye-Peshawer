@@ -80,6 +80,7 @@ export const ROUTES = {
   ANALYTICS_CAMERA_MANAGEMENT_VIEW: "/analytics/camera-management/:id",
   OBJECT_DETECTION: "/object-detection",
   OBJECT_TRACKING: "/object-tracking",
+  VIDEO_IMAGE_SEARCH: "/find-in-video",
   OBJECT_TRACKING_DETAIL: "/object-tracking/:uuid",
   /** Super Admin only — remote location servers + live detection streams */
   OPS_CENTRAL: "/ops-central",
@@ -87,8 +88,12 @@ export const ROUTES = {
   ALL_CITIES_CAMERAS: "/all-cities-cameras",
   PERSON_JOURNEY: "/person-journey",
   PERSON_JOURNEY_DETAIL: "/person-journey/:uuid",
+  GPS_TRACKING: "/gps-tracking",
+  VIDEO_RECOVERY: "/video-recovery",
   ANPR_SETTINGS: "/anpr-settings",
   ANPR_VEHICLE_TRACKING: "/anpr-vehicle-tracking",
+  VEHICLE_JOURNEY: "/vehicle-journey",
+  VEHICLE_JOURNEY_DETAIL: "/vehicle-journey/:plateKey",
   /** Vehicle detection log (car/truck/bus/etc.). Legacy path kept for bookmarks. */
   NUMBER_PLATE_DETECTION: "/vehicle-detection",
   NUMBER_PLATE_DETECTION_LEGACY: "/number-plate-detection",
@@ -100,7 +105,10 @@ export const ROUTES = {
   DEPOSIT_ACCOUNT_REGISTER_DETAIL: "/deposit-account-register/:id",
   DETENTION_MEMO: "/seizure-management/detention-memo",
   DETENTION_MEMO_CREATE: "/seizure-management/detention-memo/create",
-  /** Legacy path kept for QR / bookmarks; prefer DETENTION_MEMO. */
+  /** Warehouse Management copy of the same detention memo pages. */
+  WAREHOUSE_DETENTION_MEMO: "/detention-memo",
+  WAREHOUSE_DETENTION_MEMO_CREATE: "/detention-memo/create",
+  /** Legacy alias of WAREHOUSE_DETENTION_MEMO (QR / bookmarks). */
   DETENTION_MEMO_LEGACY: "/detention-memo",
   SEIZED_INVENTORY: "/seized-inventory",
   // Seizures & cases
@@ -177,6 +185,7 @@ export const ROUTES = {
   EMPLOYEES: "/employees",
   ADD_STAFF: "/employees/add",
   RECRUITMENT: "/recruitment",
+  VISITOR_EDIT: "/visitors/:id/edit",
   /** Path for employee detail; use getEmployeeDetailPath(id) for links */
   EMPLOYEE_DETAIL: "/employees/:id",
   ATTENDANCE: "/attendance",
@@ -242,6 +251,12 @@ export function getObjectTrackingDetailPath(uuid: string): string {
   return `/object-tracking/${encodeURIComponent(uuid)}`
 }
 
+export function getVehicleJourneyPath(plateKey?: string): string {
+  const key = (plateKey || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase()
+  if (!key) return ROUTES.VEHICLE_JOURNEY
+  return `/vehicle-journey/${encodeURIComponent(key)}`
+}
+
 /** Build path to user detail page */
 export function getUserDetailPath(id: number): string {
   return `/settings/users/${id}`
@@ -269,8 +284,34 @@ export function getCycleCountingDetailPath(id: string): string {
 export function getInventoryValuationDetailPath(id: string): string {
   return `${ROUTES.INVENTORY_VALUATION}/${encodeURIComponent(id)}`
 }
-export function getDetentionMemoDetailPath(id: string): string {
-  return `${ROUTES.DETENTION_MEMO}/${encodeURIComponent(id)}`
+export function isWarehouseDetentionMemoPath(pathname: string): boolean {
+  const path = (pathname.split("?")[0] || "/").replace(/\/+$/, "") || "/"
+  return (
+    path === ROUTES.WAREHOUSE_DETENTION_MEMO ||
+    path.startsWith(`${ROUTES.WAREHOUSE_DETENTION_MEMO}/`)
+  )
+}
+
+export function getDetentionMemoListPath(pathname?: string): string {
+  if (pathname && isWarehouseDetentionMemoPath(pathname)) {
+    return ROUTES.WAREHOUSE_DETENTION_MEMO
+  }
+  return ROUTES.DETENTION_MEMO
+}
+
+export function getDetentionMemoCreatePath(pathname?: string): string {
+  return `${getDetentionMemoListPath(pathname)}/create`
+}
+
+export function getDetentionMemoDetailPath(id: string, pathname?: string): string {
+  return `${getDetentionMemoListPath(pathname)}/${encodeURIComponent(id)}`
+}
+
+export function getDetentionMemoSectionCrumb(pathname: string): { label: string; href: string } {
+  if (isWarehouseDetentionMemoPath(pathname)) {
+    return { label: "Warehouse Management", href: ROUTES.OPERATIONS_DASHBOARD }
+  }
+  return { label: "Seizure Management", href: ROUTES.SEIZURE_MANAGEMENT }
 }
 export function getDepositAccountRegisterDetailPath(id: string): string {
   return `${ROUTES.DEPOSIT_ACCOUNT_REGISTER}/${encodeURIComponent(id)}`
@@ -316,6 +357,10 @@ export function isDashboardRoute(pathname: string): boolean {
 /** URL for the shared visitor detail page (used by both Walk-In and Pre-Registration). */
 export function getVisitorDetailPath(id: number | string): string {
   return `/visitors/${id}`
+}
+
+export function getVisitorEditPath(id: number | string): string {
+  return `/visitors/${id}/edit`
 }
 
 /** Build path to People Database person detail page */
@@ -398,7 +443,7 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
       { label: "Dashboard", href: ROUTES.OPERATIONS_DASHBOARD },
       {
         label: "Detentions",
-        children: [{ label: "Detention Memo", href: ROUTES.DETENTION_MEMO }],
+        children: [{ label: "Detention Memo", href: ROUTES.WAREHOUSE_DETENTION_MEMO }],
       },
       {
         label: "Deposit Account",
@@ -474,10 +519,7 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
     overviewHref: ROUTES.SEIZURE_MANAGEMENT,
     children: [
       { label: "Dashboard", href: ROUTES.SEIZURE_MANAGEMENT },
-      {
-        label: "Note Sheet",
-        children: [{ label: "Note Sheets", href: ROUTES.SEIZURE_MGMT_NOTE_SHEET }],
-      },
+      { label: "Note Sheet", href: ROUTES.SEIZURE_MGMT_NOTE_SHEET },
       {
         label: "Detention",
         children: [
@@ -555,9 +597,12 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
           { label: "Cameras", href: ROUTES.CAMERA_MANAGEMENT },
           { label: "Object Detection", href: ROUTES.OBJECT_DETECTION },
           { label: "Object Tracking", href: ROUTES.OBJECT_TRACKING },
+          { label: "Find in Video", href: ROUTES.VIDEO_IMAGE_SEARCH },
           { label: "Person Journey", href: ROUTES.PERSON_JOURNEY },
+          { label: "GPS Tracking", href: ROUTES.GPS_TRACKING },
           { label: "ANPR Settings", href: ROUTES.ANPR_SETTINGS },
           { label: "Number Plate Tracking", href: ROUTES.ANPR_VEHICLE_TRACKING },
+          { label: "Vehicle Journey", href: ROUTES.VEHICLE_JOURNEY },
           { label: "Vehicle Detection", href: ROUTES.NUMBER_PLATE_DETECTION },
           { label: "Anomaly Detection", href: ROUTES.ANOMALY_DETECTION },
         ],
@@ -572,6 +617,8 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
           { label: "Live View", href: ROUTES.LIVE_CAMERA_GRID },
           { label: "LPR/ANPR", href: ROUTES.JCP_TOLL_PLAZA_ENTRY },
           { label: "Playback & Search", href: ROUTES.PLAYBACK_SEARCH },
+          { label: "Video Recovery", href: ROUTES.VIDEO_RECOVERY },
+          { label: "Find in Video", href: ROUTES.VIDEO_IMAGE_SEARCH },
           { label: "Thermal Imaging", href: ROUTES.THERMAL_IMAGING },
         ],
       },
@@ -658,12 +705,12 @@ const VEHICLE_MANAGEMENT_NAV: NavGroup = {
   ],
 }
 
-const INCIDENT_MANAGEMENT_NAV: NavGroup = {         
+const INCIDENT_MANAGEMENT_NAV: NavGroup = {
   label: "Incident Management",
   children: [
     { label: "AI Incident Management", href: ROUTES.AI_INCIDENT_MANAGEMENT },
     { label: "Incident Creation", href: ROUTES.INCIDENT_CREATION },
-  ], 
+  ],
 }
 
 const VISITOR_OVERVIEW_NAV: NavItem = {
@@ -678,7 +725,7 @@ const WAREHOUSE_SUPERINTENDENT_WAREHOUSE_NAV: NavGroup = {
     { label: "Goods Receipt", href: ROUTES.GOODS_RECEIPT },
     { label: "Deposit Account Register", href: ROUTES.DEPOSIT_ACCOUNT_REGISTER },
     { label: "Seizure Register", href: ROUTES.SEIZURE_REGISTER },
-    { label: "Examination", href: ROUTES.DETENTION_MEMO },
+    { label: "Examination", href: ROUTES.WAREHOUSE_DETENTION_MEMO },
     { label: "Inventory Valuation", href: ROUTES.INVENTORY_VALUATION },
     { label: "Item Valuation", href: ROUTES.ITEM_VALUATION },
     { label: "Stock Management", href: ROUTES.STOCK_MANAGEMENT },
@@ -701,7 +748,7 @@ const EXAMINATION_OFFICER_WAREHOUSE_NAV: NavGroup = {
   label: "Warehouse Management",
   children: [
     { label: "Dashboard", href: ROUTES.OPERATIONS_DASHBOARD },
-    { label: "Detention Memo", href: ROUTES.DETENTION_MEMO },
+    { label: "Detention Memo", href: ROUTES.WAREHOUSE_DETENTION_MEMO },
     { label: "Seizure Register", href: ROUTES.SEIZURE_REGISTER },
     { label: "Inventory Valuation", href: ROUTES.INVENTORY_VALUATION },
     { label: "Item Valuation", href: ROUTES.ITEM_VALUATION },
@@ -726,7 +773,7 @@ const AUDITOR_WAREHOUSE_NAV: NavGroup = {
     { label: "Goods Receipt", href: ROUTES.GOODS_RECEIPT },
     { label: "Deposit Account Register", href: ROUTES.DEPOSIT_ACCOUNT_REGISTER },
     { label: "Seizure Register", href: ROUTES.SEIZURE_REGISTER },
-    { label: "Examination", href: ROUTES.DETENTION_MEMO },
+    { label: "Examination", href: ROUTES.WAREHOUSE_DETENTION_MEMO },
     { label: "Inventory Valuation", href: ROUTES.INVENTORY_VALUATION },
     { label: "Item Valuation", href: ROUTES.ITEM_VALUATION },
     { label: "Stock Management", href: ROUTES.STOCK_MANAGEMENT },
@@ -779,6 +826,13 @@ export const AUDITOR_NAV_SECTIONS: NavSection[] = [
   { title: "System", items: [{ label: "Logs", href: ROUTES.LOGS }] },
 ]
 
+export const PRAL_NAV_SECTIONS: NavSection[] = [
+  { title: "Warehouse Management", items: [AUDITOR_WAREHOUSE_NAV] },
+  { title: "Seizure Management", items: [SEIZURE_MANAGEMENT_NAV] },
+  { title: "Auction Management", items: [AUCTION_MANAGEMENT_NAV] },
+  { title: "System", items: [{ label: "Logs", href: ROUTES.LOGS }] },
+]
+
 export const IT_ADMIN_NAV_SECTIONS: NavSection[] = [
   {
     title: "System Configuration",
@@ -807,6 +861,7 @@ export const GUARD_NAV_SECTIONS: NavSection[] = [
   { title: "Visitor Management", items: [VISITOR_MANAGEMENT_NAV] },
   { title: "Vehicle Management", items: [VEHICLE_MANAGEMENT_NAV] },
   { title: "Incident Management", items: [{ label: "Incident Creation", href: ROUTES.INCIDENT_CREATION }] },
+  { title: "GPS Tracking", items: [{ label: "GPS Tracking", href: ROUTES.GPS_TRACKING }] },
 ]
 
 /** Shown when a non-admin has no custom grants and no role-default template. */
@@ -824,14 +879,23 @@ export function getNavSectionsForRole(
   // Super Admin — full sidebar, no Central Ops.
   if (normalized === "ADMIN") return NAV_SECTIONS
 
-  // IT Super Admin — Central Ops + all-cities live wall.
+  if (
+    normalized === "LOCATION_ADMIN" ||
+    normalized === "OPERATION_MANAGER" ||
+    normalized === "COLLECTOR" ||
+    normalized === "DEPUTY_COLLECTOR" ||
+    normalized === "ASSISTANT_COLLECTOR"
+  ) {
+    return NAV_SECTIONS
+  }
+
+  // IT Super Admin — Central Ops only.
   if (normalized === "IT_SUPERADMIN") {
     return [
       {
         title: "Central Ops",
         items: [
           { label: "Central Ops", href: ROUTES.OPS_CENTRAL },
-          { label: "All Cities Cameras", href: ROUTES.ALL_CITIES_CAMERAS },
         ],
       },
     ]
@@ -852,6 +916,7 @@ export function getNavSectionsForRole(
   if (normalized === "EXAMINATION_OFFICER") return EXAMINATION_OFFICER_NAV_SECTIONS
   if (normalized === "STOCK_CONTROLLER") return STOCK_CONTROLLER_NAV_SECTIONS
   if (normalized === "AUDITOR") return AUDITOR_NAV_SECTIONS
+  if (normalized === "PRAL") return PRAL_NAV_SECTIONS
   if (normalized === "IT_ADMIN") return IT_ADMIN_NAV_SECTIONS
   if (normalized === "HR") return HR_NAV_SECTIONS
   return EMPTY_NAV_SECTIONS
@@ -891,6 +956,17 @@ export function getModuleLabelForPath(
 ): string | null {
   const path = (pathname.split("?")[0] || "/").replace(/\/+$/, "") || "/"
   if (path === "/" || path === "") return null
+
+  const PREFIX_MODULES: [string, string][] = [
+    ["/visitors", "Visitor Management"],
+    ["/settings/users", "System Configuration"],
+    ["/settings/logs", "System Configuration"],
+    ["/employees", "Human Resource"],
+    ["/recruitment", "Human Resource"],
+  ]
+  for (const [prefix, label] of PREFIX_MODULES) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) return label
+  }
 
   function pathMatchesHref(href: string): boolean {
     if (href === path) return true

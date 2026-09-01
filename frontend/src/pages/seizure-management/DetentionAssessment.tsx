@@ -5,11 +5,13 @@ import {
   Eye,
   Loader2,
   Package,
+  PackageOpen,
   Plus,
   Search,
   Trash2,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
+import { TableActionGroup, TableActionIcon } from "@/components/seizure/table-action-icon"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,6 +37,11 @@ import {
   type DetentionAssessmentRecord,
 } from "@/lib/seizure-management-api"
 import { toast } from "@/hooks/use-toast"
+import { ExportMenu } from "@/components/seizure/export-menu"
+import AssessmentReportPrint from "@/components/seizure/AssessmentReportPrint"
+import { downloadCsv, joinList } from "@/lib/csv-export"
+import { useBatchPdfExport } from "@/hooks/use-batch-pdf-export"
+import { PdfExportHost } from "@/components/seizure/pdf-export-host"
 
 function goodsSummary(memo: DetentionMemoApiRecord): string {
   const items = memo.goodsItems ?? []
@@ -138,6 +145,113 @@ export default function DetentionAssessmentPage() {
     }
   }, [memos, assessmentByMemoId])
 
+  const pdf = useBatchPdfExport<{
+    row: DetentionAssessmentRecord
+    memo: DetentionMemoApiRecord
+  }>(`assessments-${new Date().toISOString().slice(0, 10)}.pdf`)
+
+  const exportCsv = () => {
+    const headers = [
+      "Sheet Sr. No",
+      "Case No",
+      "Detention Memo No",
+      "Detention Date",
+      "Place of Detention",
+      "Detention Type",
+      "Owner",
+      "Verification",
+      "Assessment No",
+      "Assessment Date",
+      "Examining Officer",
+      "Goods Condition",
+      "Valuation Notes",
+      "Findings",
+      "Document Relevance",
+      "Assessment Status",
+      "Approved By",
+      "Approved At",
+      "Approval Remarks",
+      "Rejection Reason",
+      "Submitted At",
+      "Viewed At",
+      "Created By",
+      "Updated By",
+      "Goods Line No",
+      "Goods QR",
+      "Description of Goods",
+      "PCT Code",
+      "Quantity",
+      "Unit",
+      "Condition",
+      "Assessable Value (PKR)",
+      "Perishable",
+      "ID / Chassis No",
+      "Item Notes",
+      "Goods Image URLs",
+    ]
+    const rows: unknown[][] = []
+    filtered.forEach((memo, index) => {
+      const assessment = assessmentByMemoId.get(memo.id)
+      const goods = memo.goodsItems?.length ? memo.goodsItems : [null]
+      goods.forEach((item, itemIndex) => {
+        rows.push([
+          index + 1,
+          memo.caseNo,
+          memo.referenceNumber,
+          memo.dateTimeDetention,
+          memo.placeOfDetention,
+          memo.detentionType,
+          memo.owner?.name,
+          memo.verificationStatus,
+          assessment?.referenceNumber,
+          assessment?.assessmentDate,
+          assessment?.examiningOfficer,
+          assessment?.goodsCondition,
+          assessment?.valuationNotes,
+          assessment?.findings,
+          assessment?.documentRelevance,
+          assessment?.status,
+          assessment?.approvedBy,
+          assessment?.approvedAt,
+          assessment?.approvalRemarks,
+          assessment?.rejectionReason,
+          assessment?.submittedAt,
+          assessment?.viewedAt,
+          assessment?.createdBy,
+          assessment?.updatedBy,
+          item ? itemIndex + 1 : "",
+          item?.qrCodeNumber,
+          item?.description,
+          item?.pctCode,
+          item?.quantity,
+          item?.unit,
+          item?.condition,
+          item?.assessableValuePkr,
+          item ? (item.perishable ? "Yes" : "No") : "",
+          item?.identificationRef,
+          item?.itemNotes,
+          joinList(item?.images),
+        ])
+      })
+    })
+    downloadCsv(`assessments-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+  }
+
+  const exportPdf = () => {
+    const items = filtered.flatMap((memo) => {
+      const assessment = assessmentByMemoId.get(memo.id)
+      return assessment ? [{ row: assessment, memo }] : []
+    })
+    if (!items.length) {
+      toast({
+        title: "No assessments to export",
+        description: "Create an assessment first, then export PDF.",
+      })
+      return
+    }
+    pdf.start(items)
+  }
+
   const handleDelete = async (id: string) => {
     try {
       await deleteAssessment(id)
@@ -200,29 +314,35 @@ export default function DetentionAssessmentPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button asChild>
-              <Link to={ROUTES.SEIZURE_MGMT_ASSESSMENT_CREATE}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Assessment
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ml-auto">
+              <Button asChild>
+                <Link to={ROUTES.SEIZURE_MGMT_ASSESSMENT_CREATE}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Assessment
+                </Link>
+              </Button>
+              <ExportMenu
+                disabled={filtered.length === 0}
+                onExportCsv={exportCsv}
+                onExportPdf={exportPdf}
+              />
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <Table>
+          <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Case No</TableHead>
-                  <TableHead>Detention Memo No</TableHead>
-                  <TableHead>Detention Date</TableHead>
-                  <TableHead>Place</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Goods</TableHead>
-                  <TableHead>Value</TableHead>
-                  <TableHead>Verification</TableHead>
-                  <TableHead>Assessment</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-[10%]">Case No</TableHead>
+                  <TableHead className="w-[12%]">Detention Memo No</TableHead>
+                  <TableHead className="w-[10%]">Detention Date</TableHead>
+                  <TableHead className="w-[12%]">Place</TableHead>
+                  <TableHead className="w-[8%]">Type</TableHead>
+                  <TableHead className="w-[10%]">Owner</TableHead>
+                  <TableHead className="w-[10%]">Goods</TableHead>
+                  <TableHead className="w-[8%]">Value</TableHead>
+                  <TableHead className="w-[8%]">Verification</TableHead>
+                  <TableHead className="w-[8%]">Assessment</TableHead>
+                  <TableHead className="w-[7.5rem] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -246,56 +366,58 @@ export default function DetentionAssessmentPage() {
 
                     return (
                       <TableRow key={memo.id}>
-                        <TableCell className="font-medium whitespace-nowrap">
+                        <TableCell className="font-medium truncate" title={memo.caseNo || ""}>
                           {memo.caseNo || "—"}
                         </TableCell>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs truncate" title={memo.referenceNumber || ""}>
                           {memo.referenceNumber || "—"}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">
+                        <TableCell className="truncate">
                           {memo.dateTimeDetention?.slice(0, 10) || "—"}
                         </TableCell>
-                        <TableCell className="max-w-[140px] truncate" title={memo.placeOfDetention}>
+                        <TableCell className="truncate" title={memo.placeOfDetention}>
                           {memo.placeOfDetention || "—"}
                         </TableCell>
-                        <TableCell>{memo.detentionType || "—"}</TableCell>
-                        <TableCell className="max-w-[120px] truncate" title={memo.owner?.name}>
+                        <TableCell className="truncate">{memo.detentionType || "—"}</TableCell>
+                        <TableCell className="truncate" title={memo.owner?.name}>
                           {memo.owner?.name || "—"}
                         </TableCell>
-                        <TableCell className="max-w-[140px] truncate" title={goodsSummary(memo)}>
+                        <TableCell className="truncate" title={goodsSummary(memo)}>
                           {goodsSummary(memo)}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">{goodsValue(memo)}</TableCell>
+                        <TableCell className="truncate">{goodsValue(memo)}</TableCell>
                         <TableCell>
                           <Badge variant="outline">{memo.verificationStatus || "—"}</Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="space-y-0.5">
+                          <div className="space-y-0.5 min-w-0">
                             {assessmentStatusBadge(assessment)}
                             {assessment?.documentRelevance &&
                               assessment.documentRelevance !== "Pending" && (
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-xs text-muted-foreground truncate">
                                   {assessment.documentRelevance}
                                 </p>
                               )}
                             {assessment?.examiningOfficer && (
-                              <p className="text-xs text-muted-foreground truncate max-w-[120px]">
+                              <p className="text-xs text-muted-foreground truncate">
                                 {assessment.examiningOfficer}
                               </p>
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1 flex-wrap">
-                            <Button variant="ghost" size="sm" asChild title="View memo">
-                              <Link to={getDetentionMemoDetailPath(memo.id)}>
-                                <Eye className="h-4 w-4" />
-                              </Link>
-                            </Button>
+                        <TableCell className="overflow-visible p-2 text-right align-middle">
+                          <TableActionGroup>
+                            <TableActionIcon label="View memo" to={getDetentionMemoDetailPath(memo.id)}>
+                              <Eye className="h-4 w-4" />
+                            </TableActionIcon>
                             {assessment ? (
                               <>
-                                <Button
-                                  size="sm"
+                                <TableActionIcon
+                                  label={
+                                    assessment.status === "Draft" || assessment.status === "Rejected"
+                                      ? "Edit assessment"
+                                      : "View assessment"
+                                  }
                                   onClick={() =>
                                     navigate(
                                       assessment.status === "Draft" ||
@@ -305,52 +427,43 @@ export default function DetentionAssessmentPage() {
                                     )
                                   }
                                 >
-                                  <ClipboardCheck className="h-4 w-4 mr-1" />
-                                  Assess
-                                </Button>
+                                  <ClipboardCheck className="h-4 w-4" />
+                                </TableActionIcon>
                                 {isApproved && assessment.documentRelevance === "Relevant" && (
-                                  <Button variant="outline" size="sm" asChild>
-                                    <Link to={ROUTES.RELEASE_INVENTORY}>Release</Link>
-                                  </Button>
+                                  <TableActionIcon label="Release" to={ROUTES.RELEASE_INVENTORY}>
+                                    <PackageOpen className="h-4 w-4" />
+                                  </TableActionIcon>
                                 )}
-                                {isApproved &&
-                                  assessment.documentRelevance === "Not Relevant" && (
-                                    <Button variant="outline" size="sm" asChild>
-                                      <Link
-                                        to={recoveryMemoCreateHref(
-                                          assessment.detentionMemoId,
-                                          assessment.id
-                                        )}
-                                      >
-                                        <Package className="h-4 w-4 mr-1" />
-                                        Recovery
-                                      </Link>
-                                    </Button>
-                                  )}
+                                {isApproved && assessment.documentRelevance === "Not Relevant" && (
+                                  <TableActionIcon
+                                    label="Create recovery memo"
+                                    to={recoveryMemoCreateHref(
+                                      assessment.detentionMemoId,
+                                      assessment.id
+                                    )}
+                                  >
+                                    <Package className="h-4 w-4" />
+                                  </TableActionIcon>
+                                )}
                                 {assessment.status !== "Approved" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
+                                  <TableActionIcon
+                                    label="Delete assessment"
+                                    destructive
                                     onClick={() => void handleDelete(assessment.id)}
                                   >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
+                                    <Trash2 className="h-4 w-4" />
+                                  </TableActionIcon>
                                 )}
                               </>
                             ) : (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  navigate(
-                                    `${ROUTES.SEIZURE_MGMT_ASSESSMENT_CREATE}?detentionMemoId=${encodeURIComponent(memo.id)}`
-                                  )
-                                }
+                              <TableActionIcon
+                                label="Assess"
+                                to={`${ROUTES.SEIZURE_MGMT_ASSESSMENT_CREATE}?detentionMemoId=${encodeURIComponent(memo.id)}`}
                               >
-                                <ClipboardCheck className="h-4 w-4 mr-1" />
-                                Assess
-                              </Button>
+                                <ClipboardCheck className="h-4 w-4" />
+                              </TableActionIcon>
                             )}
-                          </div>
+                          </TableActionGroup>
                         </TableCell>
                       </TableRow>
                     )
@@ -358,9 +471,13 @@ export default function DetentionAssessmentPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
+      <PdfExportHost hostRef={pdf.hostRef}>
+        {pdf.items?.map((item) => (
+          <AssessmentReportPrint key={item.row.id} row={item.row} memo={item.memo} embedded />
+        ))}
+      </PdfExportHost>
     </ModulePageLayout>
   )
 }

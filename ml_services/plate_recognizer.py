@@ -350,6 +350,47 @@ def reading_score(text: str, conf: float) -> float:
     return conf + min(len(key), 12) * 0.035 + bonus - penalty
 
 
+def scale_for_plate_detect(
+    frame: np.ndarray,
+    max_w: int,
+    max_h: int,
+) -> tuple[np.ndarray, float, float]:
+    """Return (detect_frame, sx, sy) mapping detect pixels → original pixels."""
+    if frame is None or frame.size == 0:
+        return frame, 1.0, 1.0
+    h, w = frame.shape[:2]
+    if max_w <= 0 and max_h <= 0:
+        return frame, 1.0, 1.0
+    if max_w <= 0:
+        max_w = w
+    if max_h <= 0:
+        max_h = h
+    if w <= max_w and h <= max_h:
+        return frame, 1.0, 1.0
+    scale = min(max_w / float(w), max_h / float(h))
+    dw = max(2, int(w * scale) // 2 * 2)
+    dh = max(2, int(h * scale) // 2 * 2)
+    small = cv2.resize(frame, (dw, dh), interpolation=cv2.INTER_AREA)
+    return small, w / float(dw), h / float(dh)
+
+
+def map_box_to_original(
+    box: tuple[int, int, int, int] | list[int],
+    sx: float,
+    sy: float,
+    orig_w: int,
+    orig_h: int,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    ox1 = max(0, min(orig_w, int(round(x1 * sx))))
+    oy1 = max(0, min(orig_h, int(round(y1 * sy))))
+    ox2 = max(0, min(orig_w, int(round(x2 * sx))))
+    oy2 = max(0, min(orig_h, int(round(y2 * sy))))
+    if ox2 <= ox1 or oy2 <= oy1:
+        return x1, y1, x2, y2
+    return ox1, oy1, ox2, oy2
+
+
 def upscale(crop: np.ndarray, min_height: int = 120) -> np.ndarray:
     h, w = crop.shape[:2]
     scale = max(1.0, min_height / max(h, 1))
@@ -559,16 +600,30 @@ class PlateEngine:
         self._infer_lock = threading.Lock()
         self._save_lock = threading.Lock()
         self._last_saved: dict[str, float] = {}
-        self._best_saved: dict[str, float] = {}  # plate_key → best ocr*det score already on disk
+        self._best_saved: dict[str, float] = {}  # raw track slot → best score
+        self._raw_was_valid: dict[str, bool] = {}
         self.conf = _env_float("ML_PLATE_CONF", 0.45)
-        self.min_ocr_conf = _env_float("ML_PLATE_MIN_OCR_CONF", 0.45)
+        self.min_ocr_conf = _env_float(
+            "ML_PLATE_RECO_CONF",
+            _env_float("ML_PLATE_MIN_OCR_CONF", 0.45),
+        )
         self.min_det_conf = _env_float("ML_PLATE_MIN_DET_CONF", 0.45)
         self.min_plate_len = _env_int("ML_PLATE_MIN_LEN", 5)
-        # Default: only one snapshot per plate unless a better OCR read appears
+        # Only used when upgrading a track from UNKNOWN → accepted text
         self.save_interval = _env_float("ML_PLATE_SAVE_INTERVAL", 3600.0)
-        # 4K cameras need larger imgsz — 640 misses small plates
+        # Detect on a ~1080p copy; crop/OCR always from the original (4K) frame.
+        self.detect_width = max(0, _env_int("ML_PLATE_DETECT_WIDTH", 1920))
+        self.detect_height = max(0, _env_int("ML_PLATE_DETECT_HEIGHT", 1080))
         self.imgsz = max(640, _env_int("ML_PLATE_IMGSZ", 1280))
-        self.device = os.getenv("ML_DEVICE", "0").strip() or "0"
+        self.device = "cpu"
+        try:
+            from inference_engine import resolve_ml_device
+
+            resolved = resolve_ml_device()
+            self.device = "cpu" if resolved == "cpu" else str(resolved)
+        except Exception:
+            raw = os.getenv("ML_DEVICE", "0").strip() or "0"
+            self.device = "cpu" if raw.lower() == "cpu" else raw
         self.require_vehicle = os.getenv("ML_PLATE_REQUIRE_VEHICLE", "true").strip().lower() in (
             "1",
             "true",
@@ -606,8 +661,16 @@ class PlateEngine:
             import easyocr
 
             use_gpu = self.device.lower() != "cpu"
-            self.reader = easyocr.Reader(["en"], gpu=use_gpu, verbose=False)
-            print(f"[plate] EasyOCR ready (gpu={use_gpu})")
+            try:
+                self.reader = easyocr.Reader(["en"], gpu=use_gpu, verbose=False)
+                print(f"[plate] EasyOCR ready (gpu={use_gpu})")
+            except Exception as gpu_exc:
+                if not use_gpu:
+                    raise
+                print(f"[plate] EasyOCR GPU failed ({gpu_exc}) — retrying CPU")
+                self.device = "cpu"
+                self.reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+                print("[plate] EasyOCR ready (gpu=False)")
         except Exception as exc:
             print(f"[plate] Failed to load EasyOCR: {exc}")
             return
@@ -658,42 +721,48 @@ class PlateEngine:
         *,
         camera_key: str = "",
         force: bool = False,
+        track_id: int = 0,
+        bbox: tuple[int, int, int, int] | None = None,
     ) -> dict[str, str] | None:
-        """Save plate crop + annotated frame under media/licence plates/."""
-        if not is_valid_plate(plate_text, min_len=self.min_plate_len):
-            return None
-        key = canonicalize_plate(plate_text) or plate_key(plate_text)
-        if not key:
-            return None
-        plate_text = format_plate_display(key)
+        """Save a 4K-source plate crop. OCR/format/OSD never block the JPEG."""
+        valid = is_valid_plate(plate_text, min_len=self.min_plate_len)
+        if valid:
+            key = canonicalize_plate(plate_text) or plate_key(plate_text)
+            plate_text = format_plate_display(key) if key else "UNKNOWN"
+            if not key:
+                valid = False
+                key = "UNKNOWN"
+                plate_text = "UNKNOWN"
+        else:
+            key = "UNKNOWN"
+            plate_text = "UNKNOWN"
+
+        if track_id:
+            slot = f"{camera_key}:raw:{int(track_id)}"
+        elif bbox is not None:
+            cx = int((bbox[0] + bbox[2]) / 2) // 80
+            cy = int((bbox[1] + bbox[3]) / 2) // 80
+            slot = f"{camera_key}:raw:{cx}_{cy}"
+        else:
+            slot = f"{camera_key}:raw:{key}"
+
         score = float(ocr_conf) * float(det_conf) + float(ocr_conf) * 0.5
         now = time.time()
         with self._save_lock:
-            # Collapse OCR variants of the same physical plate per camera
-            slot = f"{camera_key}:{key}"
-            for existing_slot, prev_best in list(self._best_saved.items()):
-                if not existing_slot.startswith(f"{camera_key}:"):
-                    continue
-                existing_key = existing_slot.split(":", 1)[-1]
-                if not plates_are_same_vehicle(key, existing_key):
-                    continue
-                last = self._last_saved.get(existing_slot, 0.0)
-                if not force:
-                    if score <= prev_best * 1.05:
-                        return None
-                    if now - last < self.save_interval and score <= prev_best:
-                        return None
-                slot = existing_slot
-                break
             if not force:
-                prev_best = self._best_saved.get(slot, 0.0)
                 last = self._last_saved.get(slot, 0.0)
-                if prev_best > 0 and score <= prev_best * 1.05:
-                    return None
-                if now - last < self.save_interval and score <= prev_best:
-                    return None
+                prev_best = self._best_saved.get(slot, 0.0)
+                prev_valid = self._raw_was_valid.get(slot, False)
+                if last > 0:
+                    # One raw crop per track. Allow a second write only to
+                    # upgrade UNKNOWN → accepted plate text (or a clearly better read).
+                    if prev_valid and (not valid or score <= prev_best * 1.05):
+                        return None
+                    if not prev_valid and not valid:
+                        return None
             self._last_saved[slot] = now
             self._best_saved[slot] = max(self._best_saved.get(slot, 0.0), score)
+            self._raw_was_valid[slot] = bool(valid or self._raw_was_valid.get(slot, False))
 
         media = resolve_plate_media_dir()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -761,19 +830,26 @@ class PlateEngine:
         force_save: bool = False,
         vehicle_boxes: list[list[float]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Run plate YOLO + track-gated OCR on a BGR frame. Optionally save accepted plates."""
+        """
+        Plate YOLO on a scaled copy (~1080p), crop from original 4K, save every
+        qualifying detection (per track), then OCR for ABC 123 / UNKNOWN labels.
+        Vehicle / OCR success / Pakistan format / OSD never block the crop.
+        """
         if not self.available or self.detector is None or frame is None or frame.size == 0:
             return []
 
-        height, width = frame.shape[:2]
+        orig_h, orig_w = frame.shape[:2]
+        detect_frame, sx, sy = scale_for_plate_detect(
+            frame, self.detect_width, self.detect_height
+        )
+        det_h, det_w = detect_frame.shape[:2]
         det_conf_thresh = conf if conf is not None else self.conf
         detections: list[dict[str, Any]] = []
-        need_vehicle = self.require_vehicle
         now = time.time()
 
         with self._infer_lock:
             results = self.detector.predict(
-                frame,
+                detect_frame,
                 conf=det_conf_thresh,
                 imgsz=self.imgsz,
                 device=self.device,
@@ -784,10 +860,15 @@ class PlateEngine:
             if result.boxes is None:
                 continue
             for box in result.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(width, x2), min(height, y2)
+                dx1, dy1, dx2, dy2 = map(int, box.xyxy[0].tolist())
+                dx1, dy1 = max(0, dx1), max(0, dy1)
+                dx2, dy2 = min(det_w, dx2), min(det_h, dy2)
                 det_conf = float(box.conf[0])
+                if dx2 <= dx1 or dy2 <= dy1:
+                    continue
+                x1, y1, x2, y2 = map_box_to_original(
+                    (dx1, dy1, dx2, dy2), sx, sy, orig_w, orig_h
+                )
                 if x2 <= x1 or y2 <= y1:
                     continue
                 crop = frame[y1:y2, x1:x2]
@@ -796,23 +877,17 @@ class PlateEngine:
 
                 bbox = (x1, y1, x2, y2)
                 track = self._ocr_tracker.assign(camera_key, bbox, now)
+                near_vehicle = plate_near_vehicle(
+                    bbox,
+                    vehicle_boxes,
+                    frame_w=orig_w,
+                    frame_h=orig_h,
+                    min_iou=self.vehicle_iou,
+                    expand=self.vehicle_expand,
+                )
 
-                near_vehicle = True
-                if need_vehicle:
-                    near_vehicle = plate_near_vehicle(
-                        bbox,
-                        vehicle_boxes,
-                        frame_w=width,
-                        frame_h=height,
-                        min_iou=self.vehicle_iou,
-                        expand=self.vehicle_expand,
-                    )
-
-                # Never burn OCR on OSD/false plates far from a vehicle
-                run_ocr = False
-                if near_vehicle or not need_vehicle:
-                    run_ocr = self._ocr_tracker.should_ocr(track, now)
-
+                # OCR labels the crop; it is not a save gate.
+                run_ocr = self._ocr_tracker.should_ocr(track, now)
                 plate_text = track.plate_text
                 ocr_conf = track.ocr_conf
                 ocr_ran = False
@@ -820,14 +895,10 @@ class PlateEngine:
                     plate_text, ocr_conf = self.ocr_plate(crop)
                     ocr_ran = True
                     if looks_like_datetime_ocr(plate_text):
+                        # Keep the JPEG; never store OSD/clock text as a plate number.
                         plate_text, ocr_conf = "", 0.0
 
-                accepted = (
-                    is_valid_plate(plate_text, self.min_plate_len)
-                    and ocr_conf >= self.min_ocr_conf
-                    and det_conf >= self.min_det_conf
-                    and near_vehicle
-                )
+                accepted = is_valid_plate(plate_text, self.min_plate_len) and ocr_conf >= self.min_ocr_conf
 
                 if ocr_ran:
                     self._ocr_tracker.mark_ocr(
@@ -839,29 +910,32 @@ class PlateEngine:
                     )
                     plate_text = track.plate_text or plate_text
                     ocr_conf = track.ocr_conf if track.ocr_conf else ocr_conf
+                    accepted = is_valid_plate(plate_text, self.min_plate_len) and ocr_conf >= self.min_ocr_conf
+
+                save_text = plate_text if accepted else "UNKNOWN"
+                overlay_text = save_text
 
                 saved: dict[str, str] | None = None
-                # Only persist accepted reads — no low-OCR / non-vehicle bypass
-                should_save = save and accepted and ocr_ran
-                if should_save:
+                if save:
                     annotated = frame.copy()
-                    label = plate_text if plate_text else "PLATE"
-                    draw_plate_box(annotated, bbox, label, accepted)
+                    draw_plate_box(annotated, bbox, overlay_text, accepted)
                     saved = self.save_snapshot(
                         annotated,
                         crop,
-                        plate_text or "UNKNOWN",
+                        save_text,
                         det_conf,
                         ocr_conf,
                         camera_key=camera_key,
                         force=force_save,
+                        track_id=track.track_id,
+                        bbox=bbox,
                     )
 
                 det: dict[str, Any] = {
                     "class_id": 0,
                     "class_name": "license_plate",
-                    "label": plate_text if plate_text else "license_plate",
-                    "plate_number": plate_text,
+                    "label": overlay_text,
+                    "plate_number": overlay_text,
                     "confidence": round(det_conf, 4),
                     "ocr_confidence": round(float(ocr_conf), 4),
                     "bbox": [x1, y1, x2, y2],

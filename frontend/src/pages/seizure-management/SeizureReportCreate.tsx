@@ -35,6 +35,7 @@ import {
 } from "@/lib/seizure-management-api"
 import { getStoredUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
 import { DetentionMemoReadOnlyView } from "@/pages/seizure-management/DetentionMemoReadOnlyView"
 
 function buildSheetNotes(
@@ -65,6 +66,7 @@ export default function SeizureReportCreatePage() {
   const [memoLoading, setMemoLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [invalidField, setInvalidField] = useState("")
 
   const [form, setForm] = useState({
     detentionMemoId: memoFromQuery,
@@ -207,28 +209,47 @@ export default function SeizureReportCreatePage() {
       recoveryMemoId: approvedRecovery?.id ?? "",
       recoveryAssessmentNotes: buildSheetNotes(assess, approvedRecovery),
     }))
+    setInvalidField("")
   }
 
   const handleSave = async (submit: boolean) => {
-    if (!form.detentionMemoId || !form.preparedBy.trim()) {
-      toast({ title: "Detention memo and prepared by are required", variant: "destructive" })
+    const missing = firstMissingField([
+      { id: "sr-memo", label: "Detention Memo", missing: !form.detentionMemoId },
+      { id: "sr-prepared-by", label: "Prepared By", missing: !form.preparedBy.trim() },
+      {
+        id: "sr-assessment",
+        label: "Assessment",
+        missing: submit && !form.assessmentId,
+        message: "Completed assessment is required to submit.",
+      },
+      {
+        id: "sr-assessment",
+        label: "Assessment",
+        title: "Assessment must be approved",
+        missing: submit && Boolean(assessment) && assessment?.status !== "Approved",
+        message: "Assessment must be approved before submit.",
+      },
+      {
+        id: "sr-recovery",
+        label: "Approved Recovery Memo",
+        missing: submit && !form.recoveryMemoId,
+        message: "An approved recovery memo is required to submit.",
+      },
+      {
+        id: "sr-recovery",
+        label: "Approved Recovery Memo",
+        title: "Recovery memo must be approved",
+        missing: submit && Boolean(selectedRecovery) && selectedRecovery?.approvalStatus !== "Approved",
+        message: "Recovery memo must be approved before submit.",
+      },
+      { id: "sr-summary", label: "Summary", missing: submit && !form.summary.trim() },
+    ])
+    if (missing) {
+      setInvalidField(missing.id)
+      reportMissingField(missing)
       return
     }
-    if (submit && (!form.assessmentId || !form.recoveryMemoId)) {
-      toast({
-        title: "Completed assessment and approved recovery memo required to submit",
-        variant: "destructive",
-      })
-      return
-    }
-    if (submit && assessment && assessment.status !== "Approved") {
-      toast({ title: "Assessment must be approved before submit", variant: "destructive" })
-      return
-    }
-    if (submit && selectedRecovery && selectedRecovery.approvalStatus !== "Approved") {
-      toast({ title: "Recovery memo must be approved before submit", variant: "destructive" })
-      return
-    }
+    setInvalidField("")
     setSaving(true)
     try {
       const saved = await createSeizureReport({
@@ -289,9 +310,9 @@ export default function SeizureReportCreatePage() {
             </CardHeader>
             <CardContent className="space-y-4 px-4 sm:px-6">
               <div className="space-y-2 max-w-xl">
-                <Label>Detention Memo / Case *</Label>
+                <Label htmlFor="sr-memo">Detention Memo / Case <span className="text-red-600">*</span></Label>
                 <Select value={form.detentionMemoId || undefined} onValueChange={onMemoSelect}>
-                  <SelectTrigger>
+                  <SelectTrigger id="sr-memo" className="w-full" aria-invalid={invalidField === "sr-memo"}>
                     <SelectValue placeholder="Select case" />
                   </SelectTrigger>
                   <SelectContent>
@@ -318,11 +339,17 @@ export default function SeizureReportCreatePage() {
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-            <Card>
+            <Card
+              id="sr-assessment"
+              tabIndex={-1}
+              className={
+                invalidField === "sr-assessment" ? "ring-2 ring-red-500 outline-none" : undefined
+              }
+            >
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <ClipboardCheck className="h-4 w-4" />
-                  Assessment
+                  Assessment <span className="text-red-600">*</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
@@ -363,7 +390,7 @@ export default function SeizureReportCreatePage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="space-y-2">
-                  <Label>Approved Recovery Memo</Label>
+                  <Label htmlFor="sr-recovery">Approved Recovery Memo <span className="text-red-600">*</span></Label>
                   <Select
                     value={form.recoveryMemoId || undefined}
                     onValueChange={(v) => {
@@ -373,9 +400,10 @@ export default function SeizureReportCreatePage() {
                         recoveryMemoId: v,
                         recoveryAssessmentNotes: buildSheetNotes(assessment, r),
                       }))
+                      if (invalidField === "sr-recovery") setInvalidField("")
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="sr-recovery" className="w-full" aria-invalid={invalidField === "sr-recovery"}>
                       <SelectValue
                         placeholder={
                           recoveryOptions.length ? "Select recovery memo" : "None approved"
@@ -431,19 +459,29 @@ export default function SeizureReportCreatePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Prepared By *</Label>
+                  <Label htmlFor="sr-prepared-by">Prepared By <span className="text-red-600">*</span></Label>
                   <Input
+                    id="sr-prepared-by"
                     value={form.preparedBy}
-                    onChange={(e) => setForm((f) => ({ ...f, preparedBy: e.target.value }))}
+                    aria-invalid={invalidField === "sr-prepared-by"}
+                    onChange={(e) => {
+                      setForm((f) => ({ ...f, preparedBy: e.target.value }))
+                      if (invalidField === "sr-prepared-by") setInvalidField("")
+                    }}
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label>Summary</Label>
+                <Label htmlFor="sr-summary">Summary <span className="text-red-600">*</span></Label>
                 <Textarea
+                  id="sr-summary"
                   value={form.summary}
-                  onChange={(e) => setForm((f) => ({ ...f, summary: e.target.value }))}
+                  aria-invalid={invalidField === "sr-summary"}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, summary: e.target.value }))
+                    if (invalidField === "sr-summary") setInvalidField("")
+                  }}
                   rows={4}
                   placeholder="Executive summary of the seizure…"
                 />

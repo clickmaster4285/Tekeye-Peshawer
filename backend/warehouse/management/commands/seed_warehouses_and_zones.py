@@ -34,6 +34,11 @@ class Command(BaseCommand):
                 "code": "WH-DIK-RETTA",
                 "name": "New Warehouse, Retta Kulachi",
             },
+            {
+                "location_code": "SWH_RATTA_KULACHI",
+                "code": "WH-SWH-RK-01",
+                "name": "SWH Ratta Kulachi",
+            },
         ]
 
         total_created = 0

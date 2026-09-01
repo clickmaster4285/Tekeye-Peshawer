@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Switch } from "@/components/ui/switch"
 import { clearAuth, getStoredUser, isAuthenticated, AUTH_USER_UPDATED_EVENT } from "@/lib/auth"
+import { stopOfficerGpsTracking } from "@/lib/officer-gps-session"
+import { queryClient } from "@/lib/query-client"
 import { clearLegacyVmsLocalStorage } from "@/lib/vms-list-api"
 import { getRoleDisplayLabel, normalizeRole } from "@/lib/role-access"
 import { isGlobalAdmin } from "@/lib/location-access"
@@ -122,8 +124,10 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
     }
   }, [loadNotifications])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await stopOfficerGpsTracking({ endDuty: true })
     clearAuth()
+    queryClient.clear()
     clearLegacyVmsLocalStorage()
     navigate(ROUTES.LOGIN, { replace: true })
   }

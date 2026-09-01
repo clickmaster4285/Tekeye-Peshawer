@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   ClipboardCheck,
@@ -11,6 +11,7 @@ import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { PrintMenu } from "@/components/seizure/print-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,6 +20,7 @@ import {
   getDetentionMemoDetailPath,
   getSeizureMgmtAssessmentDetailPath,
   getSeizureMgmtRecoveryMemoDetailPath,
+  getSeizureMgmtSeizureReportDetailPath,
 } from "@/routes/config"
 import {
   fetchAssessmentById,
@@ -32,7 +34,9 @@ import {
 import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { getStoredUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
+import { reportMissingField } from "@/lib/form-missing-field"
 import { DetentionMemoReadOnlyView } from "@/pages/seizure-management/DetentionMemoReadOnlyView"
+import SeizureReportPrint from "@/components/seizure/SeizureReportPrint"
 
 function DetailRow({ label, value }: { label: string; value: string | undefined }) {
   return (
@@ -62,6 +66,10 @@ function formatWhen(value?: string) {
 export default function SeizureReportDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const printMode = searchParams.get("print")
+  const autoPrint = searchParams.get("autoprint") === "1"
+  const autoSavePdf = searchParams.get("savepdf") === "1"
   const [row, setRow] = useState<SeizureReportRecord | null>(null)
   const [memo, setMemo] = useState<DetentionMemoApiRecord | null>(null)
   const [assessment, setAssessment] = useState<DetentionAssessmentRecord | null>(null)
@@ -72,6 +80,7 @@ export default function SeizureReportDetailPage() {
   const [editNotes, setEditNotes] = useState("")
   const [editPreparedBy, setEditPreparedBy] = useState("")
   const [editReportDate, setEditReportDate] = useState("")
+  const [invalidField, setInvalidField] = useState("")
 
   useEffect(() => {
     if (!id) return
@@ -120,6 +129,13 @@ export default function SeizureReportDetailPage() {
     }
   }, [id])
 
+  useEffect(() => {
+    if (printMode === "full" && autoPrint && row) {
+      const timer = window.setTimeout(() => window.print(), 350)
+      return () => window.clearTimeout(timer)
+    }
+  }, [printMode, autoPrint, row])
+
   if (loading) {
     return (
       <ModulePageLayout
@@ -153,6 +169,18 @@ export default function SeizureReportDetailPage() {
     )
   }
 
+  if (printMode === "full") {
+    return (
+      <SeizureReportPrint
+        row={row}
+        memo={memo}
+        assessment={assessment}
+        recovery={recovery}
+        autoSavePdf={autoSavePdf}
+      />
+    )
+  }
+
   const isDraft = row.status === "Draft"
   const canSubmit =
     isDraft &&
@@ -163,9 +191,11 @@ export default function SeizureReportDetailPage() {
 
   const saveDraft = async () => {
     if (!editPreparedBy.trim()) {
-      toast({ title: "Prepared by is required", variant: "destructive" })
+      setInvalidField("sr-prepared-by")
+      reportMissingField({ id: "sr-prepared-by", label: "Prepared By" })
       return
     }
+    setInvalidField("")
     setActing(true)
     try {
       const updated = await updateSeizureReport(row.id, {
@@ -200,9 +230,16 @@ export default function SeizureReportDetailPage() {
       return
     }
     if (!editPreparedBy.trim()) {
-      toast({ title: "Prepared by is required", variant: "destructive" })
+      setInvalidField("sr-prepared-by")
+      reportMissingField({ id: "sr-prepared-by", label: "Prepared By" })
       return
     }
+    if (!editSummary.trim()) {
+      setInvalidField("sr-summary")
+      reportMissingField({ id: "sr-summary", label: "Summary" })
+      return
+    }
+    setInvalidField("")
     setActing(true)
     try {
       const updated = await updateSeizureReport(row.id, {
@@ -290,13 +327,17 @@ export default function SeizureReportDetailPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
               {statusBadge(row.status)}
               {memo?.verificationStatus && (
                 <Badge variant={memo.verificationStatus === "Verified" ? "default" : "secondary"}>
                   {memo.verificationStatus}
                 </Badge>
               )}
+              <PrintMenu
+                printHref={`${getSeizureMgmtSeizureReportDetailPath(row.id)}?print=full`}
+                pdfHref={`${getSeizureMgmtSeizureReportDetailPath(row.id)}?print=full&savepdf=1`}
+              />
             </div>
           </CardHeader>
 
@@ -334,18 +375,28 @@ export default function SeizureReportDetailPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Prepared By *</Label>
+                      <Label htmlFor="sr-prepared-by">Prepared By <span className="text-red-600">*</span></Label>
                       <Input
+                        id="sr-prepared-by"
                         value={editPreparedBy}
-                        onChange={(e) => setEditPreparedBy(e.target.value)}
+                        aria-invalid={invalidField === "sr-prepared-by"}
+                        onChange={(e) => {
+                          setEditPreparedBy(e.target.value)
+                          if (invalidField === "sr-prepared-by") setInvalidField("")
+                        }}
                       />
                     </div>
                     <div className="md:col-span-2 space-y-2">
-                      <Label>Summary</Label>
+                      <Label htmlFor="sr-summary">Summary <span className="text-red-600">*</span></Label>
                       <Textarea
+                        id="sr-summary"
                         rows={4}
                         value={editSummary}
-                        onChange={(e) => setEditSummary(e.target.value)}
+                        aria-invalid={invalidField === "sr-summary"}
+                        onChange={(e) => {
+                          setEditSummary(e.target.value)
+                          if (invalidField === "sr-summary") setInvalidField("")
+                        }}
                         placeholder="Executive summary of the seizure…"
                       />
                     </div>

@@ -5,6 +5,7 @@ export const LOCATION_OPTIONS = [
   { value: "NOWSHERA", label: "Nowshera" },
   { value: "MARDAN", label: "Mardan" },
   { value: "DI_KHAN", label: "DI Khan" },
+  { value: "SWH_RATTA_KULACHI", label: "SWH Ratta Kulachi" },
 ] as const;
 
 export type LocationCode = (typeof LOCATION_OPTIONS)[number]["value"];

@@ -228,15 +228,17 @@ export function getMlLiveMultipartUrl(
 ): string | null {
   const direct = (camera.ml_live_stream_url || "").trim()
   const streamKey = (camera.ml_stream_key || "").trim()
-  const route = streamKey || `cam-${camera.id}`
+  const route = streamKey || (camera.id ? `cam-${camera.id}` : "")
   let url = ""
-  if (direct.startsWith("/ml/")) {
+  if (direct.startsWith("/ml/") || /^https?:\/\//i.test(direct)) {
     if (direct.endsWith("/jpeg")) url = `${direct.slice(0, -"/jpeg".length)}/mjpeg`
     else if (direct.includes("/jpeg")) url = direct.replace(/\/jpeg(\/|$)/, "/mjpeg$1")
     else if (direct.includes("/mjpeg")) url = direct
     else url = direct
-  } else {
+  } else if (streamKey || direct) {
     url = `/ml/live/cam/${encodeURIComponent(route)}/mjpeg`
+  } else {
+    return null
   }
 
   // Always attach purposes so ML gates models even if Django URL is stale
@@ -691,11 +693,100 @@ export async function fetchPlateCaptures(opts?: {
   if (opts?.plate_number) params.set("plate_number", opts.plate_number);
   if (opts?.date_from) params.set("date_from", opts.date_from);
   if (opts?.date_to) params.set("date_to", opts.date_to);
-  if (opts?.cleanup === false) params.set("cleanup", "false");
+  params.set("cleanup", opts?.cleanup === true ? "true" : "false");
   const res = await fetch(`${API}/cameras/plate-captures/?${params.toString()}`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`Failed to load plate captures (${res.status})`);
+  return res.json();
+}
+
+export type VehicleJourneySighting = {
+  index: number;
+  timestamp: string;
+  camera_key: string;
+  camera_name: string;
+  camera_code: string;
+  location: string;
+  zone: string;
+  plate_number: string;
+  det_conf: number;
+  ocr_conf: number;
+  plate_image: string;
+  frame_image: string;
+};
+
+export type VehicleJourneyCamera = {
+  camera_key: string;
+  camera_name: string;
+  location: string;
+  zone: string;
+};
+
+export type VehicleJourney = {
+  plate_key: string;
+  plate_number: string;
+  ocr_variants: string[];
+  sighting_count: number;
+  pass_count: number;
+  camera_count: number;
+  cameras: VehicleJourneyCamera[];
+  route: string[];
+  first_seen: string;
+  last_seen: string;
+  first_camera: string;
+  last_camera: string;
+  plate_image: string;
+  frame_image: string;
+  path?: VehicleJourneySighting[];
+};
+
+export type VehicleJourneySummary = {
+  total_vehicles: number;
+  repeat_vehicles: number;
+  multi_camera: number;
+  total_sightings: number;
+};
+
+export async function fetchVehicleJourneys(opts?: {
+  page?: number;
+  page_size?: number;
+  q?: string;
+  min_passes?: number;
+  date_from?: string;
+  date_to?: string;
+}): Promise<{
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  min_passes: number;
+  summary: VehicleJourneySummary;
+  results: VehicleJourney[];
+}> {
+  const params = new URLSearchParams();
+  params.set("page", String(opts?.page ?? 1));
+  params.set("page_size", String(opts?.page_size ?? 25));
+  params.set("min_passes", String(opts?.min_passes ?? 2));
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.date_from) params.set("date_from", opts.date_from);
+  if (opts?.date_to) params.set("date_to", opts.date_to);
+  const res = await fetch(`${API}/cameras/vehicle-journeys/?${params.toString()}`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Failed to load vehicle journeys (${res.status})`);
+  return res.json();
+}
+
+export async function fetchVehicleJourney(plateKey: string): Promise<VehicleJourney> {
+  const key = encodeURIComponent(plateKey.trim());
+  const res = await fetch(`${API}/cameras/vehicle-journeys/${key}/`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (res.status === 404) throw new Error("No journey found for this plate.");
+  if (!res.ok) throw new Error(`Failed to load vehicle journey (${res.status})`);
   return res.json();
 }
