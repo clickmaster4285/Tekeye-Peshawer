@@ -55,25 +55,35 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
   // Ops wall: toggle mirrors the route so it never needs a second click.
   const allCitiesCameras = location.pathname === ROUTES.ALL_CITIES_CAMERAS
 
+  const navigateAfterPaint = useCallback(
+    (to: string, options?: { replace?: boolean }) => {
+      // Defer soft navigation one frame so Chrome DevTools web-vitals (VMxx reportAllChanges)
+      // does not race MJPEG teardown during All Cities toggle.
+      requestAnimationFrame(() => {
+        startTransition(() => {
+          navigate(to, options)
+        })
+      })
+    },
+    [navigate],
+  )
+
   const handleAllCitiesCameras = useCallback(
     (enabled: boolean) => {
       if (enabled) {
         setAllCitiesCamerasPreference(true)
-        startTransition(() => {
-          navigate(ROUTES.ALL_CITIES_CAMERAS)
-        })
+        navigateAfterPaint(ROUTES.ALL_CITIES_CAMERAS)
         return
       }
       setAllCitiesCamerasPreference(false)
       if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
-        startTransition(() => {
-          navigate(role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD, {
-            replace: true,
-          })
-        })
+        navigateAfterPaint(
+          role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD,
+          { replace: true },
+        )
       }
     },
-    [navigate, location.pathname, role],
+    [location.pathname, navigateAfterPaint, role],
   )
 
   useEffect(() => {
