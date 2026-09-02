@@ -295,7 +295,7 @@ ATTENDANCE_CCTV_AUTOSTART = os.getenv("ATTENDANCE_CCTV_AUTOSTART", "True").lower
     "yes",
 )
 ATTENDANCE_INSIGHTFACE_MODEL = os.getenv("ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
-# Comma-separated ONNX providers override, e.g. "CUDAExecutionProvider,CPUExecutionProvider"
+# Comma-separated ONNX providers override, e.g. "CUDAExecutionProvider,TensorrtExecutionProvider,CPUExecutionProvider"
 ATTENDANCE_ONNX_PROVIDERS = os.getenv("ATTENDANCE_ONNX_PROVIDERS", "")
 # Visitor Identity gallery — separate from staff attendance. Never punches attendance.
 VISITOR_MIN_ENROLLMENT_IMAGES = int(os.getenv("VISITOR_MIN_ENROLLMENT_IMAGES", "3"))

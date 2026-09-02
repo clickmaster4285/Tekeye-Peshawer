@@ -87,6 +87,8 @@ def _download(url: str, dest: Path):
 
 
 def _configure_opencv_dnn_gpu() -> None:
+    if os.getenv("ML_PREFER_GPU", "true").strip().lower() not in ("1", "true", "yes"):
+        return
     if os.getenv("ML_DEVICE", "0").strip().lower() == "cpu":
         return
     try:
