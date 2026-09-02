@@ -205,10 +205,10 @@ def _use_nvdec(ffmpeg_path: str) -> bool:
 def _rtsp_scale_size() -> tuple[int, int]:
     """
     Live AI/view capture size after FFmpeg scale (NVR keeps original 4K recording).
-    Default 1280x720 preview decode — set 0x0 for native 4K passthrough.
+    Default 0x0 = native 3840x2160 main-stream passthrough.
     """
-    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 1280))
-    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 720))
+    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 0))
+    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 0))
     return w, h
 
 
@@ -1396,6 +1396,7 @@ class LiveStreamManager:
                         "detections": det_count,
                         "purpose": (self._purposes.get(key) or [""])[0] if self._purposes.get(key) else "",
                         "purposes": list(self._purposes.get(key) or []),
+                        "rtsp_url": (self._registry.get(key) or "").strip(),
                     }
                 )
         return {
