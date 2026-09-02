@@ -216,8 +216,14 @@ def _ffmpeg_threads() -> str:
     return os.getenv("ML_FFMPEG_THREADS", "1").strip() or "1"
 
 
-def _ffmpeg_stimeout_us() -> str:
+def _ffmpeg_socket_timeout_us() -> str:
     return os.getenv("ML_FFMPEG_STIMEOUT_US", "10000000").strip() or "10000000"
+
+
+def _ffmpeg_timeout_cli_flag() -> str:
+    """CLI flag for socket I/O timeout (microseconds). Use 'timeout' — '-stimeout' is not accepted by many ffmpeg builds."""
+    raw = os.getenv("ML_FFMPEG_TIMEOUT_FLAG", "timeout").strip().lstrip("-") or "timeout"
+    return raw
 
 
 def _mjpeg_quality(*, keep_native: bool) -> str:
@@ -227,14 +233,16 @@ def _mjpeg_quality(*, keep_native: bool) -> str:
 
 
 def _rtsp_stream_input_flags() -> list[str]:
-    return [
+    flags = [
         "-rtsp_transport",
         "tcp",
-        "-stimeout",
-        _ffmpeg_stimeout_us(),
-        "-reorder_queue_size",
-        os.getenv("ML_FFMPEG_REORDER_QUEUE_SIZE", "2048").strip() or "2048",
+        f"-{_ffmpeg_timeout_cli_flag()}",
+        _ffmpeg_socket_timeout_us(),
     ]
+    reorder = os.getenv("ML_FFMPEG_REORDER_QUEUE_SIZE", "").strip()
+    if reorder:
+        flags += ["-reorder_queue_size", reorder]
+    return flags
 
 
 def _rtsp_scale_filter(use_cuda_scale: bool) -> str | None:

@@ -187,15 +187,16 @@ def _throttle_ffmpeg_spawn() -> None:
 
 
 def _rtsp_input_extra() -> list[str]:
-    stimeout = os.getenv("FFMPEG_STIMEOUT_US", "10000000").strip() or "10000000"
+    timeout_us = os.getenv("FFMPEG_STIMEOUT_US", "10000000").strip() or "10000000"
+    timeout_flag = os.getenv("FFMPEG_TIMEOUT_FLAG", "timeout").strip().lstrip("-") or "timeout"
     threads = os.getenv("FFMPEG_THREADS", "1").strip() or "1"
     return [
         "-threads",
         threads,
         "-rtsp_transport",
         "tcp",
-        "-stimeout",
-        stimeout,
+        f"-{timeout_flag}",
+        timeout_us,
         "-fflags",
         "+discardcorrupt+genpts",
         "-flags",
