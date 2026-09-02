@@ -208,10 +208,10 @@ def _use_nvdec(ffmpeg_path: str) -> bool:
 def _rtsp_scale_size() -> tuple[int, int]:
     """
     Live AI/view capture size after FFmpeg scale (NVR keeps original 4K recording).
-    Default 1920x1080. Set either dim to 0 to disable scaling.
+    Default 0x0 = native 4K passthrough. Set e.g. 3840x2160 to cap, or 1920x1080 to downscale.
     """
-    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 1920))
-    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 1080))
+    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 0))
+    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 0))
     return w, h
 
 
@@ -970,9 +970,9 @@ class LiveStreamManager:
         self._plate_frame_counters: dict[str, int] = {}
         self._plate_counter_lock = threading.Lock()
         self._last_plate_dets: dict[str, list[dict[str, Any]]] = {}
-        # Cap live preview for smooth browser streaming through the Vite proxy.
-        self._max_width = 960
-        self._max_height = 540
+        # 0 = native 4K passthrough for browser preview (override via ML_LIVE_MAX_WIDTH/HEIGHT).
+        self._max_width = 0
+        self._max_height = 0
         self._stream_fps = max(5, min(_env_int("ML_LIVE_STREAM_FPS", 12), 30))
         self._frame_interval = 1.0 / self._stream_fps
         self._detections: dict[str, list[dict[str, Any]]] = {}
@@ -1485,7 +1485,10 @@ class LiveStreamManager:
         return small, w / float(dw), h / float(dh)
 
     def _want_native_frame(self, camera_key: str) -> bool:
-        """Keep the original 4K RTSP frame only for ANPR cameras."""
+        """Keep native camera resolution (4K) when RTSP scaling is disabled."""
+        w, h = _rtsp_scale_size()
+        if w <= 0 and h <= 0:
+            return True
         if self._plate_on_all:
             return True
         return "anpr" in self._purposes_for(camera_key)
@@ -1698,7 +1701,7 @@ class LiveStreamManager:
             with self._plate_counter_lock:
                 counter = self._plate_frame_counters.get(camera_key, 0) + 1
                 self._plate_frame_counters[camera_key] = counter
-            # Plate YOLO every N infer cycles; EasyOCR is track+cooldown gated inside PlateEngine.
+            # Plate YOLO every N infer cycles; PaddleOCR PP-OCRv5 runs inside PlateEngine.
             if counter % self._plate_ocr_every == 0:
                 try:
                     plate_dets = self._plate_engine.detect_and_read(
