@@ -3,10 +3,7 @@ Live RTSP streams with purpose-gated multi-model YOLO inference + optional plate
 Only models relevant to each camera's purpose run on that feed.
 
 Pipeline (decoupled — capture / infer / render never block each other):
-  4K Camera ──► NVR records original 4K (unchanged)
-         │
-         ▼
-  FFmpeg NVDEC + scale to 1080p
+  NVR main stream (4K) ──► FFmpeg NVDEC (native, no downscale)
          ▼
   Latest Frame Buffer
          ├─► Partitioned Inference Workers → Result Buffer
@@ -208,11 +205,36 @@ def _use_nvdec(ffmpeg_path: str) -> bool:
 def _rtsp_scale_size() -> tuple[int, int]:
     """
     Live AI/view capture size after FFmpeg scale (NVR keeps original 4K recording).
-    Default 0x0 = native 4K passthrough. Set e.g. 3840x2160 to cap, or 1920x1080 to downscale.
+    Default 1280x720 preview decode — set 0x0 for native 4K passthrough.
     """
-    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 0))
-    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 0))
+    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 1280))
+    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 720))
     return w, h
+
+
+def _ffmpeg_threads() -> str:
+    return os.getenv("ML_FFMPEG_THREADS", "1").strip() or "1"
+
+
+def _ffmpeg_stimeout_us() -> str:
+    return os.getenv("ML_FFMPEG_STIMEOUT_US", "10000000").strip() or "10000000"
+
+
+def _mjpeg_quality(*, keep_native: bool) -> str:
+    if keep_native:
+        return os.getenv("ML_MJPEG_QUALITY_NATIVE", "2").strip() or "2"
+    return os.getenv("ML_MJPEG_QUALITY", "8").strip() or "8"
+
+
+def _rtsp_stream_input_flags() -> list[str]:
+    return [
+        "-rtsp_transport",
+        "tcp",
+        "-stimeout",
+        _ffmpeg_stimeout_us(),
+        "-reorder_queue_size",
+        os.getenv("ML_FFMPEG_REORDER_QUEUE_SIZE", "2048").strip() or "2048",
+    ]
 
 
 def _rtsp_scale_filter(use_cuda_scale: bool) -> str | None:
@@ -409,6 +431,8 @@ class FfmpegCameraStream:
             "-hide_banner",
             "-loglevel",
             "error",
+            "-threads",
+            _ffmpeg_threads(),
         ]
         if self._use_nvdec:
             cmd += [
@@ -430,8 +454,7 @@ class FfmpegCameraStream:
             "nobuffer+discardcorrupt+genpts",
             "-flags",
             "low_delay",
-            "-rtsp_transport",
-            "tcp",
+            *_rtsp_stream_input_flags(),
             "-i",
             self.rtsp_url,
             "-an",
@@ -443,11 +466,14 @@ class FfmpegCameraStream:
         if vf:
             cmd += ["-vf", vf]
 
+        mux_qsize = os.getenv("ML_FFMPEG_MAX_MUXING_QUEUE_SIZE", "1024").strip() or "1024"
         cmd += [
+            "-max_muxing_queue_size",
+            mux_qsize,
             "-f",
             "mjpeg",
             "-q:v",
-            "2" if self.keep_native else "5",
+            _mjpeg_quality(keep_native=self.keep_native),
             "-",
         ]
         return cmd
