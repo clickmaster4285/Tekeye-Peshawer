@@ -134,6 +134,7 @@ export async function listRemoteServers(): Promise<RemoteServerRecord[]> {
 
 export async function fetchAllCitiesStreams(opts?: {
   refresh?: boolean
+  signal?: AbortSignal
 }): Promise<{
   servers: Array<{
     id: number
@@ -161,6 +162,7 @@ export async function fetchAllCitiesStreams(opts?: {
   const qs = opts?.refresh ? "?refresh=1" : ""
   const res = await fetch(`${API}/ops/all-cities-streams/${qs}`, {
     headers: getAuthHeaders(),
+    signal: opts?.signal,
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(formatApiError(data, "Failed to load all-cities streams"))

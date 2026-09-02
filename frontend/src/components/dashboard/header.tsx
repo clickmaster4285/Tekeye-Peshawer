@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Search, Bell, HelpCircle, User, LogOut, Menu, Wifi, WifiOff } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -57,11 +57,20 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
 
   const handleAllCitiesCameras = useCallback(
     (enabled: boolean) => {
-      setAllCitiesCamerasPreference(enabled)
       if (enabled) {
-        navigate(ROUTES.ALL_CITIES_CAMERAS)
-      } else if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
-        navigate(role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD)
+        setAllCitiesCamerasPreference(true)
+        startTransition(() => {
+          navigate(ROUTES.ALL_CITIES_CAMERAS)
+        })
+        return
+      }
+      setAllCitiesCamerasPreference(false)
+      if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
+        startTransition(() => {
+          navigate(role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD, {
+            replace: true,
+          })
+        })
       }
     },
     [navigate, location.pathname, role],
