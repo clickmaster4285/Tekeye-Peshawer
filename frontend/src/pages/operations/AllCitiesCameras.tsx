@@ -83,13 +83,29 @@ function StreamTile({
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [visible, setVisible] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const raw = (camera.ml_live_stream_url || "").trim()
   const tokenized = raw ? withOpsStreamToken(raw) : null
-  const src = tokenized
-    ? `${tokenized}${tokenized.includes("?") ? "&" : "?"}r=${retry}`
-    : null
+  const src =
+    visible && tokenized
+      ? `${tokenized}${tokenized.includes("?") ? "&" : "?"}r=${retry}`
+      : null
+
+  useEffect(() => {
+    const node = rootRef.current
+    if (!node) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setVisible(true)
+      },
+      { rootMargin: "120px", threshold: 0.05 },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
@@ -139,6 +155,7 @@ function StreamTile({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "overflow-hidden rounded-lg border border-border bg-black",
         isFullscreen && "fixed inset-0 z-[200] flex flex-col rounded-none border-0",
@@ -161,12 +178,12 @@ function StreamTile({
               window.setTimeout(() => {
                 setError(false)
                 setRetry((n) => n + 1)
-              }, 2500)
+              }, 5000)
             }}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/60">
-            {error ? "Reconnecting…" : "No stream URL"}
+            {error ? "Reconnecting…" : visible ? "No stream URL" : "Loading stream…"}
           </div>
         )}
 
@@ -286,7 +303,9 @@ export default function AllCitiesCamerasPage() {
   const [servers, setServers] = useState<ServerSummary[]>([])
   const [cameras, setCameras] = useState<CityCamera[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const hasLoadedRef = useRef(false)
   const [filterServerId, setFilterServerId] = useState<string>("all")
   const [layout, setLayout] = useState<GridLayout>("auto")
   const [showTimestamp, setShowTimestamp] = useState(true)
@@ -295,18 +314,23 @@ export default function AllCitiesCamerasPage() {
   const [removingServerId, setRemovingServerId] = useState<number | null>(null)
 
   const load = useCallback(async (refresh = false) => {
-    setLoading(true)
+    if (!hasLoadedRef.current) setLoading(true)
+    else setRefreshing(true)
     setError(null)
     try {
       const data = await fetchAllCitiesStreams({ refresh })
       setServers(data.servers)
       setCameras(data.cameras)
+      hasLoadedRef.current = true
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load streams")
-      setServers([])
-      setCameras([])
+      if (!hasLoadedRef.current) {
+        setServers([])
+        setCameras([])
+      }
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [])
 
@@ -316,11 +340,18 @@ export default function AllCitiesCamerasPage() {
 
   useEffect(() => {
     if (!allowed) return
+    let timer: number | undefined
     const onCameraUpdated = () => {
-      void load(true)
+      if (timer != null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        void load(false)
+      }, 1500)
     }
     window.addEventListener("camera-integration-updated", onCameraUpdated)
-    return () => window.removeEventListener("camera-integration-updated", onCameraUpdated)
+    return () => {
+      if (timer != null) window.clearTimeout(timer)
+      window.removeEventListener("camera-integration-updated", onCameraUpdated)
+    }
   }, [allowed, load])
 
   useEffect(() => {
@@ -524,9 +555,9 @@ export default function AllCitiesCamerasPage() {
             variant="outline"
             size="sm"
             onClick={() => void load(true)}
-            disabled={loading}
+            disabled={loading || refreshing}
           >
-            {loading ? (
+            {loading || refreshing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="mr-2 h-4 w-4" />
