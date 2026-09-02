@@ -315,6 +315,15 @@ export default function AllCitiesCamerasPage() {
   }, [allowed, load])
 
   useEffect(() => {
+    if (!allowed) return
+    const onCameraUpdated = () => {
+      void load(true)
+    }
+    window.addEventListener("camera-integration-updated", onCameraUpdated)
+    return () => window.removeEventListener("camera-integration-updated", onCameraUpdated)
+  }, [allowed, load])
+
+  useEffect(() => {
     if (!wallFullscreen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setWallFullscreen(false)

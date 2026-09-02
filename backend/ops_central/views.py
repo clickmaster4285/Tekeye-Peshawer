@@ -16,6 +16,11 @@ from rest_framework.views import APIView
 
 from users.permissions import is_ops_viewer
 
+from .cache import (
+    parse_camera_id as _parse_camera_id,
+    prune_server_camera_cache as _prune_server_camera_cache,
+    resolve_stream_key as _resolve_stream_key,
+)
 from .client import (
     delete_remote_camera,
     fetch_ml_cameras,
@@ -88,76 +93,6 @@ def _is_local_hub_server(server: RemoteServer) -> bool:
     base = (server.normalized_base_url() or "").lower()
     local_hosts = ("127.0.0.1", "localhost", "::1")
     return any(host in ml or host in base for host in local_hosts)
-
-
-def _parse_camera_id(value) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        parsed = int(value)
-        return parsed if parsed > 0 else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _resolve_stream_key(stream_key: str, camera_id, code: str) -> str:
-    key = (stream_key or "").strip()
-    if key:
-        return key
-    cid = _parse_camera_id(camera_id)
-    if cid:
-        return f"cam-{cid}"
-    code = (code or "").strip()
-    if code:
-        return code if code.startswith("cam-") else f"cam-{code}"
-    return ""
-
-
-def _camera_matches_entry(
-    cam: dict,
-    *,
-    stream_key: str,
-    camera_id: int | None,
-    code: str,
-) -> bool:
-    if stream_key and (cam.get("ml_stream_key") or cam.get("code") or "") == stream_key:
-        return True
-    if camera_id is not None and cam.get("id") == camera_id:
-        return True
-    if code and (cam.get("code") or "") == code:
-        return True
-    if stream_key.startswith("cam-"):
-        sid = stream_key[4:]
-        if sid.isdigit() and cam.get("id") == int(sid):
-            return True
-    return False
-
-
-def _prune_server_camera_cache(
-    server: RemoteServer,
-    *,
-    stream_key: str,
-    camera_id: int | None,
-    code: str,
-) -> list[dict]:
-    cached = list(server.cached_cameras or [])
-    if not cached:
-        return cached
-    pruned = [
-        cam
-        for cam in cached
-        if isinstance(cam, dict)
-        and not _camera_matches_entry(
-            cam,
-            stream_key=stream_key,
-            camera_id=camera_id,
-            code=code,
-        )
-    ]
-    if len(pruned) != len(cached):
-        server.cached_cameras = pruned
-        server.save(update_fields=["cached_cameras", "updated_at"])
-    return pruned
 
 
 class RemoteServerViewSet(viewsets.ModelViewSet):

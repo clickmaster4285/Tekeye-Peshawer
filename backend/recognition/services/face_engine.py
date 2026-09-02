@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import threading
 from pathlib import Path
+
+# Cap native BLAS/OpenMP thread pools before InsightFace/ONNX/OpenCV load (per process).
+for _env_key, _env_val in (
+    ("OMP_NUM_THREADS", "1"),
+    ("OPENBLAS_NUM_THREADS", "1"),
+    ("MKL_NUM_THREADS", "1"),
+    ("NUMEXPR_NUM_THREADS", "1"),
+    ("VECLIB_MAXIMUM_THREADS", "1"),
+    ("BLIS_NUM_THREADS", "1"),
+):
+    os.environ.setdefault(_env_key, _env_val)
 
 import cv2
 import numpy as np
@@ -51,8 +63,19 @@ def _provider_loads(provider: str) -> bool:
         return False
 
 
+def _onnx_session_options():
+    """Single-threaded ONNX sessions to avoid native thread explosion per Gunicorn worker."""
+    import onnxruntime as ort
+
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 1
+    opts.inter_op_num_threads = 1
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    return opts
+
+
 def _select_onnx_providers() -> list[str]:
-    """Prefer an explicit override, then CPU by default to avoid CUDA runtime errors on developer machines."""
+    """Prefer GPU EPs (TensorRT/CUDA) on servers; CPU is last-resort fallback only."""
     import onnxruntime as ort
 
     override = getattr(settings, "ATTENDANCE_ONNX_PROVIDERS", "") or ""
@@ -61,9 +84,10 @@ def _select_onnx_providers() -> list[str]:
 
     available = set(ort.get_available_providers())
     preferred = (
-        "CPUExecutionProvider",
-        "DmlExecutionProvider",
+        "TensorrtExecutionProvider",
         "CUDAExecutionProvider",
+        "DmlExecutionProvider",
+        "CPUExecutionProvider",
     )
     providers: list[str] = []
     for name in preferred:
@@ -73,8 +97,15 @@ def _select_onnx_providers() -> list[str]:
             providers.append(name)
     if not providers:
         providers = ["CPUExecutionProvider"]
-    logger.info("ONNX Runtime providers: %s", providers)
+    logger.info("ONNX Runtime providers (InsightFace): %s", providers)
     return providers
+
+
+def _insightface_ctx_id(providers: list[str]) -> int:
+    """InsightFace ctx_id: 0 = GPU, -1 = CPU-only."""
+    if providers and providers[0] != "CPUExecutionProvider":
+        return 0
+    return -1
 
 
 def get_face_engine():
@@ -120,12 +151,24 @@ class FaceEngine:
         from insightface.app import FaceAnalysis
 
         providers = _select_onnx_providers()
-        ctx_id = -1 if providers == ["CPUExecutionProvider"] else 0
+        ctx_id = _insightface_ctx_id(providers)
         self.providers = providers
         model_name = getattr(settings, "ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
         _ensure_insightface_pack(model_name)
-        self.app = FaceAnalysis(name=model_name, providers=providers)
+        fa_kwargs: dict = {"providers": providers}
+        try:
+            fa_kwargs["session_options"] = _onnx_session_options()
+            self.app = FaceAnalysis(name=model_name, **fa_kwargs)
+        except TypeError:
+            fa_kwargs.pop("session_options", None)
+            self.app = FaceAnalysis(name=model_name, **fa_kwargs)
         self.app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+        logger.info(
+            "InsightFace ready (model=%s, ctx_id=%s, primary_provider=%s)",
+            model_name,
+            ctx_id,
+            providers[0] if providers else "none",
+        )
         self.quality = FaceQualityChecker()
         self._infer_lock = threading.Lock()
 
