@@ -32,8 +32,6 @@ class Command(BaseCommand):
         from cameras.detection_worker import run_worker_forever, stop_background_worker
 
         try:
-            from django.conf import settings
-
             limit = int(getattr(settings, "DETECTION_CLIP_REQUEUE_LIMIT", 50))
             requeue_pending_clips(limit=max(1, limit))
         except Exception as exc:
