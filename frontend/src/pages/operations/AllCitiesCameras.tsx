@@ -35,6 +35,10 @@ import {
   withOpsStreamToken,
   type OpsCamera,
 } from "@/lib/ops-central-api"
+import {
+  readAllCitiesStreamsCache,
+  writeAllCitiesStreamsCache,
+} from "@/lib/all-cities-cameras"
 import { cn } from "@/lib/utils"
 
 type CityCamera = OpsCamera & {
@@ -104,7 +108,11 @@ function StreamTile({
       { rootMargin: "120px", threshold: 0.05 },
     )
     observer.observe(node)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (imgRef.current) imgRef.current.removeAttribute("src")
+      setVisible(false)
+    }
   }, [])
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
@@ -300,12 +308,18 @@ export default function AllCitiesCamerasPage() {
   const allowed = role === "ADMIN" || role === "IT_SUPERADMIN"
   const canManage = role === "IT_SUPERADMIN"
 
-  const [servers, setServers] = useState<ServerSummary[]>([])
-  const [cameras, setCameras] = useState<CityCamera[]>([])
-  const [loading, setLoading] = useState(true)
+  const initialCache = useMemo(() => readAllCitiesStreamsCache(), [])
+  const [servers, setServers] = useState<ServerSummary[]>(
+    () => (initialCache?.servers as ServerSummary[]) ?? [],
+  )
+  const [cameras, setCameras] = useState<CityCamera[]>(
+    () => (initialCache?.cameras as CityCamera[]) ?? [],
+  )
+  const [loading, setLoading] = useState(() => !initialCache)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const hasLoadedRef = useRef(false)
+  const hasLoadedRef = useRef(!!initialCache)
+  const fetchAbortRef = useRef<AbortController | null>(null)
   const [filterServerId, setFilterServerId] = useState<string>("all")
   const [layout, setLayout] = useState<GridLayout>("auto")
   const [showTimestamp, setShowTimestamp] = useState(true)
@@ -314,23 +328,40 @@ export default function AllCitiesCamerasPage() {
   const [removingServerId, setRemovingServerId] = useState<number | null>(null)
 
   const load = useCallback(async (refresh = false) => {
+    fetchAbortRef.current?.abort()
+    const controller = new AbortController()
+    fetchAbortRef.current = controller
+    const timeoutId = window.setTimeout(() => controller.abort(), 20000)
+
     if (!hasLoadedRef.current) setLoading(true)
     else setRefreshing(true)
     setError(null)
     try {
-      const data = await fetchAllCitiesStreams({ refresh })
+      const data = await fetchAllCitiesStreams({ refresh, signal: controller.signal })
+      if (controller.signal.aborted) return
       setServers(data.servers)
       setCameras(data.cameras)
+      writeAllCitiesStreamsCache(data.servers, data.cameras)
       hasLoadedRef.current = true
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : "Failed to load streams")
       if (!hasLoadedRef.current) {
         setServers([])
         setCameras([])
       }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      window.clearTimeout(timeoutId)
+      if (!controller.signal.aborted) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      fetchAbortRef.current?.abort()
     }
   }, [])
 

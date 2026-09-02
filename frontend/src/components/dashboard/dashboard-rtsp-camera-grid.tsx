@@ -32,7 +32,7 @@ export function DashboardRtspCameraGrid() {
   const [location, setLocation] = useState(ALL_LOCATIONS)
   const [zone, setZone] = useState(ALL_ZONES)
   const [cameraId, setCameraId] = useState(ALL_CAMERAS)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
@@ -63,7 +63,7 @@ export function DashboardRtspCameraGrid() {
   }, [])
 
   useEffect(() => {
-    reloadCameras({ blocking: true })
+    reloadCameras({ blocking: false })
     const onCustom = () => reloadCameras()
     window.addEventListener("camera-integration-updated", onCustom)
     return () => {
@@ -214,7 +214,7 @@ export function DashboardRtspCameraGrid() {
         </div>
       </CardHeader>
       <CardContent>
-        {loading ? (
+        {loading || (refreshing && cameras.length === 0) ? (
           <p className="text-sm text-muted-foreground py-8 text-center">Loading cameras…</p>
         ) : feeds.length === 0 ? (
           <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
