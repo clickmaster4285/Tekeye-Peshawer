@@ -43,24 +43,21 @@ SIMILARITY_THRESHOLD = 0.45
 CCTV_SIMILARITY_THRESHOLD = 0.38
 
 
-def _provider_loads(provider: str) -> bool:
-    """True if ORT can create a session with this EP."""
-    try:
-        from onnx import TensorProto, helper
-        import onnxruntime as ort
+_GPU_PROVIDER_ORDER = (
+    "CUDAExecutionProvider",
+    "TensorrtExecutionProvider",
+    "DmlExecutionProvider",
+)
+_CPU_PROVIDER = "CPUExecutionProvider"
+_CUDA_PROVIDER = "CUDAExecutionProvider"
 
-        graph = helper.make_graph(
-            [helper.make_node("Identity", ["x"], ["y"])],
-            "probe",
-            [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])],
-            [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])],
-        )
-        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
-        sess = ort.InferenceSession(model.SerializeToString(), providers=[provider])
-        active = sess.get_providers()
-        return bool(active) and active[0] == provider
-    except Exception:
-        return False
+
+def _cpu_fallback_enabled() -> bool:
+    return os.getenv("ATTENDANCE_GPU_CPU_FALLBACK", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def _onnx_session_options():
@@ -75,37 +72,109 @@ def _onnx_session_options():
 
 
 def _select_onnx_providers() -> list[str]:
-    """Prefer GPU EPs (TensorRT/CUDA) on servers; CPU is last-resort fallback only."""
+    """Build provider chain with GPU first. Trust ORT's available list — no probe session."""
     import onnxruntime as ort
 
-    override = getattr(settings, "ATTENDANCE_ONNX_PROVIDERS", "") or ""
-    if override.strip():
-        return [p.strip() for p in override.split(",") if p.strip()]
-
     available = set(ort.get_available_providers())
-    preferred = (
-        "TensorrtExecutionProvider",
-        "CUDAExecutionProvider",
-        "DmlExecutionProvider",
-        "CPUExecutionProvider",
-    )
+    override = (getattr(settings, "ATTENDANCE_ONNX_PROVIDERS", "") or "").strip()
+
+    if override:
+        requested = [p.strip() for p in override.split(",") if p.strip()]
+    else:
+        requested = [*_GPU_PROVIDER_ORDER, _CPU_PROVIDER]
+
     providers: list[str] = []
-    for name in preferred:
-        if name not in available:
-            continue
-        if name == "CPUExecutionProvider" or _provider_loads(name):
+    for name in requested:
+        if name in available and name not in providers:
             providers.append(name)
+
+    if _cpu_fallback_enabled() and _CPU_PROVIDER in available and _CPU_PROVIDER not in providers:
+        providers.append(_CPU_PROVIDER)
+
     if not providers:
-        providers = ["CPUExecutionProvider"]
-    logger.info("ONNX Runtime providers (InsightFace): %s", providers)
+        providers = [_CPU_PROVIDER]
+
+    logger.info(
+        "ONNX Runtime providers (InsightFace): %s (ort_available=%s)",
+        providers,
+        sorted(available),
+    )
     return providers
 
 
 def _insightface_ctx_id(providers: list[str]) -> int:
     """InsightFace ctx_id: 0 = GPU, -1 = CPU-only."""
-    if providers and providers[0] != "CPUExecutionProvider":
+    if providers and providers[0] != _CPU_PROVIDER:
         return 0
     return -1
+
+
+def _log_insightface_session_providers(app) -> None:
+    """Log which EP each InsightFace sub-model actually loaded."""
+    try:
+        for model_name, model in getattr(app, "models", {}).items():
+            session = getattr(model, "session", None)
+            if session is not None and hasattr(session, "get_providers"):
+                logger.info(
+                    "InsightFace sub-model %s active providers: %s",
+                    model_name,
+                    session.get_providers(),
+                )
+    except Exception as exc:
+        logger.debug("Could not inspect InsightFace session providers: %s", exc)
+
+
+def _create_face_analysis(model_name: str, providers: list[str], ctx_id: int):
+    """Instantiate FaceAnalysis; try GPU-only chain first, then GPU+CPU, then CPU."""
+    from insightface.app import FaceAnalysis
+
+    gpu_chain = [p for p in providers if p != _CPU_PROVIDER]
+    cpu_ok = _CPU_PROVIDER in providers
+
+    attempts: list[tuple[list[str], int, str]] = []
+    if _CUDA_PROVIDER in providers:
+        attempts.append(([_CUDA_PROVIDER], 0, "cuda-only"))
+    if gpu_chain and gpu_chain != [_CUDA_PROVIDER]:
+        attempts.append((gpu_chain, 0, "gpu-only"))
+    if gpu_chain and cpu_ok:
+        attempts.append(([*gpu_chain, _CPU_PROVIDER], 0, "gpu-with-cpu-fallback"))
+    if cpu_ok and _cpu_fallback_enabled():
+        attempts.append(([_CPU_PROVIDER], -1, "cpu-only"))
+
+    if not attempts:
+        attempts.append((providers, ctx_id, "configured"))
+
+    last_exc: Exception | None = None
+    for attempt_providers, attempt_ctx, label in attempts:
+        fa_kwargs: dict = {"providers": attempt_providers}
+        try:
+            fa_kwargs["session_options"] = _onnx_session_options()
+            app = FaceAnalysis(name=model_name, **fa_kwargs)
+        except TypeError:
+            fa_kwargs.pop("session_options", None)
+            app = FaceAnalysis(name=model_name, **fa_kwargs)
+        try:
+            app.prepare(ctx_id=attempt_ctx, det_size=(640, 640))
+            logger.info(
+                "InsightFace initialized (%s, ctx_id=%s, providers=%s)",
+                label,
+                attempt_ctx,
+                attempt_providers,
+            )
+            _log_insightface_session_providers(app)
+            return app, attempt_providers, attempt_ctx
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "InsightFace init failed (%s, providers=%s): %s",
+                label,
+                attempt_providers,
+                exc,
+            )
+
+    raise RuntimeError(
+        f"InsightFace could not initialize with any provider chain (tried {len(attempts)})."
+    ) from last_exc
 
 
 def get_face_engine():
@@ -148,26 +217,15 @@ def _ensure_insightface_pack(model_name: str, root: str = "~/.insightface") -> P
 
 class FaceEngine:
     def __init__(self):
-        from insightface.app import FaceAnalysis
-
         providers = _select_onnx_providers()
-        ctx_id = _insightface_ctx_id(providers)
-        self.providers = providers
         model_name = getattr(settings, "ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
         _ensure_insightface_pack(model_name)
-        fa_kwargs: dict = {"providers": providers}
-        try:
-            fa_kwargs["session_options"] = _onnx_session_options()
-            self.app = FaceAnalysis(name=model_name, **fa_kwargs)
-        except TypeError:
-            fa_kwargs.pop("session_options", None)
-            self.app = FaceAnalysis(name=model_name, **fa_kwargs)
-        self.app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+        self.app, self.providers, ctx_id = _create_face_analysis(model_name, providers, _insightface_ctx_id(providers))
         logger.info(
             "InsightFace ready (model=%s, ctx_id=%s, primary_provider=%s)",
             model_name,
             ctx_id,
-            providers[0] if providers else "none",
+            self.providers[0] if self.providers else "none",
         )
         self.quality = FaceQualityChecker()
         self._infer_lock = threading.Lock()
