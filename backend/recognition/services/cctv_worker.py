@@ -309,6 +309,9 @@ class CCTVWorkerManager:
                 if now - last_infer_at < self._scan_interval:
                     continue
                 last_infer_at = now
+                from config.worker_throttle import maybe_pause_for_cpu
+
+                maybe_pause_for_cpu(logger, label=f"cctv-{state.camera_id}")
                 if now - gallery_refresh_at > 30:
                     gallery = self._shared_gallery()
                     gallery_refresh_at = now
