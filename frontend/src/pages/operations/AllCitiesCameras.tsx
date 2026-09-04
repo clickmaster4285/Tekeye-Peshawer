@@ -388,7 +388,7 @@ const StreamTile = memo(function StreamTile({
           ) : null}
         </div>
 
-        <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+        <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
           {canManage && onRemove ? (
             <Button
               type="button"
