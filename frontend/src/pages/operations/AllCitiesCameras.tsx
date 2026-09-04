@@ -108,8 +108,8 @@ function gridPageSize(layout: GridLayout): number {
   if (layout === "3x3") return 9
   if (layout === "4x4") return 16
   // Large grids paginate so the browser never mounts 36–100 streams at once
-  if (layout === "6x6") return 16
-  if (layout === "8x8") return 16
+  if (layout === "6x6") return 36
+  if (layout === "8x8") return 64
   if (layout === "10x10") return 16
   return 12
 }
@@ -1290,7 +1290,28 @@ export default function AllCitiesCamerasPage() {
                   Back
                 </Button>
               ) : null}
-              <Button type="button" onClick={() => setCameraPickerOpen(false)}>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (selectionReady) {
+                    if (saveTimerRef.current != null) {
+                      window.clearTimeout(saveTimerRef.current)
+                      saveTimerRef.current = null
+                    }
+                    const keys = [...selectedCameraKeys]
+                    setSelectionSaving(true)
+                    void saveAllCitiesSelection(keys)
+                      .then((savedKeys) => {
+                        lastSavedKeysRef.current = JSON.stringify(savedKeys)
+                      })
+                      .catch(() => {
+                        /* the next load can retry the selection */
+                      })
+                      .finally(() => setSelectionSaving(false))
+                  }
+                  setCameraPickerOpen(false)
+                }}
+              >
                 Done
               </Button>
             </div>

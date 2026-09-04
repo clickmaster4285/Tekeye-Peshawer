@@ -194,6 +194,7 @@ export async function saveAllCitiesSelection(selectedCameraKeys: string[]): Prom
     method: "PUT",
     headers: getAuthHeaders(),
     body: JSON.stringify({ selected_camera_keys: selectedCameraKeys }),
+    keepalive: true,
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(formatApiError(data, "Failed to save camera selection"))
