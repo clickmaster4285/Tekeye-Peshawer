@@ -24,8 +24,17 @@ def is_it_superadmin(user) -> bool:
 
 
 def is_ops_viewer(user) -> bool:
-    """Super Admin or IT Super Admin may view Central Ops streams."""
-    return is_global_admin(user) or is_it_superadmin(user)
+    """Super Admin, IT Super Admin, or collectorate officers may view All Cities streams."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if is_global_admin(user) or is_it_superadmin(user):
+        return True
+    role = getattr(user, "role", None)
+    return role in {
+        "COLLECTOR",
+        "DEPUTY_COLLECTOR",
+        "ASSISTANT_COLLECTOR",
+    }
 
 
 def is_location_admin(user) -> bool:

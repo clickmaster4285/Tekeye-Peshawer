@@ -51,6 +51,8 @@ export type OpsCamera = {
   raw_stream_url?: string
   status?: string
   is_active?: boolean
+  connected?: boolean
+  has_frame?: boolean
 }
 
 export type DetectionEventRow = {
@@ -135,6 +137,7 @@ export async function listRemoteServers(): Promise<RemoteServerRecord[]> {
 
 export async function fetchAllCitiesStreams(opts?: {
   refresh?: boolean
+  signal?: AbortSignal
 }): Promise<{
   servers: Array<{
     id: number
@@ -162,6 +165,7 @@ export async function fetchAllCitiesStreams(opts?: {
   const qs = opts?.refresh ? "?refresh=1" : ""
   const res = await fetch(`${API}/ops/all-cities-streams/${qs}`, {
     headers: getAuthHeaders(),
+    signal: opts?.signal,
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(formatApiError(data, "Failed to load all-cities streams"))
@@ -171,6 +175,31 @@ export async function fetchAllCitiesStreams(opts?: {
     count: data.count ?? (data.cameras || []).length,
     server_count: data.server_count ?? (data.servers || []).length,
   }
+}
+
+/** Per-user All Cities camera checkbox selection (persisted in DB). */
+export async function fetchAllCitiesSelection(): Promise<string[]> {
+  const res = await fetch(`${API}/ops/all-cities-selection/`, {
+    headers: getAuthHeaders(),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to load camera selection"))
+  return Array.isArray(data.selected_camera_keys)
+    ? data.selected_camera_keys.filter((k: unknown): k is string => typeof k === "string")
+    : []
+}
+
+export async function saveAllCitiesSelection(selectedCameraKeys: string[]): Promise<string[]> {
+  const res = await fetch(`${API}/ops/all-cities-selection/`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ selected_camera_keys: selectedCameraKeys }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to save camera selection"))
+  return Array.isArray(data.selected_camera_keys)
+    ? data.selected_camera_keys.filter((k: unknown): k is string => typeof k === "string")
+    : selectedCameraKeys
 }
 
 export async function createRemoteServer(payload: RemoteServerWrite): Promise<RemoteServerRecord> {

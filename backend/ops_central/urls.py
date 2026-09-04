@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AllCitiesCameraSelectionAPIView,
     AllCitiesStreamsAPIView,
     EphemeralMjpegProxyView,
     QuickConnectView,
@@ -18,6 +19,11 @@ urlpatterns = [
         "ops/all-cities-streams/",
         AllCitiesStreamsAPIView.as_view(),
         name="ops-all-cities-streams",
+    ),
+    path(
+        "ops/all-cities-selection/",
+        AllCitiesCameraSelectionAPIView.as_view(),
+        name="ops-all-cities-selection",
     ),
     path(
         "ops/servers/<int:pk>/mjpeg/",

@@ -19,10 +19,16 @@ import { getRoleDisplayLabel, normalizeRole } from "@/lib/role-access"
 import { isGlobalAdmin } from "@/lib/location-access"
 import { locationLabel } from "@/lib/locations"
 import {
+  canViewAllCitiesCameras,
   setAllCitiesCamerasPreference,
 } from "@/lib/all-cities-cameras"
 import { listRemoteServers, type RemoteServerRecord } from "@/lib/ops-central-api"
-import { ROUTES, getSeizureMgmtAssessmentDetailPath, getSeizureMgmtNoteSheetDetailPath, getSeizureMgmtRecoveryMemoDetailPath } from "@/routes/config"
+import {
+  ROUTES,
+  getSeizureMgmtAssessmentDetailPath,
+  getSeizureMgmtNoteSheetDetailPath,
+  getSeizureMgmtRecoveryMemoDetailPath,
+} from "@/routes/config"
 import {
   fetchNoteSheetNotifications,
   markAllNoteSheetNotificationsRead,
@@ -45,14 +51,13 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
     return () => window.removeEventListener(AUTH_USER_UPDATED_EVENT, sync)
   }, [])
   const role = normalizeRole(user?.role)
-  const canViewOpsStreams = role === "ADMIN" || role === "IT_SUPERADMIN"
+  const showAllCitiesToggle = canViewAllCitiesCameras(user?.role)
   const [searchInput, setSearchInput] = useState("")
   const [notifications, setNotifications] = useState<NoteSheetNotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifOpen, setNotifOpen] = useState(false)
   const [connectedServers, setConnectedServers] = useState<RemoteServerRecord[]>([])
 
-  // Ops wall: toggle mirrors the route so it never needs a second click.
   const allCitiesCameras = location.pathname === ROUTES.ALL_CITIES_CAMERAS
 
   const handleAllCitiesCameras = useCallback(
@@ -68,7 +73,7 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
   )
 
   useEffect(() => {
-    if (!canViewOpsStreams || !isAuthenticated()) {
+    if (!showAllCitiesToggle || !isAuthenticated()) {
       setConnectedServers([])
       return
     }
@@ -88,13 +93,14 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [canViewOpsStreams])
+  }, [showAllCitiesToggle])
 
   useEffect(() => {
     if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
       setAllCitiesCamerasPreference(true)
     }
   }, [location.pathname])
+
   const loadNotifications = useCallback(() => {
     if (!isAuthenticated()) return
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return
@@ -201,7 +207,7 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
       </div>
 
       <div className="flex max-w-[min(100%,28rem)] shrink-0 flex-col items-center justify-center gap-1 px-1 sm:px-2">
-        {canViewOpsStreams && (
+        {showAllCitiesToggle && (
           <>
             <div className="flex items-center gap-2.5">
               <Switch
@@ -229,7 +235,8 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
             {connectedServers.length > 0 && (
               <div className="flex max-w-full flex-wrap items-center justify-center gap-1">
                 {connectedServers.slice(0, 6).map((s) => {
-                  const healthy = (s.last_health || "").toLowerCase() === "ok"
+                  const health = (s.last_health || "").toLowerCase()
+                  const healthy = health === "ok" || health === "online"
                   return (
                     <span
                       key={s.id}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 from urllib.parse import urljoin
 
 import requests
@@ -26,7 +27,7 @@ from .client import (
     probe_ml_health,
     unregister_ml_camera_remote,
 )
-from .models import ConnectionMode, RemoteServer
+from .models import ConnectionMode, RemoteServer, AllCitiesCameraPreference
 from .permissions import IsITSuperAdminOnly, IsOpsViewer
 from .serializers import QuickConnectSerializer, RemoteServerSerializer
 from .utils import (
@@ -362,6 +363,38 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
         )
 
 
+class AllCitiesCameraSelectionAPIView(APIView):
+    """Load / save the current user's All Cities camera checkbox selection."""
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request):
+        pref, _ = AllCitiesCameraPreference.objects.get_or_create(user=request.user)
+        keys = pref.selected_camera_keys if isinstance(pref.selected_camera_keys, list) else []
+        return Response({"selected_camera_keys": keys})
+
+    def put(self, request):
+        raw = request.data.get("selected_camera_keys", [])
+        if not isinstance(raw, list):
+            return Response(
+                {"detail": "selected_camera_keys must be a list of strings."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        keys = [str(k).strip() for k in raw if str(k).strip()]
+        # De-dupe while preserving order
+        seen: set[str] = set()
+        unique: list[str] = []
+        for key in keys:
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(key)
+        pref, _ = AllCitiesCameraPreference.objects.get_or_create(user=request.user)
+        pref.selected_camera_keys = unique
+        pref.save(update_fields=["selected_camera_keys", "updated_at"])
+        return Response({"selected_camera_keys": pref.selected_camera_keys})
+
+
 class AllCitiesStreamsAPIView(APIView):
     """Aggregate live cameras from every active connected Central Ops server."""
 
@@ -369,11 +402,63 @@ class AllCitiesStreamsAPIView(APIView):
 
     def get(self, request):
         refresh = str(request.query_params.get("refresh", "")).lower() in ("1", "true", "yes")
-        qs = RemoteServer.objects.filter(is_active=True).order_by("name")
+        servers = list(RemoteServer.objects.filter(is_active=True).order_by("name"))
         servers_out: list[dict] = []
         cameras_out: list[dict] = []
 
-        for server in qs:
+        def fetch_server(server: RemoteServer) -> dict:
+            if server.is_ml_mode():
+                return fetch_ml_cameras(
+                    server.resolved_ml_base_url(),
+                    server_name=server.name,
+                )
+            token = (server.auth_token or "").strip()
+            if not token or token in ("pending", "ml-only"):
+                token = token_for_user(request.user) or ""
+            return fetch_remote_cameras(server.normalized_base_url(), token)
+
+        live_results: dict = {}
+        servers_to_fetch = [
+            server for server in servers if refresh or not server.cached_cameras
+        ]
+        # One overall deadline for ALL servers (parallel). Sequential per-future
+        # timeouts used to stack (N × 12s) and freeze Refresh when remote nodes hang.
+        # Important: shutdown(wait=False) so hung requests.get threads don't block the response.
+        overall_fetch_timeout = 14.0 if refresh else 12.0
+        if servers_to_fetch:
+            executor = ThreadPoolExecutor(max_workers=min(8, len(servers_to_fetch)))
+            try:
+                future_to_id = {
+                    executor.submit(fetch_server, server): server.pk
+                    for server in servers_to_fetch
+                }
+                done, not_done = wait(
+                    future_to_id.keys(),
+                    timeout=overall_fetch_timeout,
+                    return_when=ALL_COMPLETED,
+                )
+                for future in done:
+                    server_id = future_to_id[future]
+                    try:
+                        live_results[server_id] = future.result(timeout=0)
+                    except Exception as exc:  # noqa: BLE001 — surface remote failures per server
+                        live_results[server_id] = {
+                            "ok": False,
+                            "error": str(exc) or "Failed to fetch cameras",
+                            "cameras": [],
+                        }
+                for future in not_done:
+                    server_id = future_to_id[future]
+                    future.cancel()
+                    live_results[server_id] = {
+                        "ok": False,
+                        "error": "Timed out contacting ML server",
+                        "cameras": [],
+                    }
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+
+        for server in servers:
             entry: dict = {
                 "id": server.pk,
                 "name": server.name,
@@ -395,16 +480,7 @@ class AllCitiesStreamsAPIView(APIView):
                 entry["ok"] = True
                 entry["source"] = "cache"
             else:
-                if server.is_ml_mode():
-                    result = fetch_ml_cameras(
-                        server.resolved_ml_base_url(),
-                        server_name=server.name,
-                    )
-                else:
-                    token = (server.auth_token or "").strip()
-                    if not token or token in ("pending", "ml-only"):
-                        token = token_for_user(request.user) or ""
-                    result = fetch_remote_cameras(server.normalized_base_url(), token)
+                result = live_results.get(server.pk, {"ok": False, "error": "Failed to fetch cameras"})
 
                 mark_server_health(
                     server,
