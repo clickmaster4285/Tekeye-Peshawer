@@ -111,7 +111,7 @@ function gridPageSize(layout: GridLayout): number {
   if (layout === "6x6") return 36
   if (layout === "8x8") return 64
   if (layout === "10x10") return 16
-  return 12
+  return Number.MAX_SAFE_INTEGER
 }
 
 function camerasFingerprint(
@@ -856,12 +856,12 @@ export default function AllCitiesCamerasPage() {
       {grouped.map(({ server, cameras: cams }) => (
         <section key={server?.id ?? "unknown"} className={wallFullscreen ? "flex min-h-0 flex-1 flex-col" : undefined}>
           <div className={cn("mb-3 flex flex-wrap items-center gap-2", wallFullscreen && "mb-1 shrink-0")}> 
-            <Video className="h-4 w-4 text-white" />
-            <h2 className="text-base font-semibold text-white">{server?.name || "Server"}</h2>
+            <Video className="h-4 w-4 text-foreground" />
+            <h2 className="text-lg font-semibold text-foreground">{server?.name || "Server"}</h2>
             {server?.location_code ? (
-              <Badge variant="outline" className="border-white/40 text-white">{server.location_code}</Badge>
+              <Badge variant="outline" className="border-border text-foreground">{server.location_code}</Badge>
             ) : null}
-            <span className="text-xs text-white/80">
+            <span className="text-sm text-muted-foreground">
               {cams.length} camera{cams.length === 1 ? "" : "s"}
               {server?.ml_base_url ? ` · ${server.ml_base_url}` : ""}
             </span>
