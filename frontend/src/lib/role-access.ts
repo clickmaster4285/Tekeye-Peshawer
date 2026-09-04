@@ -515,18 +515,9 @@ export function isPathAllowedForRole(
 
   const path = normalizePathname(pathname)
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
-  const restricted = getRestrictedRole(role)
-
-  if (isSiteFullAccessRole(role)) {
-    if (path === ROUTES.OPS_CENTRAL || path.startsWith(`${ROUTES.OPS_CENTRAL}/`)) return false
-    return true
-  }
-
-  // Main `/` dashboard: Super Admin only (handled above). Restricted / granted users
-  // go to their module home. Unconfigured users (no template, no grants) may use `/`
-  // until Super Admin assigns modules.
+  // Main `/` dashboard remains available while a Super Admin assigns modules.
   if (path === "/" || path === "") {
-    return !restricted && modules.length === 0
+    return true
   }
 
   if (modules.length > 0) {
@@ -535,9 +526,8 @@ export function isPathAllowedForRole(
     return modules.includes(moduleLabel)
   }
 
-  // No custom grants and no role template → only `/` (handled above).
-  if (!restricted) return false
-  return isPathAllowedForRestrictedRole(pathname, restricted)
+  // No custom grants means no module routes are available.
+  return false
 }
 
 /** @deprecated Use isPathAllowedForRole */
@@ -566,7 +556,6 @@ export function getHomeRouteForRole(
   const normalized = normalizeRole(role)
   if (normalized === "ADMIN") return ROUTES.DASHBOARD
   if (normalized === "IT_SUPERADMIN") return ROUTES.OPS_CENTRAL
-  if (isSiteFullAccessRole(role)) return ROUTES.DASHBOARD
 
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   if (modules.length > 0) {
@@ -576,25 +565,7 @@ export function getHomeRouteForRole(
     }
   }
 
-  const restricted = getRestrictedRole(role)
-  if (restricted === "RECEPTIONIST" || restricted === "GUARD") {
-    return ROUTES.VISITOR_MANAGEMENT_OVERVIEW
-  }
-  if (
-    restricted === "WAREHOUSE_OFFICER" ||
-    restricted === "WAREHOUSE_SUPERINTENDENT" ||
-    restricted === "WAREHOUSE_IN_CHARGE" ||
-    restricted === "EXAMINATION_OFFICER" ||
-    restricted === "STOCK_CONTROLLER" ||
-    restricted === "AUDITOR"
-  ) {
-    return ROUTES.OPERATIONS_DASHBOARD
-  }
-  if (restricted === "IT_ADMIN") return ROUTES.ATTENDANCE_DASHBOARD
-  if (restricted === "HR") return ROUTES.EMPLOYEES
-  if (restricted === "PRAL") return ROUTES.ASO_PORTAL_SYNC
-
-  // Unconfigured role with no grants — temporary until modules are assigned.
+  // Unconfigured users remain on the dashboard until modules are assigned.
   return ROUTES.DASHBOARD
 }
 

@@ -65,7 +65,7 @@ class User(AbstractUser):
     effective_date = models.DateField(null=True, blank=True)
     we_boc_role = models.CharField(max_length=150, blank=True, default="")
     is_deleted = models.BooleanField(default=False)
-    # Top-level sidebar module labels the user may access (empty = use role defaults).
+    # Top-level sidebar module labels the user may access (empty = no module access).
     # Super Admin (ADMIN) always has full access regardless of this field.
     allowed_modules = models.JSONField(default=list, blank=True)
 

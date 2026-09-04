@@ -879,16 +879,6 @@ export function getNavSectionsForRole(
   // Super Admin — full sidebar, no Central Ops.
   if (normalized === "ADMIN") return NAV_SECTIONS
 
-  if (
-    normalized === "LOCATION_ADMIN" ||
-    normalized === "OPERATION_MANAGER" ||
-    normalized === "COLLECTOR" ||
-    normalized === "DEPUTY_COLLECTOR" ||
-    normalized === "ASSISTANT_COLLECTOR"
-  ) {
-    return NAV_SECTIONS
-  }
-
   // IT Super Admin — Central Ops only.
   if (normalized === "IT_SUPERADMIN") {
     return [
@@ -901,24 +891,13 @@ export function getNavSectionsForRole(
     ]
   }
 
-  // Custom grants: only show modules Super Admin explicitly allowed (no main Dashboard).
+  // Custom grants: only show modules Super Admin explicitly allowed.
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   if (modules.length > 0) {
     return filterNavSectionsByModules(NAV_SECTIONS, modules)
   }
 
-  // No custom grants → role default template. Never fall through to the full sidebar.
-  if (normalized === "GUARD") return GUARD_NAV_SECTIONS
-  if (normalized === "RECEPTIONIST") return RECEPTIONIST_NAV_SECTIONS
-  if (normalized === "WAREHOUSE_OFFICER") return WAREHOUSE_OFFICER_NAV_SECTIONS
-  if (normalized === "WAREHOUSE_SUPERINTENDENT") return WAREHOUSE_SUPERINTENDENT_NAV_SECTIONS
-  if (normalized === "WAREHOUSE_IN_CHARGE") return WAREHOUSE_IN_CHARGE_NAV_SECTIONS
-  if (normalized === "EXAMINATION_OFFICER") return EXAMINATION_OFFICER_NAV_SECTIONS
-  if (normalized === "STOCK_CONTROLLER") return STOCK_CONTROLLER_NAV_SECTIONS
-  if (normalized === "AUDITOR") return AUDITOR_NAV_SECTIONS
-  if (normalized === "PRAL") return PRAL_NAV_SECTIONS
-  if (normalized === "IT_ADMIN") return IT_ADMIN_NAV_SECTIONS
-  if (normalized === "HR") return HR_NAV_SECTIONS
+  // No custom grants means no module sidebar until permissions are assigned.
   return EMPTY_NAV_SECTIONS
 }
 
