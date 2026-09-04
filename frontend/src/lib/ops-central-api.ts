@@ -41,6 +41,7 @@ export type OpsCamera = {
   site_name?: string
   nvr_name?: string
   channel?: number
+  channel_label?: string
   purpose?: string
   purpose_label?: string
   ml_enabled?: boolean

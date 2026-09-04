@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, Navigate } from "react-router-dom"
+import { Navigate } from "react-router-dom"
 import {
   Camera,
   Expand,
@@ -9,15 +9,13 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
-  Server,
   Trash2,
   Video,
-  Wifi,
-  WifiOff,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -29,9 +27,7 @@ import { getStoredUser } from "@/lib/auth"
 import { normalizeRole } from "@/lib/role-access"
 import { ROUTES } from "@/routes/config"
 import {
-  deleteRemoteServer,
   fetchAllCitiesStreams,
-  removeServerCamera,
   withOpsStreamToken,
   type OpsCamera,
 } from "@/lib/ops-central-api"
@@ -247,7 +243,7 @@ function StreamTile({
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
           <p className="truncate text-sm font-medium text-white">{camera.name}</p>
           <p className="truncate text-xs text-white/70">
-            {[camera.code, camera.status, camera.location_code || camera.location]
+            {[camera.code, camera.channel_label || `Channel ${camera.channel ?? "-"}`, camera.status, camera.location_code || camera.location]
               .filter(Boolean)
               .join(" · ")}
           </p>
@@ -281,18 +277,16 @@ export default function AllCitiesCamerasPage() {
   const user = getStoredUser()
   const role = normalizeRole(user?.role)
   const allowed = role === "ADMIN" || role === "IT_SUPERADMIN"
-  const canManage = role === "IT_SUPERADMIN"
 
   const [servers, setServers] = useState<ServerSummary[]>([])
   const [cameras, setCameras] = useState<CityCamera[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [filterServerId, setFilterServerId] = useState<string>("all")
+  const [locationFilter, setLocationFilter] = useState<string>("all")
+  const [selectedCameraKeys, setSelectedCameraKeys] = useState<string[]>([])
   const [layout, setLayout] = useState<GridLayout>("auto")
   const [showTimestamp, setShowTimestamp] = useState(true)
   const [wallFullscreen, setWallFullscreen] = useState(false)
-  const [removingCameraKey, setRemovingCameraKey] = useState<string | null>(null)
-  const [removingServerId, setRemovingServerId] = useState<number | null>(null)
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true)
@@ -327,59 +321,37 @@ export default function AllCitiesCamerasPage() {
     }
   }, [wallFullscreen])
 
-  const onRemoveServer = async (server: ServerSummary) => {
-    if (
-      !window.confirm(
-        `Remove "${server.name}" from Central Ops? Its cameras will disappear from All Cities.`
-      )
-    ) {
-      return
-    }
-    setRemovingServerId(server.id)
-    setError(null)
-    try {
-      await deleteRemoteServer(server.id)
-      if (filterServerId === String(server.id)) setFilterServerId("all")
-      await load(true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove server")
-    } finally {
-      setRemovingServerId(null)
-    }
-  }
-
-  const onRemoveCamera = async (cam: CityCamera) => {
-    if (!cam.server_id) return
-    const label = cam.name || cam.code || "this camera"
-    if (
-      !window.confirm(
-        `Remove ${label} from ${cam.server_name || "this server"}? This deletes it on the node when possible.`
-      )
-    ) {
-      return
-    }
-    const key = cam.ml_stream_key || cam.code || String(cam.id)
-    setRemovingCameraKey(`${cam.server_id}-${key}`)
-    setError(null)
-    try {
-      await removeServerCamera(cam.server_id, {
-        stream_key: cam.ml_stream_key || cam.code,
-        camera_id: cam.id,
-        code: cam.code,
-      })
-      await load(true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove camera")
-    } finally {
-      setRemovingCameraKey(null)
-    }
-  }
-
   const visibleCameras = useMemo(() => {
-    if (filterServerId === "all") return cameras
-    const id = Number(filterServerId)
-    return cameras.filter((c) => c.server_id === id)
-  }, [cameras, filterServerId])
+    const locationCameras = locationFilter === "all"
+      ? cameras
+      : cameras.filter((camera) => (camera.location_code || camera.location) === locationFilter)
+    return locationCameras.filter((camera) =>
+      selectedCameraKeys.includes(`${camera.server_id ?? 0}:${camera.id}:${camera.code}`)
+    )
+  }, [cameras, locationFilter, selectedCameraKeys])
+
+  const camerasByLocation = useMemo(() => {
+    const groups = new Map<string, CityCamera[]>()
+    for (const camera of cameras) {
+      const location = camera.location_code || camera.location || "Unassigned location"
+      const group = groups.get(location) ?? []
+      group.push(camera)
+      groups.set(location, group)
+    }
+    return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right))
+  }, [cameras])
+
+  const toggleCamera = (camera: CityCamera) => {
+    const key = `${camera.server_id ?? 0}:${camera.id}:${camera.code}`
+    setSelectedCameraKeys((keys) => keys.includes(key)
+      ? keys.filter((value) => value !== key)
+      : [...keys, key])
+  }
+
+  const selectLocationCameras = (locationCameras: CityCamera[]) => {
+    const keys = locationCameras.map((camera) => `${camera.server_id ?? 0}:${camera.id}:${camera.code}`)
+    setSelectedCameraKeys((current) => Array.from(new Set([...current, ...keys])))
+  }
 
   const grouped = useMemo(() => {
     const map = new Map<number, { server: ServerSummary | null; cameras: CityCamera[] }>()
@@ -432,38 +404,17 @@ export default function AllCitiesCamerasPage() {
             {server?.error ? (
               <span className="text-xs text-amber-700">{server.error}</span>
             ) : null}
-            {canManage && server ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="ml-auto h-7 text-destructive hover:text-destructive"
-                disabled={removingServerId === server.id}
-                onClick={() => void onRemoveServer(server)}
-              >
-                {removingServerId === server.id ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                )}
-                Remove server
-              </Button>
-            ) : null}
           </div>
           {cams.length === 0 ? (
             <p className="text-sm text-muted-foreground">No live cameras on this server.</p>
           ) : (
             <div className={cn("grid gap-3", GRID_CLASS[layout])}>
               {cams.map((cam) => {
-                const removeKey = `${cam.server_id}-${cam.ml_stream_key || cam.code || cam.id}`
                 return (
                   <StreamTile
                     key={`${cam.server_id}-${cam.id}-${cam.ml_stream_key || cam.code}`}
                     camera={cam}
                     showTimestamp={showTimestamp}
-                    canManage={canManage}
-                    onRemove={() => void onRemoveCamera(cam)}
-                    removing={removingCameraKey === removeKey}
                   />
                 )
               })}
@@ -527,42 +478,49 @@ export default function AllCitiesCamerasPage() {
         </div>
       }
     >
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Connected servers:</span>
-        {servers.length === 0 && !loading ? (
-          <span className="text-sm text-muted-foreground">None — connect them in Central Ops</span>
-        ) : (
-          servers.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() =>
-                setFilterServerId((prev) => (prev === String(s.id) ? "all" : String(s.id)))
-              }
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-                filterServerId === String(s.id)
-                  ? "border-sky-600 bg-sky-50 text-sky-900"
-                  : "border-border bg-background hover:bg-muted",
-              )}
-            >
-              {s.ok || s.last_health === "ok" ? (
-                <Wifi className="h-3.5 w-3.5 text-emerald-600" />
-              ) : (
-                <WifiOff className="h-3.5 w-3.5 text-amber-600" />
-              )}
-              {s.name}
-              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                {s.camera_count}
-              </Badge>
-            </button>
-          ))
-        )}
-        {filterServerId !== "all" && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setFilterServerId("all")}>
-            Show all
+      <div className="mb-4 rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <label className="text-sm font-medium" htmlFor="all-cities-location">Location</label>
+          <Select value={locationFilter} onValueChange={setLocationFilter}>
+            <SelectTrigger id="all-cities-location" className="w-56">
+              <SelectValue placeholder="All locations" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All locations</SelectItem>
+              {camerasByLocation.map(([location]) => (
+                <SelectItem key={location} value={location}>{location}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">{selectedCameraKeys.length} selected</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setSelectedCameraKeys([])}>
+            Clear selection
           </Button>
-        )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {camerasByLocation.map(([location, locationCameras]) => (
+            <div key={location} className="rounded-md border border-border p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold">{location}</span>
+                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => selectLocationCameras(locationCameras)}>
+                  Select all
+                </Button>
+              </div>
+              <div className="space-y-1">
+                {locationCameras.map((camera) => {
+                  const key = `${camera.server_id ?? 0}:${camera.id}:${camera.code}`
+                  return (
+                    <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted">
+                      <Checkbox checked={selectedCameraKeys.includes(key)} onCheckedChange={() => toggleCamera(camera)} />
+                      <span className="min-w-0 flex-1 truncate">{camera.name || camera.code}</span>
+                      <span className="text-xs text-muted-foreground">{camera.channel_label || `Ch ${camera.channel ?? "-"}`}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -580,15 +538,14 @@ export default function AllCitiesCamerasPage() {
         <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
           <Server className="h-10 w-10 opacity-40" />
           <p className="text-sm">No cameras yet. Connect ML servers in Central Ops first.</p>
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link to={ROUTES.OPS_CENTRAL}>Open Central Ops</Link>
-          </Button>
         </div>
+      ) : visibleCameras.length === 0 ? (
+        <div className="py-20 text-center text-sm text-muted-foreground">Select cameras above to display them.</div>
       ) : (
         cameraGrid
       )}
 
-      {wallFullscreen && cameras.length > 0 && (
+      {wallFullscreen && visibleCameras.length > 0 && (
         <div className="fixed inset-0 z-[190] flex flex-col bg-black">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
             <p className="text-sm font-medium text-white">
