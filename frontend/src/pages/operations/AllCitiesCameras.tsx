@@ -99,9 +99,6 @@ function clearLegacyLocalSelection() {
   }
 }
 
-/** Hard cap — each MJPEG tile opens a long-lived connection; too many crash the tab. */
-const MAX_LIVE_STREAMS = 12
-
 function gridPageSize(layout: GridLayout): number {
   if (layout === "1x1") return 1
   if (layout === "2x2") return 4
@@ -841,7 +838,7 @@ export default function AllCitiesCamerasPage() {
 
   const liveStreamKeys = useMemo(() => {
     const keys = new Set<string>()
-    for (const cam of pagedCameras.slice(0, MAX_LIVE_STREAMS)) {
+    for (const cam of pagedCameras) {
       keys.add(`${cam.server_id ?? 0}:${cam.id}:${cam.code}`)
     }
     return keys
