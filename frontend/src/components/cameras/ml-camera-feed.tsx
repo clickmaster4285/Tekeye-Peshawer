@@ -177,7 +177,7 @@ export function MlCameraFeed({
               if (mlLiveSrc && streamRetry < 12) {
                 retryTimer.current = window.setTimeout(() => {
                   setStreamRetry((n) => n + 1)
-                }, 1500)
+                }, 4000)
                 return
               }
               setStreamError(

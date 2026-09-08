@@ -2,6 +2,13 @@ import { normalizeRole } from "@/lib/role-access"
 
 export const ALL_CITIES_CAMERAS_KEY = "tekeye_all_cities_cameras"
 export const ALL_CITIES_CAMERAS_EVENT = "all-cities-cameras-changed"
+export const ALL_CITIES_STREAMS_CACHE_KEY = "tekeye_all_cities_streams_cache"
+
+export type AllCitiesStreamsCache = {
+  servers: unknown[]
+  cameras: unknown[]
+  fetchedAt: number
+}
 
 const HEAD_OFFICE_LOCATION = "PESHAWAR"
 const THIS_SITE_LOCATION = "PESHAWAR"
@@ -74,4 +81,31 @@ export function setAllCitiesCamerasPreference(enabled: boolean): void {
   window.dispatchEvent(
     new CustomEvent(ALL_CITIES_CAMERAS_EVENT, { detail: { enabled } }),
   )
+}
+
+export function readAllCitiesStreamsCache(): AllCitiesStreamsCache | null {
+  try {
+    const raw = sessionStorage.getItem(ALL_CITIES_STREAMS_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as AllCitiesStreamsCache
+    if (!parsed || !Array.isArray(parsed.servers) || !Array.isArray(parsed.cameras)) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function writeAllCitiesStreamsCache(servers: unknown[], cameras: unknown[]): void {
+  try {
+    const payload: AllCitiesStreamsCache = {
+      servers,
+      cameras,
+      fetchedAt: Date.now(),
+    }
+    sessionStorage.setItem(ALL_CITIES_STREAMS_CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    /* ignore */
+  }
 }

@@ -17,6 +17,11 @@ from rest_framework.views import APIView
 
 from users.permissions import is_ops_viewer
 
+from .cache import (
+    parse_camera_id as _parse_camera_id,
+    prune_server_camera_cache as _prune_server_camera_cache,
+    resolve_stream_key as _resolve_stream_key,
+)
 from .client import (
     delete_remote_camera,
     fetch_ml_cameras,
@@ -61,6 +66,76 @@ def _ops_user_from_request(request):
     return None
 
 
+_OPS_CAMERAS_CACHE_TTL_SEC = 120
+
+
+def _cache_is_fresh(server: RemoteServer, *, refresh: bool) -> bool:
+    if refresh or not server.cached_cameras:
+        return False
+    fetched_at = server.cameras_fetched_at
+    if not fetched_at:
+        return False
+    age = (timezone.now() - fetched_at).total_seconds()
+    return age < _OPS_CAMERAS_CACHE_TTL_SEC
+
+
+def _resolve_stream_rtsp_url(server: RemoteServer, stream_key: str) -> str:
+    """Resolve RTSP URL for ops MJPEG proxy (server-side only — not sent to browser)."""
+    key = (stream_key or "").strip()
+    if not key:
+        return ""
+    for cam in server.cached_cameras or []:
+        if not isinstance(cam, dict):
+            continue
+        cam_key = (cam.get("ml_stream_key") or cam.get("code") or "").strip()
+        cam_id = cam.get("id")
+        alt = f"cam-{cam_id}" if cam_id else ""
+        if key not in (cam_key, alt):
+            continue
+        url = (cam.get("rtsp_url") or cam.get("stream_url") or "").strip()
+        if url:
+            return url
+    if _is_local_hub_server(server):
+        try:
+            from cameras.models import Camera
+
+            cam_id = int(key[4:]) if key.startswith("cam-") and key[4:].isdigit() else None
+            if cam_id:
+                camera = (
+                    Camera.objects.filter(pk=cam_id, is_active=True)
+                    .select_related("nvr", "nvr__site")
+                    .first()
+                )
+                if camera:
+                    return (camera.effective_stream_url() or "").strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _ml_mjpeg_upstream_candidates(
+    *,
+    ml_base: str,
+    django_base: str,
+    stream_key: str,
+    kind: str,
+    rtsp_url: str = "",
+) -> list[str]:
+    path = (
+        f"/live/cam/{stream_key}/mjpeg/raw"
+        if kind == "raw"
+        else f"/live/cam/{stream_key}/mjpeg"
+    )
+    params: dict[str, str] = {}
+    if (rtsp_url or "").strip():
+        params["rtsp_url"] = rtsp_url.strip()
+    qs = f"?{urlencode(params)}" if params else ""
+    urls = [urljoin(ml_base.rstrip("/") + "/", path.lstrip("/")) + qs]
+    if django_base and django_base.rstrip("/") != ml_base.rstrip("/"):
+        urls.append(urljoin(django_base.rstrip("/") + "/", f"ml{path}") + qs)
+    return urls
+
+
 def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]:
     """Rewrite stream URLs to hub proxy endpoints."""
     out = []
@@ -89,76 +164,6 @@ def _is_local_hub_server(server: RemoteServer) -> bool:
     base = (server.normalized_base_url() or "").lower()
     local_hosts = ("127.0.0.1", "localhost", "::1")
     return any(host in ml or host in base for host in local_hosts)
-
-
-def _parse_camera_id(value) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        parsed = int(value)
-        return parsed if parsed > 0 else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _resolve_stream_key(stream_key: str, camera_id, code: str) -> str:
-    key = (stream_key or "").strip()
-    if key:
-        return key
-    cid = _parse_camera_id(camera_id)
-    if cid:
-        return f"cam-{cid}"
-    code = (code or "").strip()
-    if code:
-        return code if code.startswith("cam-") else f"cam-{code}"
-    return ""
-
-
-def _camera_matches_entry(
-    cam: dict,
-    *,
-    stream_key: str,
-    camera_id: int | None,
-    code: str,
-) -> bool:
-    if stream_key and (cam.get("ml_stream_key") or cam.get("code") or "") == stream_key:
-        return True
-    if camera_id is not None and cam.get("id") == camera_id:
-        return True
-    if code and (cam.get("code") or "") == code:
-        return True
-    if stream_key.startswith("cam-"):
-        sid = stream_key[4:]
-        if sid.isdigit() and cam.get("id") == int(sid):
-            return True
-    return False
-
-
-def _prune_server_camera_cache(
-    server: RemoteServer,
-    *,
-    stream_key: str,
-    camera_id: int | None,
-    code: str,
-) -> list[dict]:
-    cached = list(server.cached_cameras or [])
-    if not cached:
-        return cached
-    pruned = [
-        cam
-        for cam in cached
-        if isinstance(cam, dict)
-        and not _camera_matches_entry(
-            cam,
-            stream_key=stream_key,
-            camera_id=camera_id,
-            code=code,
-        )
-    ]
-    if len(pruned) != len(cached):
-        server.cached_cameras = pruned
-        server.save(update_fields=["cached_cameras", "updated_at"])
-    return pruned
 
 
 class RemoteServerViewSet(viewsets.ModelViewSet):
@@ -480,7 +485,7 @@ class AllCitiesStreamsAPIView(APIView):
             }
             raw_cameras: list = []
 
-            use_cache = bool(not refresh and server.cached_cameras)
+            use_cache = _cache_is_fresh(server, refresh=refresh)
             if use_cache:
                 raw_cameras = list(server.cached_cameras or [])
                 entry["ok"] = True
@@ -739,15 +744,14 @@ class RemoteMjpegProxyView(APIView):
             )
 
         ml_base = server.resolved_ml_base_url()
-        if kind == "raw":
-            path = f"/live/cam/{stream_key}/mjpeg/raw"
-        else:
-            path = f"/live/cam/{stream_key}/mjpeg"
-
-        candidates = [
-            urljoin(ml_base.rstrip("/") + "/", path.lstrip("/")),
-            urljoin(server.normalized_base_url() + "/", f"ml{path}"),
-        ]
+        rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
+        candidates = _ml_mjpeg_upstream_candidates(
+            ml_base=ml_base,
+            django_base=server.normalized_base_url(),
+            stream_key=stream_key,
+            kind=kind,
+            rtsp_url=rtsp_url,
+        )
 
         upstream = None
         last_err = ""

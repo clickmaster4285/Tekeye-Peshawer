@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useState, startTransition } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Search, Bell, HelpCircle, User, LogOut, Menu, Wifi, WifiOff } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -64,16 +64,35 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
 
   const allCitiesCameras = location.pathname === ROUTES.ALL_CITIES_CAMERAS
 
+  const navigateAfterPaint = useCallback(
+    (to: string, options?: { replace?: boolean }) => {
+      // Defer soft navigation one frame so Chrome DevTools web-vitals (VMxx reportAllChanges)
+      // does not race MJPEG teardown during All Cities toggle.
+      requestAnimationFrame(() => {
+        startTransition(() => {
+          navigate(to, options)
+        })
+      })
+    },
+    [navigate],
+  )
+
   const handleAllCitiesCameras = useCallback(
     (enabled: boolean) => {
-      setAllCitiesCamerasPreference(enabled)
       if (enabled) {
-        navigate(ROUTES.ALL_CITIES_CAMERAS)
-      } else if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
-        navigate(role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD)
+        setAllCitiesCamerasPreference(true)
+        navigateAfterPaint(ROUTES.ALL_CITIES_CAMERAS)
+        return
+      }
+      setAllCitiesCamerasPreference(false)
+      if (location.pathname === ROUTES.ALL_CITIES_CAMERAS) {
+        navigateAfterPaint(
+          role === "IT_SUPERADMIN" ? ROUTES.OPS_CENTRAL : ROUTES.DASHBOARD,
+          { replace: true },
+        )
       }
     },
-    [navigate, location.pathname, role],
+    [location.pathname, navigateAfterPaint, role],
   )
 
   useEffect(() => {

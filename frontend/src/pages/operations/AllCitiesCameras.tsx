@@ -56,6 +56,10 @@ import {
   withOpsStreamToken,
   type OpsCamera,
 } from "@/lib/ops-central-api"
+import {
+  readAllCitiesStreamsCache,
+  writeAllCitiesStreamsCache,
+} from "@/lib/all-cities-cameras"
 import { cn } from "@/lib/utils"
 
 type CityCamera = OpsCamera & {
@@ -262,6 +266,7 @@ const StreamTile = memo(function StreamTile({
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [visible, setVisible] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const imgRef = useRef<HTMLImageElement | null>(null)
   const retryTimerRef = useRef<number | null>(null)
@@ -335,6 +340,7 @@ const StreamTile = memo(function StreamTile({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "overflow-hidden rounded-lg border border-border bg-black",
         wallMode && "flex h-full min-h-0 min-w-0 flex-col rounded-md",

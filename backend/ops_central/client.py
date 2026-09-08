@@ -190,6 +190,7 @@ def _normalize_stream_cam(c: dict) -> dict[str, Any]:
         "ml_stream_key": stream_key,
         "ml_live_stream_url": c.get("ml_live_stream_url") or "",
         "raw_stream_url": c.get("raw_stream_url") or "",
+        "rtsp_url": (c.get("rtsp_url") or c.get("stream_url") or "").strip(),
         "status": c.get("status") or "Online",
         "is_active": True,
     }
@@ -216,6 +217,7 @@ def _normalize_camera_record(c: dict) -> dict[str, Any]:
         "ml_stream_key": stream_key,
         "ml_live_stream_url": c.get("ml_live_stream_url") or "",
         "raw_stream_url": c.get("raw_stream_url") or "",
+        "rtsp_url": (c.get("rtsp_url") or c.get("stream_url") or "").strip(),
         "status": c.get("status") or "Online",
         "is_active": bool(c.get("is_active", True)),
         "nvr": c.get("nvr"),
