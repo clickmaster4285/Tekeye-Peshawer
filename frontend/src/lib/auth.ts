@@ -44,7 +44,7 @@ export type AuthUser = {
   collectorate?: string;
   department?: string;
   is_active?: boolean;
-  /** Top-level sidebar modules; empty = role defaults. ADMIN ignores this. */
+  /** Top-level sidebar modules; empty = no module access. ADMIN ignores this. */
   allowed_modules?: string[];
 };
 

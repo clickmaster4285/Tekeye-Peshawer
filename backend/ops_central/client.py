@@ -182,6 +182,7 @@ def _normalize_stream_cam(c: dict) -> dict[str, Any]:
         "site_name": c.get("site_label") or c.get("site_name") or "",
         "nvr_name": c.get("nvr_name") or "",
         "channel": c.get("channel"),
+        "channel_label": c.get("channel_label") or "",
         "purpose": c.get("purpose") or "",
         "purpose_label": c.get("purpose_label") or "",
         "ml_enabled": bool(c.get("ml_enabled")),
@@ -208,6 +209,7 @@ def _normalize_camera_record(c: dict) -> dict[str, Any]:
         "site_name": c.get("site_name") or "",
         "nvr_name": c.get("nvr_name") or "",
         "channel": c.get("channel"),
+        "channel_label": c.get("channel_label") or "",
         "purpose": c.get("purpose") or "",
         "purpose_label": c.get("purpose_label") or "",
         "ml_enabled": bool(c.get("ml_enabled")),
@@ -330,7 +332,7 @@ def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, An
     if not base:
         return {"ok": False, "error": "ML URL is required.", "cameras": []}
     try:
-        resp = requests.get(f"{base}/live/status", timeout=15, headers={"Accept": "application/json"})
+        resp = requests.get(f"{base}/live/status", timeout=8, headers={"Accept": "application/json"})
     except requests.RequestException as exc:
         return {"ok": False, "error": _friendly_conn_error(exc, base), "cameras": []}
 
@@ -356,6 +358,8 @@ def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, An
         key = (c.get("key") or c.get("ip") or "").strip()
         if not key:
             continue
+        # Registered on a reachable ML node ⇒ Online. Transient RTSP reconnects
+        # (connected/has_frame false) must not mark the wall / server as offline.
         connected = bool(c.get("connected") or c.get("has_frame"))
         purpose = (c.get("purpose") or "").strip()
         cameras.append(
@@ -376,8 +380,7 @@ def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, An
                 "ml_stream_key": key,
                 "ml_live_stream_url": "",
                 "raw_stream_url": "",
-                "rtsp_url": (c.get("rtsp_url") or "").strip(),
-                "status": "Online" if connected else "Offline",
+                "status": "Online",
                 "is_active": True,
                 "connected": connected,
                 "has_frame": bool(c.get("has_frame")),
