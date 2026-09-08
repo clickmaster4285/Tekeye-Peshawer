@@ -43,7 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getStoredUser } from "@/lib/auth"
-import { canViewAllCitiesCameras } from "@/lib/all-cities-cameras"
+import { canViewAllCitiesCameras, getCamerasWallLabel } from "@/lib/all-cities-cameras"
 import { normalizeRole } from "@/lib/role-access"
 import { ROUTES } from "@/routes/config"
 import {

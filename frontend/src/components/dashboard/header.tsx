@@ -19,7 +19,9 @@ import { getRoleDisplayLabel, normalizeRole } from "@/lib/role-access"
 import { isGlobalAdmin } from "@/lib/location-access"
 import { locationLabel } from "@/lib/locations"
 import {
+  canSeeAllCitiesCameras,
   canViewAllCitiesCameras,
+  getCamerasWallLabel,
   setAllCitiesCamerasPreference,
 } from "@/lib/all-cities-cameras"
 import { listRemoteServers, type RemoteServerRecord } from "@/lib/ops-central-api"
@@ -52,6 +54,8 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
   }, [])
   const role = normalizeRole(user?.role)
   const showAllCitiesToggle = canViewAllCitiesCameras(user?.role)
+  const camerasWallLabel = getCamerasWallLabel(user?.role, user?.location)
+  const showAllCityServerChips = canSeeAllCitiesCameras(user?.role, user?.location)
   const [searchInput, setSearchInput] = useState("")
   const [notifications, setNotifications] = useState<NoteSheetNotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -214,7 +218,7 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
                 id="all-cities-cameras"
                 checked={allCitiesCameras}
                 onCheckedChange={handleAllCitiesCameras}
-                aria-label="All Cities Cameras"
+                aria-label={camerasWallLabel}
                 className="h-7 w-12 shrink-0 [&_[data-slot=switch-thumb]]:size-6 [&_[data-slot=switch-thumb]]:data-[state=checked]:translate-x-[1.35rem]"
               />
               <span
@@ -229,10 +233,10 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
                 }}
                 className="cursor-pointer select-none whitespace-nowrap text-sm font-semibold text-[#101727] sm:text-base"
               >
-                All Cities Cameras
+                {camerasWallLabel}
               </span>
             </div>
-            {connectedServers.length > 0 && (
+            {showAllCityServerChips && connectedServers.length > 0 && (
               <div className="flex max-w-full flex-wrap items-center justify-center gap-1">
                 {connectedServers.slice(0, 6).map((s) => {
                   const health = (s.last_health || "").toLowerCase()

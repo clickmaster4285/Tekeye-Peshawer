@@ -514,11 +514,12 @@ export function isPathAllowedForRole(
       path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`)
     )
   }
-  // Collectorate officers may open the All Cities wall
+  // Collectorate officers and location admins may open the live camera wall
   if (
     normalized === "COLLECTOR" ||
     normalized === "DEPUTY_COLLECTOR" ||
-    normalized === "ASSISTANT_COLLECTOR"
+    normalized === "ASSISTANT_COLLECTOR" ||
+    normalized === "LOCATION_ADMIN"
   ) {
     const path = normalizePathname(pathname)
     if (
