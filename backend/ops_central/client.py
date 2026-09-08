@@ -356,6 +356,8 @@ def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, An
         key = (c.get("key") or c.get("ip") or "").strip()
         if not key:
             continue
+        # Registered on a reachable ML node ⇒ Online. Transient RTSP reconnects
+        # (connected/has_frame false) must not mark the wall / server as offline.
         connected = bool(c.get("connected") or c.get("has_frame"))
         purpose = (c.get("purpose") or "").strip()
         cameras.append(
@@ -376,7 +378,7 @@ def fetch_ml_cameras(ml_base_url: str, *, server_name: str = "") -> dict[str, An
                 "ml_stream_key": key,
                 "ml_live_stream_url": "",
                 "raw_stream_url": "",
-                "status": "Online" if connected else "Offline",
+                "status": "Online",
                 "is_active": True,
                 "connected": connected,
                 "has_frame": bool(c.get("has_frame")),

@@ -304,6 +304,14 @@ export default function OpsCentralPage() {
       breadcrumbs={[{ label: "Central Ops" }]}
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.OPS_ML_SERVERS)}>
+            <Server className="mr-1.5 h-4 w-4" />
+            ML Servers
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.OPS_CAMERA_DISTRIBUTION)}>
+            <LayoutGrid className="mr-1.5 h-4 w-4" />
+            Distribution
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.ALL_CITIES_CAMERAS)}>
             <LayoutGrid className="mr-1.5 h-4 w-4" />
             All Cities Cameras
@@ -481,7 +489,9 @@ export default function OpsCentralPage() {
                     {selectedServer ? (
                       <div className="space-y-2 rounded-md border p-3 text-xs text-muted-foreground">
                         <div className="flex items-center gap-2">
-                          {selectedServer.last_health === "online" ? (
+                          {["online", "ok", "healthy", "up"].includes(
+                            (selectedServer.last_health || "").toLowerCase()
+                          ) ? (
                             <Wifi className="h-3.5 w-3.5 text-emerald-600" />
                           ) : (
                             <WifiOff className="h-3.5 w-3.5 text-amber-600" />

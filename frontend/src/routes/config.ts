@@ -84,6 +84,10 @@ export const ROUTES = {
   OBJECT_TRACKING_DETAIL: "/object-tracking/:uuid",
   /** Super Admin only — remote location servers + live detection streams */
   OPS_CENTRAL: "/ops-central",
+  /** IT Super Admin — ML server capacity registry */
+  OPS_ML_SERVERS: "/ops-central/ml-servers",
+  /** IT Super Admin — drag-drop / auto camera distribution */
+  OPS_CAMERA_DISTRIBUTION: "/ops-central/distribution",
   /** All connected Central Ops servers — live city camera wall */
   ALL_CITIES_CAMERAS: "/all-cities-cameras",
   PERSON_JOURNEY: "/person-journey",
@@ -886,6 +890,9 @@ export function getNavSectionsForRole(
         title: "Central Ops",
         items: [
           { label: "Central Ops", href: ROUTES.OPS_CENTRAL },
+          { label: "ML Servers", href: ROUTES.OPS_ML_SERVERS },
+          { label: "Camera Distribution", href: ROUTES.OPS_CAMERA_DISTRIBUTION },
+          { label: "All Cities Cameras", href: ROUTES.ALL_CITIES_CAMERAS },
         ],
       },
     ]
