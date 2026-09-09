@@ -340,7 +340,6 @@ const StreamTile = memo(function StreamTile({
 
   return (
     <div
-      ref={rootRef}
       className={cn(
         "overflow-hidden rounded-lg border border-border bg-black",
         wallMode && "flex h-full min-h-0 min-w-0 flex-col rounded-md",
