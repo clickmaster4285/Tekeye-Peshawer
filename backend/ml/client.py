@@ -21,11 +21,23 @@ class MLServiceError(Exception):
 def known_ml_base_urls() -> list[str]:
     """
     Every ML node the backend should control:
-      - ML_SERVICE_URL (optional hub / local)
+      - ML_SERVICE_URL (optional hub — must be a reachable remote if set)
       - active RemoteServer rows in ML mode (ops camera distribution)
+
+    Loopback hub URLs (127.0.0.1 / localhost) are ignored when at least one
+    non-local RemoteServer ML URL exists, so Django hosts without local
+    ml_services do not spam connection-refused errors.
     """
     urls: list[str] = []
     seen: set[str] = set()
+
+    def _is_loopback(url: str) -> bool:
+        low = (url or "").lower()
+        return (
+            "://127.0.0.1" in low
+            or "://localhost" in low
+            or "://[::1]" in low
+        )
 
     def _add(raw: str) -> None:
         url = (raw or "").strip().rstrip("/")
@@ -34,16 +46,32 @@ def known_ml_base_urls() -> list[str]:
         seen.add(url)
         urls.append(url)
 
-    _add(getattr(settings, "ML_SERVICE_URL", "") or "")
+    hub = (getattr(settings, "ML_SERVICE_URL", "") or "").strip().rstrip("/")
+    remote_urls: list[str] = []
     try:
         from ops_central.models import RemoteServer
 
         for server in RemoteServer.objects.filter(is_active=True):
             if hasattr(server, "is_ml_mode") and not server.is_ml_mode():
                 continue
-            _add(server.resolved_ml_base_url() or "")
+            u = (server.resolved_ml_base_url() or "").strip().rstrip("/")
+            if u:
+                remote_urls.append(u)
     except Exception:
         logger.debug("Could not enumerate RemoteServer ML URLs", exc_info=True)
+
+    non_local_remotes = [u for u in remote_urls if not _is_loopback(u)]
+    if hub:
+        if _is_loopback(hub) and non_local_remotes:
+            logger.info(
+                "Skipping loopback ML_SERVICE_URL=%s — using %s Ops ML RemoteServer(s)",
+                hub,
+                len(non_local_remotes),
+            )
+        else:
+            _add(hub)
+    for u in remote_urls:
+        _add(u)
     return urls
 
 
