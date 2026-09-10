@@ -15,7 +15,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import close_old_connections, connection
 
-from .stream_utils import ffmpeg_path
+from .stream_utils import ffmpeg_path, gpu_aware_vf, hwaccel_input_flags
 
 if TYPE_CHECKING:
     from .models import Camera, DetectionEvent
@@ -533,14 +533,21 @@ def _read_rtsp_snapshot(stream_url: str) -> object | None:
         "-hide_banner",
         "-loglevel",
         "error",
+        *hwaccel_input_flags(),
         *_rtsp_input_extra(),
         "-i",
         stream_url,
         "-frames:v",
         "1",
+    ]
+    vf = gpu_aware_vf(None)
+    if vf:
+        cmd += ["-vf", vf]
+    cmd += [
         "-q:v",
         "2",
         "-y",
+        
         temp_path,
     ]
     try:
@@ -842,11 +849,17 @@ def _read_rtsp_native_snapshot(stream_url: str) -> object | None:
         "-hide_banner",
         "-loglevel",
         "error",
+        *hwaccel_input_flags(),
         *_rtsp_input_extra(),
         "-i",
         stream_url,
         "-frames:v",
         "1",
+    ]
+    vf = gpu_aware_vf(None)
+    if vf:
+        cmd += ["-vf", vf]
+    cmd += [
         "-q:v",
         "1",
         "-y",
@@ -893,13 +906,14 @@ def _read_rtsp_hd_snapshot(stream_url: str, *, target_width: int) -> object | No
         "-hide_banner",
         "-loglevel",
         "error",
+        *hwaccel_input_flags(),
         *_rtsp_input_extra(),
         "-i",
         stream_url,
         "-frames:v",
         "1",
         "-vf",
-        f"scale='min(iw,{target_width})':-2:flags=lanczos",
+        gpu_aware_vf(f"scale='min(iw,{target_width})':-2:flags=lanczos"),
         "-q:v",
         "1",
         "-y",
@@ -1105,14 +1119,16 @@ def _read_rtsp_clip(
         "-hide_banner",
         "-loglevel",
         "error",
+        *hwaccel_input_flags(),
         *_rtsp_input_extra(),
         "-i",
         stream_url,
         "-t",
         f"{duration_sec:.2f}",
     ]
-    if target_width > 0:
-        cmd += ["-vf", f"scale='min(iw,{target_width})':-2:flags=lanczos"]
+    vf = gpu_aware_vf(f"scale='min(iw,{target_width})':-2:flags=lanczos" if target_width > 0 else None)
+    if vf:
+        cmd += ["-vf", vf]
     cmd += [
         "-r",
         str(max(4, max_fps)),

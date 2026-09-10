@@ -19,7 +19,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from cameras.models import Camera
-from cameras.stream_utils import ffmpeg_path
+from cameras.stream_utils import ffmpeg_path, hwaccel_input_flags, video_encoder_flags
 from detentions.models import DepositAccountEntry, DetentionMemo, DetentionMemoGoodsLine
 
 from .models import DestructionAlert, FireSmokeDetectionLog, MemoDistribution, WarehouseStockItem
@@ -495,14 +495,10 @@ def _finalize_recording_file(src_path: str, dest_mp4: str) -> bool:
             "-loglevel",
             "error",
             "-y",
+            *hwaccel_input_flags(),
             "-i",
             src_path,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "23",
+            *video_encoder_flags(crf=23, preset="fast"),
             "-an",
             "-movflags",
             "+faststart",
@@ -611,6 +607,12 @@ def _start_camera_recording(
         "-hide_banner",
         "-loglevel",
         "error",
+    ]
+    # NVDEC decode only for raw RTSP (H.264/H.265); the ml_annotated source is an
+    # MJPEG multipart HTTP stream, which ffmpeg does not hardware-decode reliably.
+    if source == "rtsp":
+        cmd += hwaccel_input_flags()
+    cmd += [
         *input_extra,
         "-i",
         stream_url,
@@ -619,12 +621,7 @@ def _start_camera_recording(
         "-an",
         "-r",
         str(record_fps),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-crf",
-        "23",
+        *video_encoder_flags(crf=23, preset="ultrafast"),
         "-g",
         str(record_fps * 2),
     ]

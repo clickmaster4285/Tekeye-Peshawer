@@ -70,6 +70,28 @@ def _substream_url(url: str) -> str | None:
     return None
 
 
+def _hw_accel_params() -> list[int]:
+    """
+    OpenCV VideoCapture params requesting GPU (NVDEC/CUDA) decode when the installed
+    OpenCV+FFmpeg build supports it. Empty list (plain CPU decode) when unsupported or
+    explicitly disabled — this is a best-effort hint, never a hard requirement, so an
+    unsupported build silently falls back instead of failing to open the stream.
+    """
+    if os.getenv("ML_RTSP_NVDEC", "true").strip().lower() in ("0", "false", "no", "off"):
+        return []
+    accel_prop = getattr(cv2, "CAP_PROP_HW_ACCELERATION", None)
+    accel_any = getattr(cv2, "VIDEO_ACCELERATION_ANY", None)
+    if accel_prop is None or accel_any is None:
+        return []
+    params = [accel_prop, accel_any]
+    device_prop = getattr(cv2, "CAP_PROP_HW_DEVICE", None)
+    if device_prop is not None:
+        device = os.getenv("ML_DEVICE", "0").strip()
+        if device.isdigit():
+            params += [device_prop, int(device)]
+    return params
+
+
 def open_rtsp_capture(rtsp_url: str, timeout_ms: int = 8000):
     """
     Open the NVR main RTSP stream (4K). Substream fallback is disabled by default
@@ -94,7 +116,11 @@ def open_rtsp_capture(rtsp_url: str, timeout_ms: int = 8000):
                 )
                 cap = None
                 try:
-                    cap = cv2.VideoCapture(encoded, cv2.CAP_FFMPEG)
+                    hw_params = _hw_accel_params()
+                    if hw_params:
+                        cap = cv2.VideoCapture(encoded, cv2.CAP_FFMPEG, hw_params)
+                    else:
+                        cap = cv2.VideoCapture(encoded, cv2.CAP_FFMPEG)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     if not cap.isOpened():
                         last_error = f"RTSP open failed ({transport})"
