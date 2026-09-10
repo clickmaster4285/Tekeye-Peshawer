@@ -460,7 +460,26 @@ class CameraViewSet(viewsets.ModelViewSet):
                 purposes=camera.purpose_list(),
             )
         except MLServiceError as exc:
-            return Response({"detail": str(exc)}, status=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE)
+            if exc.status_code == status.HTTP_409_CONFLICT:
+                # Camera is allocated in Django but the ML node's in-memory
+                # registry lost it (e.g. ML process restarted). Re-push this
+                # camera and retry once instead of surfacing a stale 409.
+                try:
+                    from ml.camera_sync import route_camera_to_ml_server
+
+                    route_camera_to_ml_server(camera)
+                    result = ml_live_detections_for_camera(
+                        camera,
+                        purpose=camera.purpose,
+                        purposes=camera.purpose_list(),
+                    )
+                except MLServiceError as retry_exc:
+                    return Response(
+                        {"detail": str(retry_exc)},
+                        status=retry_exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
+            else:
+                return Response({"detail": str(exc)}, status=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE)
 
         detections = result.get("detections") or []
         detections = filter_detections_for_camera(camera, detections)
