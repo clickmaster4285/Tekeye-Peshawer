@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import urlencode
 
 import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class MLServiceError(Exception):
@@ -15,15 +18,48 @@ class MLServiceError(Exception):
         self.status_code = status_code
 
 
+def known_ml_base_urls() -> list[str]:
+    """
+    Every ML node the backend should control:
+      - ML_SERVICE_URL (optional hub / local)
+      - active RemoteServer rows in ML mode (ops camera distribution)
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        url = (raw or "").strip().rstrip("/")
+        if not url or url in seen:
+            return
+        seen.add(url)
+        urls.append(url)
+
+    _add(getattr(settings, "ML_SERVICE_URL", "") or "")
+    try:
+        from ops_central.models import RemoteServer
+
+        for server in RemoteServer.objects.filter(is_active=True):
+            if hasattr(server, "is_ml_mode") and not server.is_ml_mode():
+                continue
+            _add(server.resolved_ml_base_url() or "")
+    except Exception:
+        logger.debug("Could not enumerate RemoteServer ML URLs", exc_info=True)
+    return urls
+
+
 def ml_service_enabled() -> bool:
-    return bool(getattr(settings, "ML_SERVICE_URL", "").strip())
+    """True when at least one ML endpoint is configured (hub and/or RemoteServer)."""
+    return bool(known_ml_base_urls())
 
 
 def _base_url() -> str:
-    url = getattr(settings, "ML_SERVICE_URL", "").strip().rstrip("/")
-    if not url:
-        raise MLServiceError("ML service is not configured. Set ML_SERVICE_URL in .env.", 503)
-    return url
+    urls = known_ml_base_urls()
+    if not urls:
+        raise MLServiceError(
+            "ML service is not configured. Set ML_SERVICE_URL or add an active ML RemoteServer.",
+            503,
+        )
+    return urls[0]
 
 
 def _timeout() -> int:
@@ -55,33 +91,128 @@ def _request(method: str, path: str, *, timeout: float | tuple[float, float] | N
 
 
 def ml_health() -> dict[str, Any]:
-    res = _request("GET", "/health")
-    if res.status_code != 200:
-        raise MLServiceError(f"ML health check failed ({res.status_code})", res.status_code)
-    return res.json()
+    """Health of the first reachable ML node (hub preference order)."""
+    return ml_health_any()
+
+
+def ml_health_any() -> dict[str, Any]:
+    """Return health from the first reachable known ML node."""
+    last_exc: Exception | None = None
+    urls = known_ml_base_urls()
+    if not urls:
+        raise MLServiceError(
+            "ML service is not configured. Set ML_SERVICE_URL or add an active ML RemoteServer.",
+            503,
+        )
+    for base in urls:
+        try:
+            data = ml_health_at(base)
+            data.setdefault("ml_base_url", base)
+            return data
+        except MLServiceError as exc:
+            last_exc = exc
+            logger.debug("ML health failed at %s: %s", base, exc)
+    raise MLServiceError(
+        f"No reachable ML service among {len(urls)} configured node(s). Last error: {last_exc}",
+        getattr(last_exc, "status_code", None) or 503,
+    ) from last_exc
+
+
+def ml_health_all() -> dict[str, Any]:
+    """Probe every known ML node (does not raise if some are down)."""
+    by_server: dict[str, Any] = {}
+    for base in known_ml_base_urls():
+        try:
+            by_server[base] = {"ok": True, **ml_health_at(base)}
+        except MLServiceError as exc:
+            by_server[base] = {"ok": False, "error": str(exc)}
+    return {
+        "ok_count": sum(1 for v in by_server.values() if v.get("ok")),
+        "total": len(by_server),
+        "by_server": by_server,
+    }
 
 
 def ml_reload_faces(embeddings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Push known faces to every connected ML node."""
+    return ml_reload_faces_all(embeddings)
+
+
+def ml_reload_faces_all(embeddings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     payload = [
         {"identity": entry["identity"], "embedding": entry["embedding"]}
         for entry in (embeddings or [])
     ]
-    res = _request("POST", "/reload/faces", json=payload)
-    if res.status_code != 200:
-        raise MLServiceError("Failed to reload known faces.", res.status_code)
-    return res.json()
+    urls = known_ml_base_urls()
+    if not urls:
+        raise MLServiceError(
+            "ML service is not configured. Set ML_SERVICE_URL or add an active ML RemoteServer.",
+            503,
+        )
+    by_server: dict[str, Any] = {}
+    ok = 0
+    for base in urls:
+        try:
+            res = _request_at(base, "POST", "/reload/faces", json=payload)
+            if res.status_code != 200:
+                by_server[base] = {
+                    "ok": False,
+                    "error": f"HTTP {res.status_code}",
+                    "detail": res.text[:200],
+                }
+                logger.warning("[face-sync] reload/faces failed at %s (%s)", base, res.status_code)
+                continue
+            data = res.json() if res.content else {}
+            by_server[base] = {"ok": True, **(data if isinstance(data, dict) else {"result": data})}
+            ok += 1
+        except MLServiceError as exc:
+            by_server[base] = {"ok": False, "error": str(exc)}
+            logger.warning("[face-sync] reload/faces unreachable at %s: %s", base, exc)
+    if ok == 0:
+        raise MLServiceError(
+            f"Failed to reload faces on all {len(urls)} ML node(s).",
+            503,
+        )
+    return {
+        "known_faces": len(payload),
+        "db_embeddings": len(payload),
+        "ok_count": ok,
+        "total": len(urls),
+        "by_server": by_server,
+    }
 
 
 def ml_extract_face_embedding(file_bytes: bytes, filename: str = "face.jpg") -> dict[str, Any]:
-    res = _request(
-        "POST",
-        "/faces/extract",
-        files={"image": (filename, file_bytes, "application/octet-stream")},
-    )
-    if res.status_code != 200:
-        detail = res.text[:300]
-        raise MLServiceError(f"Face embedding extraction failed: {detail}", res.status_code)
-    return res.json()
+    """Extract embedding via the first reachable ML node."""
+    last_exc: Exception | None = None
+    urls = known_ml_base_urls()
+    if not urls:
+        raise MLServiceError(
+            "ML service is not configured. Set ML_SERVICE_URL or add an active ML RemoteServer.",
+            503,
+        )
+    for base in urls:
+        try:
+            res = _request_at(
+                base,
+                "POST",
+                "/faces/extract",
+                files={"image": (filename, file_bytes, "application/octet-stream")},
+            )
+            if res.status_code != 200:
+                last_exc = MLServiceError(
+                    f"Face embedding extraction failed: {res.text[:300]}",
+                    res.status_code,
+                )
+                continue
+            return res.json()
+        except MLServiceError as exc:
+            last_exc = exc
+            logger.debug("Face extract failed at %s: %s", base, exc)
+    raise MLServiceError(
+        f"Face embedding extraction failed on all ML nodes. Last error: {last_exc}",
+        getattr(last_exc, "status_code", None) or 503,
+    ) from last_exc
 
 
 def ml_detect_image(

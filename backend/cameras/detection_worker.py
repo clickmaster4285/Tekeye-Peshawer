@@ -77,14 +77,14 @@ def _camera_refresh_interval() -> int:
 
 
 def _wait_for_ml(timeout_sec: float = 180.0) -> bool:
-    from ml.client import ml_health, ml_service_enabled
+    from ml.client import ml_health_any, ml_service_enabled
 
     if not ml_service_enabled():
         return False
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline and not _stop_event.is_set():
         try:
-            ml_health()
+            ml_health_any()
             return True
         except Exception:
             time.sleep(2.0)

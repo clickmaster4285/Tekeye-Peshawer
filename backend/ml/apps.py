@@ -32,9 +32,11 @@ class MlConfig(AppConfig):
                 result = push_face_embeddings_to_ml()
                 if result:
                     logger.info(
-                        "[face-sync] ML known faces loaded: %s (%s from DB)",
-                        result.get("known_faces", 0),
-                        result.get("db_embeddings", 0),
+                        "[face-sync] ML known faces loaded on %s/%s node(s) (%s embeddings): %s",
+                        result.get("ok_count", 0),
+                        result.get("total", 0),
+                        result.get("db_embeddings", result.get("known_faces", 0)),
+                        list((result.get("by_server") or {}).keys()),
                     )
                 from .camera_sync import sync_cameras_to_ml
 

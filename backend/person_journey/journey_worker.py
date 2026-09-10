@@ -31,23 +31,10 @@ def _journey_ingest_payload(entries: list[dict]) -> dict:
 
 
 def _known_ml_urls() -> set[str]:
-    """All active ML node URLs plus optional hub ML_SERVICE_URL."""
-    urls: set[str] = set()
-    hub = (getattr(settings, "ML_SERVICE_URL", "") or "").strip().rstrip("/")
-    if hub:
-        urls.add(hub)
-    try:
-        from ops_central.models import RemoteServer
+    """All active ML node URLs (hub + RemoteServer). Prefer shared client helper."""
+    from ml.client import known_ml_base_urls
 
-        for server in RemoteServer.objects.filter(is_active=True):
-            if hasattr(server, "is_ml_mode") and not server.is_ml_mode():
-                continue
-            url = (server.resolved_ml_base_url() or "").strip().rstrip("/")
-            if url:
-                urls.add(url)
-    except Exception:
-        logger.debug("Could not enumerate RemoteServer ML URLs", exc_info=True)
-    return urls
+    return set(known_ml_base_urls())
 
 
 def _post_journey_bulk(base_url: str, entries: list[dict]) -> dict:

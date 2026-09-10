@@ -103,16 +103,13 @@ def sync_cameras_to_ml(*, retries: int = 3) -> dict | None:
     # Include every known ML node so replace=True can clear orphans / unassigned leftovers.
     targets: dict[str, list[dict]] = {url: list(entries) for url, entries in by_url.items()}
     try:
-        from ops_central.models import RemoteServer
+        from .client import known_ml_base_urls
 
-        for server in RemoteServer.objects.filter(is_active=True):
-            if not server.is_ml_mode():
-                continue
-            url = (server.resolved_ml_base_url() or "").strip().rstrip("/")
-            if url and url not in targets:
+        for url in known_ml_base_urls():
+            if url not in targets:
                 targets[url] = []
     except Exception:
-        logger.debug("[camera-sync] Could not enumerate RemoteServer ML URLs", exc_info=True)
+        logger.debug("[camera-sync] Could not enumerate known ML URLs", exc_info=True)
 
     if not targets:
         if not ml_service_enabled():
