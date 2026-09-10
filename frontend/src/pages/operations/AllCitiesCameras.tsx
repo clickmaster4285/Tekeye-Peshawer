@@ -56,10 +56,6 @@ import {
   withOpsStreamToken,
   type OpsCamera,
 } from "@/lib/ops-central-api"
-import {
-  readAllCitiesStreamsCache,
-  writeAllCitiesStreamsCache,
-} from "@/lib/all-cities-cameras"
 import { cn } from "@/lib/utils"
 
 type CityCamera = OpsCamera & {
@@ -126,8 +122,8 @@ function camerasFingerprint(
     .join("|")
 }
 
-function cameraLocationKey(camera: Pick<CityCamera, "location_code" | "location">): string {
-  return (camera.location_code || camera.location || "Unassigned location").trim() || "Unassigned location"
+function cameraLocationKey(camera: Pick<CityCamera, "location_code" | "location" | "server_name">): string {
+  return (camera.location_code || camera.location || camera.server_name || "Unassigned location").trim() || "Unassigned location"
 }
 
 function isCameraOnline(camera: CityCamera): boolean {
@@ -266,7 +262,6 @@ const StreamTile = memo(function StreamTile({
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [visible, setVisible] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const imgRef = useRef<HTMLImageElement | null>(null)
   const retryTimerRef = useRef<number | null>(null)
@@ -463,7 +458,14 @@ const StreamTile = memo(function StreamTile({
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
           <p className="truncate text-sm font-medium text-white">{camera.name}</p>
           <p className="truncate text-xs text-white/70">
-            {[camera.code, camera.channel_label || `Channel ${camera.channel ?? "-"}`, camera.status, camera.location_code || camera.location]
+            {[
+              camera.display_label ||
+                [camera.site_name || camera.site_code, camera.nvr_name, camera.channel_label || (camera.channel != null ? `Ch ${camera.channel}` : "")]
+                  .filter(Boolean)
+                  .join(" · "),
+              camera.status,
+              camera.code,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </p>
@@ -627,6 +629,7 @@ export default function AllCitiesCamerasPage() {
     setSelectedCameraKeys((keys) => {
       if (keys.length === 0) return keys
       const next = keys.filter((key) => availableKeys.has(key))
+      if (next.length === 0 && keys.length > 0) return keys
       if (next.length === keys.length && next.every((key, i) => key === keys[i])) return keys
       return next
     })

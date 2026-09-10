@@ -81,6 +81,8 @@ export type CameraRecord = {
   id: number;
   code: string;
   name: string;
+  /** "{site} · {nvr} · Ch {channel}" — display only; code/cam-id unchanged */
+  display_label?: string;
   nvr: number;
   channel: number;
   channel_label: string;
@@ -101,7 +103,6 @@ export type CameraRecord = {
   ml_stream_key?: string;
   ml_live_stream_url?: string;
   raw_stream_url?: string;
-  /** Assigned ML node (IT Super Admin); read-only for site users */
   ml_server?: number | null;
   ml_server_name?: string;
   /** @deprecated Use ml_live_stream_url — Django proxy removed */
@@ -319,9 +320,9 @@ export function resolveMediaUrl(url: string): string {
     }
   }
   const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-  return `${base}${path}`;   
+  return `${base}${path}`;
 }
-    
+
 // ——— Sites ———
 
 export async function fetchSites(): Promise<SiteRecord[]> {
@@ -583,8 +584,20 @@ export async function fetchStreamCameras(): Promise<{
 }
 
 /** Display label for camera source (no credentials exposed). */
-export function cameraSourceLabel(cam: Pick<CameraRecord, "site_name" | "nvr_name" | "channel" | "nvr_ip">): string {
-  return `${cam.site_name} · ${cam.nvr_name} · Ch ${cam.channel}`;
+export function cameraSourceLabel(
+  cam: Pick<CameraRecord, "display_label" | "site_name" | "site_code" | "nvr_name" | "channel" | "nvr_ip">
+): string {
+  const direct = (cam.display_label || "").trim()
+  if (direct) return direct
+  const site = (cam.site_name || cam.site_code || "").trim()
+  const nvr = (cam.nvr_name || "").trim()
+  const ch = cam.channel != null ? `Ch ${cam.channel}` : ""
+  return [site, nvr, ch].filter(Boolean).join(" · ")
+}
+
+/** Primary title + source subtitle for UI lists. */
+export function cameraListTitle(cam: Pick<CameraRecord, "name" | "code">): string {
+  return (cam.name || cam.code || "").trim() || "Camera"
 }
 
 export type PersonJourneySighting = {

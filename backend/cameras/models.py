@@ -202,6 +202,22 @@ class Camera(models.Model):
     def stream_key(self) -> str:
         return f"cam-{self.pk}"
 
+    @property
+    def display_label(self) -> str:
+        """Human-readable location label; does not replace code or cam-{id}."""
+        site = ""
+        nvr_name = ""
+        if self.nvr_id:
+            try:
+                site = (self.nvr.site.code or self.nvr.site.name or "").strip()
+                nvr_name = (self.nvr.name or "").strip()
+            except Exception:
+                site = (self.location or "").strip()
+        else:
+            site = (self.location or "").strip()
+        parts = [p for p in (site, nvr_name, f"Ch {self.channel}") if p]
+        return " · ".join(parts) if parts else (self.name or self.code or f"cam-{self.pk}")
+
     def effective_stream_url(self) -> str:
         """Main-stream RTSP URL (not substream). Used for ML registration."""
         from .rtsp_utils import build_rtsp_url_from_nvr

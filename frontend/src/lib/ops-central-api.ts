@@ -109,6 +109,7 @@ export type OpsCamera = {
   id: number
   code: string
   name: string
+  display_label?: string
   label?: string
   location?: string
   site_code?: string
@@ -348,11 +349,7 @@ export async function removeServerCamera(
   }
 }
 
-export async function testRemoteServer(id: number): Promise<{
-  ok: boolean
-  error?: string
-  server?: RemoteServerRecord
-}> {
+export async function testRemoteServer(id: number): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${API}/ops/servers/${id}/test/`, {
     method: "POST",
     headers: getAuthHeaders(),

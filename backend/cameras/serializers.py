@@ -99,6 +99,7 @@ class CameraSerializer(serializers.ModelSerializer):
     nvr_name = serializers.CharField(source="nvr.name", read_only=True)
     nvr_ip = serializers.CharField(source="nvr.ip_address", read_only=True)
     channel_label = serializers.SerializerMethodField()
+    display_label = serializers.SerializerMethodField()
     ml_server_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -107,6 +108,7 @@ class CameraSerializer(serializers.ModelSerializer):
             "id",
             "code",
             "name",
+            "display_label",
             "nvr",
             "channel",
             "channel_label",
@@ -136,6 +138,7 @@ class CameraSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "code",
+            "display_label",
             "location",
             "created_at",
             "updated_at",
@@ -150,6 +153,9 @@ class CameraSerializer(serializers.ModelSerializer):
 
     def get_channel_label(self, obj: Camera) -> str:
         return f"Ch {obj.channel}"
+
+    def get_display_label(self, obj: Camera) -> str:
+        return obj.display_label
 
     def get_purpose_label(self, obj: Camera) -> str:
         return obj.purpose_label
