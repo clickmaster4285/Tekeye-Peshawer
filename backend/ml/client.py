@@ -148,7 +148,28 @@ def ml_live_status() -> dict[str, Any]:
     return res.json()
 
 
-def ml_live_detections(
+def camera_ml_base_url(camera) -> str:
+    """Assigned ML node URL, or empty when unassigned (must not fall back to ML_SERVICE_URL)."""
+    if not getattr(camera, "ml_server_id", None):
+        return ""
+    server = getattr(camera, "ml_server", None)
+    if server is None:
+        return ""
+    return (server.resolved_ml_base_url() or "").strip().rstrip("/")
+
+
+def require_camera_ml_url(camera) -> str:
+    url = camera_ml_base_url(camera)
+    if not url:
+        raise MLServiceError(
+            "Camera is not assigned to an ML server. Assign it in Camera Distribution first.",
+            409,
+        )
+    return url
+
+
+def ml_live_detections_at(
+    base_url: str,
     stream_key: str,
     rtsp_url: str | None = None,
     *,
@@ -163,7 +184,8 @@ def ml_live_detections(
     primary = (purpose or "").strip()
     if primary:
         params["purpose"] = primary
-    res = _request(
+    res = _request_at(
+        base_url,
         "GET",
         f"/live/cam/{key}/detections",
         params=params,
@@ -178,6 +200,54 @@ def ml_live_detections(
     return res.json()
 
 
+def ml_live_detections(
+    stream_key: str,
+    rtsp_url: str | None = None,
+    *,
+    purpose: str = "",
+    purposes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Legacy: detections against global ML_SERVICE_URL. Prefer ml_live_detections_for_camera."""
+    return ml_live_detections_at(
+        _base_url(),
+        stream_key,
+        rtsp_url,
+        purpose=purpose,
+        purposes=purposes,
+    )
+
+
+def ml_live_detections_for_camera(
+    camera,
+    *,
+    purpose: str = "",
+    purposes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Poll detections only on the camera's assigned ML node."""
+    base = require_camera_ml_url(camera)
+    return ml_live_detections_at(
+        base,
+        camera.stream_key,
+        rtsp_url=camera.effective_stream_url(),
+        purpose=purpose or camera.purpose,
+        purposes=purposes if purposes is not None else camera.purpose_list(),
+    )
+
+
+def ml_assigned_mjpeg_public_url(camera, *, kind: str = "live") -> str:
+    """
+    Browser MJPEG via Ops proxy to the assigned ML server.
+    Empty string when unassigned (no stream until Camera Distribution assigns).
+    """
+    if not getattr(camera, "ml_server_id", None) or not camera.is_active or not camera.nvr_id:
+        return ""
+    key = (camera.stream_key or "").strip()
+    if not key:
+        return ""
+    kind_q = "raw" if (kind or "").strip().lower() == "raw" else "live"
+    return f"/api/ops/servers/{camera.ml_server_id}/mjpeg/?stream_key={key}&kind={kind_q}"
+
+
 def ml_live_mjpeg_url(stream_key: str, rtsp_url: str | None = None) -> str:
     key = (stream_key or "").strip()
     base = f"{_base_url()}/live/cam/{key}/mjpeg"
@@ -187,6 +257,17 @@ def ml_live_mjpeg_url(stream_key: str, rtsp_url: str | None = None) -> str:
     return f"{base}?{urlencode(params)}"
 
 
+def ml_live_mjpeg_url_for_camera(camera) -> str:
+    """Absolute MJPEG URL on the assigned ML node (server-side fetch)."""
+    base = require_camera_ml_url(camera)
+    key = camera.stream_key
+    params = _live_rtsp_params(camera.effective_stream_url())
+    path = f"{base}/live/cam/{key}/mjpeg"
+    if not params:
+        return path
+    return f"{path}?{urlencode(params)}"
+
+
 def ml_live_mjpeg_public_url(
     stream_key: str,
     *,
@@ -194,7 +275,7 @@ def ml_live_mjpeg_public_url(
     purpose: str = "",
     purposes: list[str] | None = None,
 ) -> str:
-    """Browser-safe MJPEG path (same-origin /ml proxy → ML service)."""
+    """Deprecated global /ml proxy path — prefer ml_assigned_mjpeg_public_url(camera)."""
     key = (stream_key or "").strip()
     if not key:
         return ""
@@ -249,6 +330,16 @@ def ml_live_mjpeg_raw_url(stream_key: str, rtsp_url: str | None = None) -> str:
     return f"{base}?{urlencode(params)}"
 
 
+def ml_live_mjpeg_raw_url_for_camera(camera) -> str:
+    base = require_camera_ml_url(camera)
+    key = camera.stream_key
+    params = _live_rtsp_params(camera.effective_stream_url())
+    path = f"{base}/live/cam/{key}/mjpeg/raw"
+    if not params:
+        return path
+    return f"{path}?{urlencode(params)}"
+
+
 def ml_live_jpeg_url(stream_key: str, rtsp_url: str | None = None) -> str:
     key = (stream_key or "").strip()
     base = f"{_base_url()}/live/cam/{key}/jpeg"
@@ -266,6 +357,16 @@ def ml_live_jpeg_raw_url(stream_key: str, rtsp_url: str | None = None) -> str:
     if not params:
         return base
     return f"{base}?{urlencode(params)}"
+
+
+def ml_live_jpeg_raw_url_for_camera(camera) -> str:
+    base = require_camera_ml_url(camera)
+    key = camera.stream_key
+    params = _live_rtsp_params(camera.effective_stream_url())
+    path = f"{base}/live/cam/{key}/jpeg/raw"
+    if not params:
+        return path
+    return f"{path}?{urlencode(params)}"
 
 
 def ml_live_jpeg_attendance_url(
@@ -293,6 +394,14 @@ def ml_live_mjpeg_attendance_url(
     params = dict(_live_rtsp_params(rtsp_url))
     params["width"] = str(max(640, min(4096, int(width or 3840))))
     return f"{base}?{urlencode(params)}"
+
+
+def ml_live_mjpeg_attendance_url_for_camera(camera, *, width: int = 1280) -> str:
+    base = require_camera_ml_url(camera)
+    key = camera.stream_key
+    params = dict(_live_rtsp_params(camera.effective_stream_url()))
+    params["width"] = str(max(640, min(4096, int(width or 3840))))
+    return f"{base}/live/cam/{key}/mjpeg/attendance?{urlencode(params)}"
 
 
 def _build_register_payload(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -346,11 +455,20 @@ def ml_register_cameras_bulk_at(
     entries: list[dict[str, str]],
     *,
     timeout: float | tuple[float, float] | None = None,
+    replace: bool = False,
 ) -> dict[str, Any]:
     payload = _build_register_payload(entries)
-    if not payload:
-        return {"registered": 0, "total": 0}
-    res = _request_at(base_url, "POST", "/live/register/bulk", json=payload, timeout=timeout)
+    if not payload and not replace:
+        return {"registered": 0, "total": 0, "removed": 0}
+    params = {"replace": "true"} if replace else None
+    res = _request_at(
+        base_url,
+        "POST",
+        "/live/register/bulk",
+        json=payload,
+        params=params,
+        timeout=timeout,
+    )
     if res.status_code != 200:
         raise MLServiceError(
             f"Failed to register cameras with ML service at {base_url}.",

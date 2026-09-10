@@ -17,10 +17,9 @@ from rest_framework.views import APIView
 
 from ml.client import (
     MLServiceError,
+    ml_assigned_mjpeg_public_url,
     ml_detect_image,
-    ml_live_detections,
-    ml_live_mjpeg_public_url,
-    ml_live_mjpeg_raw_public_url,
+    ml_live_detections_for_camera,
     ml_service_enabled,
 )
 
@@ -442,11 +441,14 @@ class CameraViewSet(viewsets.ModelViewSet):
                 {"detail": "ML service is not running. Restart the backend to auto-start models."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        if not camera.ml_server_id:
+            return Response(
+                {"detail": "Camera is not assigned to an ML server. Assign it in Camera Distribution first."},
+                status=status.HTTP_409_CONFLICT,
+            )
         try:
-            stream_url = camera.effective_stream_url()
-            result = ml_live_detections(
-                camera.stream_key,
-                rtsp_url=stream_url,
+            result = ml_live_detections_for_camera(
+                camera,
                 purpose=camera.purpose,
                 purposes=camera.purpose_list(),
             )
@@ -557,7 +559,7 @@ class CameraStreamListView(APIView):
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
         cameras = []
-        for cam in Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site").order_by(
+        for cam in Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site", "ml_server").order_by(
             "nvr__site__name", "nvr__name", "channel"
         ):
             cameras.append(
@@ -576,18 +578,9 @@ class CameraStreamListView(APIView):
                     "ml_enabled": cam.ml_enabled,
                     "is_rtsp": cam.is_rtsp,
                     "ml_stream_key": cam.stream_key,
-                    "ml_live_stream_url": ml_live_mjpeg_public_url(
-                        cam.stream_key,
-                        rtsp_url=cam.effective_stream_url(),
-                        purpose=cam.purpose,
-                        purposes=cam.purpose_list(),
-                    ),
-                    "raw_stream_url": ml_live_mjpeg_raw_public_url(
-                        cam.stream_key,
-                        rtsp_url=cam.effective_stream_url(),
-                        purpose=cam.purpose,
-                        purposes=cam.purpose_list(),
-                    ),
+                    "ml_server_id": cam.ml_server_id,
+                    "ml_live_stream_url": ml_assigned_mjpeg_public_url(cam, kind="live"),
+                    "raw_stream_url": ml_assigned_mjpeg_public_url(cam, kind="raw"),
                     "rtsp_url": cam.effective_stream_url(),
                 }
             )

@@ -163,28 +163,14 @@ class CameraSerializer(serializers.ModelSerializer):
         return ""
 
     def get_ml_live_stream_url(self, obj: Camera) -> str:
-        if not obj.is_active or not obj.nvr_id:
-            return ""
-        from ml.client import ml_live_mjpeg_public_url
+        from ml.client import ml_assigned_mjpeg_public_url
 
-        return ml_live_mjpeg_public_url(
-            obj.stream_key,
-            rtsp_url=obj.effective_stream_url(),
-            purpose=obj.purpose,
-            purposes=obj.purpose_list(),
-        )
+        return ml_assigned_mjpeg_public_url(obj, kind="live")
 
     def get_raw_stream_url(self, obj: Camera) -> str:
-        if not obj.is_active or not obj.nvr_id:
-            return ""
-        from ml.client import ml_live_mjpeg_raw_public_url
+        from ml.client import ml_assigned_mjpeg_public_url
 
-        return ml_live_mjpeg_raw_public_url(
-            obj.stream_key,
-            rtsp_url=obj.effective_stream_url(),
-            purpose=obj.purpose,
-            purposes=obj.purpose_list(),
-        )
+        return ml_assigned_mjpeg_public_url(obj, kind="raw")
 
 
 class CameraWriteSerializer(serializers.ModelSerializer):

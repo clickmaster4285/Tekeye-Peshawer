@@ -115,6 +115,12 @@ def _key_may_be_rtsp_host(key: str) -> bool:
     return text in _boot_camera_ips()
 
 
+
+def _require_registered() -> bool:
+    """When true (default), refuse to open streams for keys not in the Django sync registry."""
+    return os.getenv("ML_REQUIRE_REGISTERED", "true").strip().lower() in ("true", "1", "yes")
+
+
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
@@ -1088,17 +1094,23 @@ class LiveStreamManager:
                 session.infer_busy = False
             session.stream.stop()
 
+    def is_registered(self, key: str) -> bool:
+        return bool(self._registry.get((key or "").strip()))
+
     def resolve_rtsp_url(self, key: str, rtsp_url: str | None = None) -> str | None:
-        key = key.strip()
+        """Resolve RTSP for a key. Registered cameras only when ML_REQUIRE_REGISTERED=true."""
+        key = (key or "").strip()
+        if not key:
+            return None
+        registered = self._registry.get(key, "").strip()
+        if registered:
+            # Ignore client-supplied rtsp_url — assignment registry is authoritative.
+            return registered
+        if _require_registered():
+            return None
         explicit = (rtsp_url or "").strip()
         if explicit:
             return explicit
-        registered = self._registry.get(key, "").strip()
-        if registered:
-            return registered
-        if not key:
-            return None
-        # Never treat Django stream keys (cam-11) as RTSP hostnames.
         if not _key_may_be_rtsp_host(key):
             return None
         cfg = _rtsp_config()
@@ -1169,18 +1181,33 @@ class LiveStreamManager:
             out.insert(0, primary_code)
         return out
 
-    def register_cameras_bulk(self, entries: list[dict[str, str]]) -> dict[str, int]:
+    def register_cameras_bulk(
+        self,
+        entries: list[dict[str, str]],
+        *,
+        replace: bool = False,
+    ) -> dict[str, int]:
         registered = 0
+        keep: set[str] = set()
         for item in entries:
             key = str(item.get("key") or "").strip()
             url = str(item.get("rtsp_url") or "").strip()
             purpose = str(item.get("purpose") or "").strip()
             raw_purposes = item.get("purposes")
             purposes = raw_purposes if isinstance(raw_purposes, list) else []
+            if not key or not url:
+                continue
+            keep.add(key)
             if self.register_camera(key, url, purpose=purpose, purposes=purposes):
                 registered += 1
+        removed = 0
+        if replace:
+            for key in list(self._registry.keys()):
+                if key not in keep:
+                    if self.unregister_camera(key):
+                        removed += 1
         self.ensure_started()
-        return {"registered": registered, "total": len(entries)}
+        return {"registered": registered, "total": len(entries), "removed": removed}
 
     def get_raw_frame(self, key: str):
         """Latest decoded frame from an existing live RTSP session (no extra connection)."""
@@ -1252,8 +1279,14 @@ class LiveStreamManager:
         return True
 
     def ensure_camera(self, key: str, rtsp_url: str | None = None) -> bool:
-        key = key.strip()
+        key = (key or "").strip()
         if not key:
+            return False
+        if _require_registered() and not self.is_registered(key):
+            print(
+                f"[live] ensure_camera rejected {key}: not registered on this ML node "
+                f"(assign via Django Camera Distribution / sync)"
+            )
             return False
         url = self.resolve_rtsp_url(key, rtsp_url)
         if not url:

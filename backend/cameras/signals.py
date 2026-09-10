@@ -81,17 +81,22 @@ def camera_deleted_sync_ml(sender, instance: Camera, **kwargs) -> None:
             instance.pk,
         )
     try:
-        from ml.client import ml_service_enabled, ml_unregister_camera
+        from ml.client import ml_service_enabled, ml_unregister_camera_at
 
         if ml_service_enabled():
-            ml_unregister_camera(instance.stream_key)
-            # Also stop person-journey pipeline for this camera
-            import requests
-            from django.conf import settings
-
-            base = getattr(settings, "ML_SERVICE_URL", "").rstrip("/")
+            base = ""
+            server = getattr(instance, "ml_server", None)
+            if instance.ml_server_id and server is not None:
+                base = (server.resolved_ml_base_url() or "").strip().rstrip("/")
             if base:
-                requests.delete(f"{base}/journey/cam/{instance.stream_key}", timeout=5)
+                ml_unregister_camera_at(base, instance.stream_key, timeout=(2.0, 8.0))
+                # Also stop person-journey pipeline for this camera on its ML node
+                import requests
+
+                try:
+                    requests.delete(f"{base}/journey/cam/{instance.stream_key}", timeout=5)
+                except Exception:
+                    pass
     except Exception:
         logger.exception("[camera-sync] Could not unregister camera %s from ML", instance.pk)
     _schedule_ml_camera_sync()

@@ -156,13 +156,10 @@ def _resolve_crop_box(
 
     if infer_w <= 0 or infer_h <= 0:
         try:
-            from ml.client import ml_live_detections, ml_service_enabled
+            from ml.client import ml_live_detections_for_camera, ml_service_enabled
 
-            if allow_live_infer and camera and ml_service_enabled():
-                payload = ml_live_detections(
-                    camera.stream_key,
-                    rtsp_url=camera.effective_stream_url(),
-                )
+            if allow_live_infer and camera and getattr(camera, "ml_server_id", None) and ml_service_enabled():
+                payload = ml_live_detections_for_camera(camera)
                 infer_w = int(payload.get("frame_width") or 0)
                 infer_h = int(payload.get("frame_height") or 0)
         except Exception:

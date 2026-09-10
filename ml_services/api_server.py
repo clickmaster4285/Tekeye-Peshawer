@@ -104,6 +104,17 @@ def _resolve_live_stream(
     # Do not block HTTP on YOLO load. Raw JPEG/RTSP can serve before infer is ready.
     if require_engine and not _live.is_ready():
         raise HTTPException(status_code=503, detail="Live engine still starting")
+    key = (key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing camera key")
+    if not _live.is_registered(key):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Camera {key} is not assigned to this ML server. "
+                "Assign it in Camera Distribution and sync; unassigned cameras stay idle."
+            ),
+        )
     purpose_list = [p.strip() for p in (purposes or "").split(",") if p.strip()]
     if purpose_list or (purpose or "").strip():
         applied = _live.set_camera_purposes(key, purpose=purpose, purposes=purpose_list)
@@ -274,7 +285,10 @@ def live_status():
 
 
 @app.post("/live/register/bulk")
-def register_cameras_bulk(payload: list[CameraRegisterEntry]):
+def register_cameras_bulk(
+    payload: list[CameraRegisterEntry],
+    replace: bool = False,
+):
     entries = []
     for item in payload:
         if not item.key.strip() or not item.rtsp_url.strip():
@@ -289,7 +303,7 @@ def register_cameras_bulk(payload: list[CameraRegisterEntry]):
         if purposes:
             entry["purposes"] = purposes
         entries.append(entry)
-    result = _live.register_cameras_bulk(entries)
+    result = _live.register_cameras_bulk(entries, replace=bool(replace))
     if not _live.ensure_started():
         print("[live] Warning: camera registry updated but infer loops did not start")
     return result

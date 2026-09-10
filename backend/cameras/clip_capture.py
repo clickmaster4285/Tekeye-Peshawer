@@ -131,27 +131,33 @@ def _camera_lock(camera_id: int) -> threading.Lock:
 
 def _ml_raw_mjpeg_url(camera) -> str | None:
     try:
-        from ml.client import ml_live_mjpeg_raw_url, ml_service_enabled
+        from ml.client import MLServiceError, ml_live_mjpeg_raw_url_for_camera, ml_service_enabled
     except ImportError:
         return None
-    if not ml_service_enabled():
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
         return None
-    return ml_live_mjpeg_raw_url(camera.stream_key, rtsp_url=camera.effective_stream_url())
+    try:
+        return ml_live_mjpeg_raw_url_for_camera(camera)
+    except MLServiceError:
+        return None
 
 
 def _ml_attendance_mjpeg_url(camera, *, target_width: int) -> str | None:
     """HD frames from ML main-stream session (avoids NVR substream on 2nd RTSP connection)."""
     try:
-        from ml.client import ml_live_mjpeg_attendance_url, ml_service_enabled
+        from ml.client import (
+            MLServiceError,
+            ml_live_mjpeg_attendance_url_for_camera,
+            ml_service_enabled,
+        )
     except ImportError:
         return None
-    if not ml_service_enabled():
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
         return None
-    return ml_live_mjpeg_attendance_url(
-        camera.stream_key,
-        rtsp_url=camera.effective_stream_url(),
-        width=target_width,
-    )
+    try:
+        return ml_live_mjpeg_attendance_url_for_camera(camera, width=target_width)
+    except MLServiceError:
+        return None
 
 
 def _max_clip_workers() -> int:
@@ -289,17 +295,17 @@ def _staff_bbox_from_ml(
 ) -> tuple[list[int] | None, float]:
     """Resolve staff bbox from live ML detections, mapped to the captured frame size."""
     try:
-        from ml.client import ml_live_detections, ml_service_enabled
+        from ml.client import ml_live_detections_for_camera, ml_service_enabled
     except ImportError:
         fitted = _fit_bbox_to_frame(fallback_bbox, frame_w, frame_h)
         return fitted, fallback_confidence
 
-    if not ml_service_enabled():
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
         fitted = _fit_bbox_to_frame(fallback_bbox, frame_w, frame_h)
         return fitted, fallback_confidence
 
     try:
-        payload = ml_live_detections(camera.stream_key, rtsp_url=camera.effective_stream_url())
+        payload = ml_live_detections_for_camera(camera)
     except Exception:
         fitted = _fit_bbox_to_frame(fallback_bbox, frame_w, frame_h)
         return fitted, fallback_confidence
@@ -573,13 +579,13 @@ def _warm_ml_stream(camera) -> None:
             pass
         return
     try:
-        from ml.client import ml_live_detections, ml_service_enabled
+        from ml.client import ml_live_detections_for_camera, ml_service_enabled
     except ImportError:
         return
-    if not ml_service_enabled():
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
         return
     try:
-        ml_live_detections(camera.stream_key, rtsp_url=camera.effective_stream_url())
+        ml_live_detections_for_camera(camera)
     except Exception:
         pass
 
@@ -760,12 +766,15 @@ def schedule_detection_clip(camera_id: int, event_id: int) -> None:
 
 def _ml_annotated_mjpeg_url(camera) -> str | None:
     try:
-        from ml.client import ml_live_mjpeg_url, ml_service_enabled
+        from ml.client import MLServiceError, ml_live_mjpeg_url_for_camera, ml_service_enabled
     except ImportError:
         return None
-    if not ml_service_enabled():
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
         return None
-    return ml_live_mjpeg_url(camera.stream_key, rtsp_url=camera.effective_stream_url())
+    try:
+        return ml_live_mjpeg_url_for_camera(camera)
+    except MLServiceError:
+        return None
 
 
 def _attendance_video_seconds() -> float:

@@ -341,15 +341,17 @@ def _load_recording_manifest(session_id: str) -> list[dict[str, Any]]:
 
 def _recording_input_for_camera(camera: Camera) -> tuple[str, str, list[str]]:
     """Return stream URL, source label, and extra ffmpeg input args."""
-    from ml.client import ml_live_mjpeg_url, ml_service_enabled
+    from ml.client import MLServiceError, ml_live_mjpeg_url_for_camera, ml_service_enabled
 
-    if camera.nvr_id and ml_service_enabled():
-        stream_url = camera.effective_stream_url()
-        return (
-            ml_live_mjpeg_url(camera.stream_key, rtsp_url=stream_url),
-            "ml_annotated",
-            ["-f", "mpjpeg", "-fflags", "nobuffer", "-flags", "low_delay"],
-        )
+    if camera.nvr_id and getattr(camera, "ml_server_id", None) and ml_service_enabled():
+        try:
+            return (
+                ml_live_mjpeg_url_for_camera(camera),
+                "ml_annotated",
+                ["-f", "mpjpeg", "-fflags", "nobuffer", "-flags", "low_delay"],
+            )
+        except MLServiceError:
+            pass
     url = camera.effective_stream_url()
     if not url:
         raise ValueError(f"Camera {camera.name} has no stream URL.")
