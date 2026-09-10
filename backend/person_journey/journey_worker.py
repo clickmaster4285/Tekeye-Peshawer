@@ -81,6 +81,11 @@ def sync_cameras_to_journey_ml() -> dict:
             logger.warning("Journey sync skip camera %s: %s", cam.pk, exc)
 
     targets = _known_ml_urls() | set(by_url.keys())
+    # Never journey-sync to loopback on a Django host without local ml_services
+    from ml.client import _allow_loopback_ml, is_loopback_ml_url
+
+    if not _allow_loopback_ml():
+        targets = {u for u in targets if u and not is_loopback_ml_url(u)}
     totals = {"synced": 0, "by_server": {}, "cleared": []}
 
     for base in sorted(targets):

@@ -245,11 +245,12 @@ FFMPEG_PATH = _resolve_ffmpeg_path()
 # -----------------------------
 # ML inference service (external ml_services/ on Server 2 — HTTP client only)
 # -----------------------------
-ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://127.0.0.1:8100").strip()
+ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "").strip()
 ML_SERVICE_PUBLIC_URL = os.getenv(
     "ML_SERVICE_PUBLIC_URL",
-    os.getenv("ML_SERVICE_URL", "http://127.0.0.1:8100"),
+    os.getenv("ML_SERVICE_URL", ""),
 ).strip().rstrip("/")
+ML_ALLOW_LOOPBACK = os.getenv("ML_ALLOW_LOOPBACK", "false").strip()
 ML_SERVICE_TIMEOUT = int(os.getenv("ML_SERVICE_TIMEOUT", "60"))
 ML_VIDEO_SEARCH_TIMEOUT = int(os.getenv("ML_VIDEO_SEARCH_TIMEOUT", "3600"))
 ML_VIDEO_SEARCH_MAX_BYTES = int(

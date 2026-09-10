@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 from urllib.parse import urlencode
 
@@ -18,60 +19,65 @@ class MLServiceError(Exception):
         self.status_code = status_code
 
 
+def is_loopback_ml_url(url: str) -> bool:
+    low = (url or "").strip().lower()
+    if not low:
+        return False
+    return (
+        "://127.0.0.1" in low
+        or "://localhost" in low
+        or "://[::1]" in low
+        or low.startswith("127.0.0.1")
+        or low.startswith("localhost")
+    )
+
+
+def _allow_loopback_ml() -> bool:
+    """Local-dev only. Production Django hosts must not talk to 127.0.0.1:8100."""
+    return str(getattr(settings, "ML_ALLOW_LOOPBACK", "") or os.getenv("ML_ALLOW_LOOPBACK", "")).strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+
 def known_ml_base_urls() -> list[str]:
     """
     Every ML node the backend should control:
       - ML_SERVICE_URL (optional hub — must be a reachable remote if set)
       - active RemoteServer rows in ML mode (ops camera distribution)
 
-    Loopback hub URLs (127.0.0.1 / localhost) are ignored when at least one
-    non-local RemoteServer ML URL exists, so Django hosts without local
-    ml_services do not spam connection-refused errors.
+    Loopback URLs (127.0.0.1 / localhost) are skipped unless ML_ALLOW_LOOPBACK=true,
+    because ml_services runs on separate hosts from Django in production.
     """
     urls: list[str] = []
     seen: set[str] = set()
-
-    def _is_loopback(url: str) -> bool:
-        low = (url or "").lower()
-        return (
-            "://127.0.0.1" in low
-            or "://localhost" in low
-            or "://[::1]" in low
-        )
+    allow_loopback = _allow_loopback_ml()
 
     def _add(raw: str) -> None:
         url = (raw or "").strip().rstrip("/")
         if not url or url in seen:
             return
+        if is_loopback_ml_url(url) and not allow_loopback:
+            logger.warning(
+                "Skipping loopback ML URL %s (ml_services is remote; "
+                "fix Ops RemoteServer ml_base_url or set ML_ALLOW_LOOPBACK=true for local dev)",
+                url,
+            )
+            return
         seen.add(url)
         urls.append(url)
 
-    hub = (getattr(settings, "ML_SERVICE_URL", "") or "").strip().rstrip("/")
-    remote_urls: list[str] = []
+    _add(getattr(settings, "ML_SERVICE_URL", "") or "")
     try:
         from ops_central.models import RemoteServer
 
         for server in RemoteServer.objects.filter(is_active=True):
             if hasattr(server, "is_ml_mode") and not server.is_ml_mode():
                 continue
-            u = (server.resolved_ml_base_url() or "").strip().rstrip("/")
-            if u:
-                remote_urls.append(u)
+            _add(server.resolved_ml_base_url() or "")
     except Exception:
         logger.debug("Could not enumerate RemoteServer ML URLs", exc_info=True)
-
-    non_local_remotes = [u for u in remote_urls if not _is_loopback(u)]
-    if hub:
-        if _is_loopback(hub) and non_local_remotes:
-            logger.info(
-                "Skipping loopback ML_SERVICE_URL=%s — using %s Ops ML RemoteServer(s)",
-                hub,
-                len(non_local_remotes),
-            )
-        else:
-            _add(hub)
-    for u in remote_urls:
-        _add(u)
     return urls
 
 
@@ -314,7 +320,16 @@ def camera_ml_base_url(camera) -> str:
     server = getattr(camera, "ml_server", None)
     if server is None:
         return ""
-    return (server.resolved_ml_base_url() or "").strip().rstrip("/")
+    url = (server.resolved_ml_base_url() or "").strip().rstrip("/")
+    if url and is_loopback_ml_url(url) and not _allow_loopback_ml():
+        logger.warning(
+            "Camera %s assigned to loopback ML URL %s — treating as unroutable "
+            "(fix Ops RemoteServer ml_base_url to the real ML host)",
+            getattr(camera, "pk", "?"),
+            url,
+        )
+        return ""
+    return url
 
 
 def require_camera_ml_url(camera) -> str:

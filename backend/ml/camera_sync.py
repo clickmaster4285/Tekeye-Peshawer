@@ -90,6 +90,16 @@ def collect_entries_by_ml_url() -> dict[str, list[dict]]:
                     camera.ml_server_id,
                 )
                 continue
+            from .client import _allow_loopback_ml, is_loopback_ml_url
+
+            if is_loopback_ml_url(target) and not _allow_loopback_ml():
+                logger.warning(
+                    "[camera-sync] Camera %s ML URL is loopback (%s) — skip "
+                    "(fix Ops RemoteServer ml_base_url)",
+                    camera.pk,
+                    target,
+                )
+                continue
             by_url[target].append(entry)
         return dict(by_url)
     finally:
