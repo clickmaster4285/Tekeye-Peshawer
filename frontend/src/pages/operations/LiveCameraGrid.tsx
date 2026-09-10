@@ -68,7 +68,11 @@ function gridCount(layout: string): number {
 }
 
 export default function LiveCameraGridPage() {
-  const { cameras: allCameras } = useCameras({ activeOnly: true, onlineOnly: true })
+  const { cameras: allCameras } = useCameras({
+    activeOnly: true,
+    onlineOnly: true,
+    allocatedOnly: true,
+  })
   const [cameras, setCameras] = useState<CameraRecord[]>([])
   const [locationFilter, setLocationFilter] = useState("all")
   const [layout, setLayout] = useState("2x2")
@@ -205,7 +209,7 @@ export default function LiveCameraGridPage() {
                 <div className="text-xs text-muted-foreground">Star icon = Add to favorites. Expand tree for camera groups.</div>
                 <div className="border rounded p-2 max-h-40 overflow-y-auto space-y-1">
                   {sidebarCameras.length === 0 ? (
-                    <p className="text-xs text-muted-foreground px-1">No cameras in database.</p>
+                    <p className="text-xs text-muted-foreground px-1">No allocated cameras. Assign in Camera Distribution.</p>
                   ) : (
                     sidebarCameras.map((c) => (
                       <div key={c.id} className="flex items-center justify-between text-sm gap-2">
@@ -348,7 +352,7 @@ export default function LiveCameraGridPage() {
             <CardContent className="p-4">
               {gridCameras.length === 0 ? (
                 <div className="aspect-video rounded-lg border border-dashed flex items-center justify-center text-sm text-muted-foreground">
-                  No cameras configured. Add cameras in Camera Integration.
+                  No allocated cameras. Assign cameras in Camera Distribution.
                 </div>
               ) : (
                 <div

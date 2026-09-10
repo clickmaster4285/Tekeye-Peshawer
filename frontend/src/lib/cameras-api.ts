@@ -104,6 +104,7 @@ export type CameraRecord = {
   ml_live_stream_url?: string;
   raw_stream_url?: string;
   ml_server?: number | null;
+  ml_server_id?: number | null;
   ml_server_name?: string;
   /** @deprecated Use ml_live_stream_url — Django proxy removed */
   stream_path?: string;
@@ -428,15 +429,29 @@ export async function fetchCamera(id: number): Promise<CameraRecord> {
   return res.json();
 }
 
-export async function fetchCameras(params?: { nvr?: number; location?: string }): Promise<CameraRecord[]> {
+/** True when camera is assigned to an ML server via Camera Distribution. */
+export function isCameraAllocated(
+  cam: Pick<CameraRecord, "ml_server"> & { ml_server_id?: number | null }
+): boolean {
+  const id = cam.ml_server ?? cam.ml_server_id
+  return id != null && Number(id) > 0
+}
+
+export async function fetchCameras(params?: {
+  nvr?: number
+  location?: string
+  allocatedOnly?: boolean
+}): Promise<CameraRecord[]> {
   const search = new URLSearchParams();
   if (params?.nvr != null) search.set("nvr", String(params.nvr));
   if (params?.location) search.set("location", params.location);
+  if (params?.allocatedOnly) search.set("allocated", "1");
   const qs = search.toString() ? `?${search}` : "";
   const res = await fetch(`${API}/cameras/${qs}`, { headers: getAuthHeaders(), cache: "no-store" });
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) throw new Error(`Failed to load cameras (${res.status})`);
-  return parseList<CameraRecord>(await res.json());
+  const rows = await parseList<CameraRecord>(await res.json());
+  return params?.allocatedOnly ? rows.filter(isCameraAllocated) : rows;
 }
 
 export async function fetchCameraPurposes(): Promise<CameraPurposeOption[]> {
@@ -575,12 +590,19 @@ export async function fetchStreamCameras(): Promise<{
   ml_service_enabled: boolean;
   ml_service_public_url?: string;
 }> {
-  const res = await fetch(`${API}/cameras/streams/`, {
+  const res = await fetch(`${API}/cameras/streams/?allocated=1`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`Failed to load streams (${res.status})`);
-  return res.json();
+  const data = await res.json();
+  const cameras = Array.isArray(data.cameras)
+    ? data.cameras.filter(
+        (c: { ml_server_id?: number | null }) =>
+          c.ml_server_id != null && Number(c.ml_server_id) > 0
+      )
+    : [];
+  return { ...data, cameras };
 }
 
 /** Display label for camera source (no credentials exposed). */

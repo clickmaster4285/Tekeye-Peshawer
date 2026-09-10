@@ -132,9 +132,16 @@ class CameraViewSet(viewsets.ModelViewSet):
     serializer_class = CameraSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["nvr", "nvr__site", "location", "purpose", "status", "is_active"]
+    filterset_fields = ["nvr", "nvr__site", "location", "purpose", "status", "is_active", "ml_server"]
     search_fields = ["name", "code", "zone", "nvr__name", "nvr__site__code"]
     ordering_fields = ["name", "channel", "location", "created_at"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        allocated = str(self.request.query_params.get("allocated", "")).strip().lower()
+        if allocated in ("1", "true", "yes"):
+            qs = qs.filter(ml_server_id__isnull=False)
+        return qs
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -559,9 +566,16 @@ class CameraStreamListView(APIView):
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
         cameras = []
-        for cam in Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site", "ml_server").order_by(
-            "nvr__site__name", "nvr__name", "channel"
-        ):
+        # Dashboard / live walls: allocated cameras only (idle until assigned in Distribution)
+        allocated_only = str(request.query_params.get("allocated", "1")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        qs = Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site", "ml_server")
+        if allocated_only:
+            qs = qs.filter(ml_server_id__isnull=False)
+        for cam in qs.order_by("nvr__site__name", "nvr__name", "channel"):
             cameras.append(
                 {
                     "id": cam.pk,
@@ -585,6 +599,8 @@ class CameraStreamListView(APIView):
                     "ml_live_stream_url": ml_assigned_mjpeg_public_url(cam, kind="live"),
                     "raw_stream_url": ml_assigned_mjpeg_public_url(cam, kind="raw"),
                     "rtsp_url": cam.effective_stream_url(),
+                    "status": cam.status,
+                    "is_active": cam.is_active,
                 }
             )
 
