@@ -29,10 +29,8 @@ export function useCameras(options?: {
     reload()
     const onUpdate = () => reload()
     window.addEventListener("camera-integration-updated", onUpdate)
-    window.addEventListener("focus", onUpdate)
     return () => {
       window.removeEventListener("camera-integration-updated", onUpdate)
-      window.removeEventListener("focus", onUpdate)
     }
   }, [reload])
 

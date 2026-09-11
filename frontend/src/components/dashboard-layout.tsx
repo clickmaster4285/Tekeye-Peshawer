@@ -5,6 +5,7 @@ import { Header } from "@/components/dashboard/header"
 import { ActivityLogger } from "@/components/activity-logger"
 import { OfficerGpsReporter } from "@/components/gps/officer-gps-reporter"
 import { SessionPermissionSync } from "@/components/session-permission-sync"
+import { RealtimeBridge } from "@/components/realtime-bridge"
 import { getStoredUser } from "@/lib/auth"
 import { getNavSectionsForRole, type NavGroup, type NavItem } from "@/routes/config"
 import { prefetchHrefsIdle, prefetchPriorityPages } from "@/routes/prefetch"
@@ -43,6 +44,8 @@ export function DashboardLayout() {
       <ActivityLogger />
       <OfficerGpsReporter />
       <SessionPermissionSync />
+      {/* Socket.IO → React Query invalidation (replaces page polling) */}
+      <RealtimeBridge />
       <Sidebar mobileOpen={mobileSidebarOpen} onMobileOpenChange={setMobileOpen} />
       <div className="flex min-w-0 w-full max-w-full flex-1 flex-col md:ml-[333px]">
         <Header onMenuClick={openMobileSidebar} />

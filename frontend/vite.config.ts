@@ -42,7 +42,8 @@ export default defineConfig(({ mode }) => {
       basicSsl(),
       react(),
       VitePWA({
-        registerType: "autoUpdate",
+        // Prompt / silent wait — never force a full-page reload on every client.
+        registerType: "prompt",
         includeAssets: [
           "custom-logo.jpeg",
           "icon.svg",
@@ -138,6 +139,12 @@ export default defineConfig(({ mode }) => {
             proxy: {
               "/api": { target: proxyTarget, changeOrigin: true, secure: false },
               "/media": { target: proxyTarget, changeOrigin: true, secure: false },
+              "/socket.io": {
+                target: proxyTarget,
+                changeOrigin: true,
+                secure: false,
+                ws: true,
+              },
               // Browser MJPEG feeds use /ml/... (same-origin). Strip prefix → ML api_server.
               // Long-lived multipart streams need no proxy timeout / no buffering.
               "/ml": {

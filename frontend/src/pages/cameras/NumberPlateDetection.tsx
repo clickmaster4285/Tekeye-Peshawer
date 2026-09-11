@@ -200,7 +200,6 @@ export default function NumberPlateDetectionPage() {
     queryKey: ["vehicle-detection-events", queryParams],
     queryFn: () => fetchDetectionEventsPage(queryParams),
     // Only auto-poll live page 1 so deeper pages stay frozen.
-    refetchInterval: page === 1 ? 12_000 : false,
     refetchOnWindowFocus: false,
   })
 

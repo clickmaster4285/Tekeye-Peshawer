@@ -156,15 +156,13 @@ export default function PersonJourneyDetailPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["journey-timeline", uuid, dateFrom, dateTo],
     queryFn: () => fetchJourneyTimeline(uuid!, dateFrom || undefined, dateTo || undefined),
-    enabled: !!uuid,
-    refetchInterval: 15000,
+    enabled: !!uuid
   })
 
   const { data: cameraData } = useQuery({
     queryKey: ["journey-camera-captures", uuid],
     queryFn: () => fetchJourneyCameraCaptures(uuid!, { refresh: true, hours: 48 }),
-    enabled: !!uuid,
-    refetchInterval: 20000,
+    enabled: !!uuid
   })
 
   const events = data?.events ?? []

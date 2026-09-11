@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "ops_central.apps.OpsCentralConfig",
     "gps_tracking.apps.GpsTrackingConfig",
     "video_recovery.apps.VideoRecoveryConfig",
+    "realtime.apps.RealtimeConfig",
 ]
 
 # -----------------------------

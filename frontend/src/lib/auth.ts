@@ -61,6 +61,7 @@ export function setAuthenticatedWithToken(token: string, user: AuthUser) {
   window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
   window.sessionStorage.setItem(AUTH_SESSION_KEY, "true");
   setAuthTokenCookie(token);
+  window.dispatchEvent(new CustomEvent("tekeye-auth-changed"));
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -99,6 +100,7 @@ export function clearAuth() {
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
     window.sessionStorage.removeItem(AUTH_USER_KEY);
     clearAuthTokenCookie();
+    window.dispatchEvent(new CustomEvent("tekeye-auth-changed"));
   }
 }
 

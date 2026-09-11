@@ -34,6 +34,19 @@ def _cctv_infer_max_width() -> int:
     return max(0, int(getattr(settings, "ATTENDANCE_VIDEO_WIDTH", 3840)))
 
 
+def _emit_attendance_realtime(*, throttle_sec: float = 1.5) -> None:
+    """Push monitor/dashboard refresh when in-memory CCTV runtime changes."""
+    try:
+        from realtime.sio_app import emit_invalidate
+
+        emit_invalidate(
+            ["attendance", "recognition", "hr"],
+            throttle_sec=throttle_sec,
+        )
+    except Exception:
+        logger.debug("[cctv] realtime emit skipped", exc_info=True)
+
+
 def _cctv_threshold() -> float:
     return float(getattr(settings, "ATTENDANCE_CCTV_SIMILARITY_THRESHOLD", 0.38))
 
@@ -427,6 +440,7 @@ class CCTVWorkerManager:
                                 event["message"] = (
                                     f"Detected on Camera #{state.camera_id} ({state.name})"
                                 )
+                            _emit_attendance_realtime(throttle_sec=1.0)
                             logger.info(
                                 "Camera %s: staff-%s -> %s (%.2f)",
                                 state.camera_id,

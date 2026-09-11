@@ -38,6 +38,7 @@ import {
   type NoteSheetNotificationItem,
 } from "@/lib/seizure-management-api"
 import { cn } from "@/lib/utils"
+import { REALTIME_INVALIDATE_EVENT } from "@/lib/realtime-socket"
 
 interface HeaderProps {
   onMenuClick?: () => void
@@ -111,10 +112,14 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
         })
     }
     load()
-    const id = window.setInterval(load, 60_000)
+    const onRealtime = (e: Event) => {
+      const domains = (e as CustomEvent<{ domains?: string[] }>).detail?.domains || []
+      if (domains.some((d) => ["ops", "cameras"].includes(d))) load()
+    }
+    window.addEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
     return () => {
       cancelled = true
-      window.clearInterval(id)
+      window.removeEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
     }
   }, [showAllCitiesToggle])
 
@@ -140,15 +145,19 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
 
   useEffect(() => {
     loadNotifications()
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") loadNotifications()
-    }, 60_000)
+    const onRealtime = (e: Event) => {
+      const domains = (e as CustomEvent<{ domains?: string[] }>).detail?.domains || []
+      if (domains.some((d) => ["notifications", "seizure", "vms"].includes(d))) {
+        if (document.visibilityState === "visible") loadNotifications()
+      }
+    }
     const onVisibility = () => {
       if (document.visibilityState === "visible") loadNotifications()
     }
+    window.addEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
     document.addEventListener("visibilitychange", onVisibility)
     return () => {
-      window.clearInterval(id)
+      window.removeEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
       document.removeEventListener("visibilitychange", onVisibility)
     }
   }, [loadNotifications])

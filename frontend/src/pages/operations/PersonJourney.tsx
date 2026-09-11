@@ -69,14 +69,12 @@ export default function PersonJourneyPage() {
 
   const summaryQuery = useQuery({
     queryKey: ["journey-summary"],
-    queryFn: fetchJourneySummary,
-    refetchInterval: 15000,
+    queryFn: fetchJourneySummary
   })
 
   const liveQuery = useQuery({
     queryKey: ["journey-live"],
-    queryFn: () => fetchJourneyLive(30),
-    refetchInterval: 10000,
+    queryFn: () => fetchJourneyLive(30)
   })
 
   const personsQuery = useQuery({
@@ -85,14 +83,12 @@ export default function PersonJourneyPage() {
       fetchJourneyPersons({
         person_type: typeFilter === "all" ? undefined : typeFilter,
         active_only: true,
-      }),
-    refetchInterval: 15000,
+      })
   })
 
   const cameraSightingsQuery = useQuery({
     queryKey: ["journey-camera-sightings"],
-    queryFn: () => fetchJourneyCameraSightings(4),
-    refetchInterval: 15000,
+    queryFn: () => fetchJourneyCameraSightings(4)
   })
 
   const filtered = useMemo(() => {

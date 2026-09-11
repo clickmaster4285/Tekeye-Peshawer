@@ -66,6 +66,7 @@ import {
   type AttendanceRecord,
 } from "@/lib/attendance-api"
 import { fetchMLHealth, type MLHealthResponse } from "@/lib/ml-api"
+import { REALTIME_INVALIDATE_EVENT } from "@/lib/realtime-socket"
 import { ROUTES } from "@/routes/config"
 
 function formatTime(iso: string | null): string {
@@ -150,8 +151,14 @@ export default function AttendancePage() {
 
   useEffect(() => {
     loadData()
-    const timer = window.setInterval(loadData, 30_000)
-    return () => window.clearInterval(timer)
+    const onRealtime = (e: Event) => {
+      const domains = (e as CustomEvent<{ domains?: string[] }>).detail?.domains || []
+      if (domains.some((d) => ["attendance", "hr", "recognition"].includes(d))) {
+        loadData()
+      }
+    }
+    window.addEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
+    return () => window.removeEventListener(REALTIME_INVALIDATE_EVENT, onRealtime)
   }, [])
 
   useEffect(() => {

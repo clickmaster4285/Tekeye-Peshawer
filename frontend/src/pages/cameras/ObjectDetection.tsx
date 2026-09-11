@@ -106,8 +106,7 @@ export default function ObjectDetectionPage() {
 
   const { data: summary } = useQuery({
     queryKey: ["detection-summary"],
-    queryFn: fetchDetectionSummary,
-    refetchInterval: 15000,
+    queryFn: fetchDetectionSummary
   })
 
   const { data: sites = [] } = useQuery({
