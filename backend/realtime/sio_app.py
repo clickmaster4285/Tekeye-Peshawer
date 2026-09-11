@@ -13,12 +13,20 @@ logger = logging.getLogger(__name__)
 _cors = os.getenv("SOCKETIO_CORS_ORIGINS", "*").strip()
 _cors_origins: list[str] | str = "*" if _cors in ("", "*") else [o.strip() for o in _cors.split(",") if o.strip()]
 
-# threading mode works with Django runserver + sync gunicorn workers (single process ideal).
+# threading + Django WSGI (runserver / gunicorn sync) cannot upgrade to WebSocket
+# (wsgiref has no raw socket → "Cannot obtain socket from WSGI environment").
+# Stay on Engine.IO long-polling unless SOCKETIO_ALLOW_WEBSOCKET=true and a
+# websocket-capable server (eventlet/gevent) is used.
+_allow_ws = os.getenv("SOCKETIO_ALLOW_WEBSOCKET", "").strip().lower() in ("1", "true", "yes")
+
 sio = socketio.Server(
     async_mode="threading",
     cors_allowed_origins=_cors_origins,
     logger=False,
     engineio_logger=False,
+    allow_upgrades=_allow_ws,
+    # Explicit: polling always; websocket only when upgrades enabled.
+    transports=["polling", "websocket"] if _allow_ws else ["polling"],
 )
 
 

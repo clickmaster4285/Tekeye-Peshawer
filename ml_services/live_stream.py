@@ -211,10 +211,11 @@ def _use_nvdec(ffmpeg_path: str) -> bool:
 def _rtsp_scale_size() -> tuple[int, int]:
     """
     Live AI/view capture size after FFmpeg scale (NVR keeps original 4K recording).
-    Default 0x0 = native 3840x2160 main-stream passthrough.
+    Default 1920x1080 so the UI/MJPEG is not full 4K. ANPR still uses native via keep_native.
+    Set ML_RTSP_SCALE_WIDTH=0 and ML_RTSP_SCALE_HEIGHT=0 for full native passthrough.
     """
-    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 0))
-    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 0))
+    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 1920))
+    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 1080))
     return w, h
 
 
@@ -1010,9 +1011,9 @@ class LiveStreamManager:
         self._plate_frame_counters: dict[str, int] = {}
         self._plate_counter_lock = threading.Lock()
         self._last_plate_dets: dict[str, list[dict[str, Any]]] = {}
-        # 0 = native 4K passthrough for browser preview (override via ML_LIVE_MAX_WIDTH/HEIGHT).
-        self._max_width = 0
-        self._max_height = 0
+        # Browser MJPEG cap (ANPR may still capture native 4K for OCR; preview is downscaled).
+        self._max_width = 1920
+        self._max_height = 1080
         self._stream_fps = max(5, min(_env_int("ML_LIVE_STREAM_FPS", 12), 30))
         self._frame_interval = 1.0 / self._stream_fps
         self._detections: dict[str, list[dict[str, Any]]] = {}
@@ -1912,7 +1913,7 @@ class LiveStreamManager:
                 time.sleep(0.05)
 
     def _limit_size(self, frame: np.ndarray) -> np.ndarray:
-        """Downscale only when ML_LIVE_MAX_WIDTH/HEIGHT cap is set; 0 = native passthrough."""
+        """Downscale browser MJPEG to ML_LIVE_MAX_WIDTH/HEIGHT (default 1080p). 0 = no cap."""
         h, w = frame.shape[:2]
         max_w = self._max_width
         max_h = self._max_height

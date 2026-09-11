@@ -123,7 +123,7 @@ export default function VehicleTrackingPage() {
         date_from: applied.date_from || undefined,
         date_to: applied.date_to || undefined,
         cleanup: false,
-      })
+      }),
     placeholderData: (prev) => prev,
   })
 

@@ -86,9 +86,12 @@ export function startRealtimeSocket(options?: { rooms?: string[] }): Socket {
   started = true
 
   const token = getStoredToken()
+  // Django runserver / sync WSGI cannot host Engine.IO WebSocket upgrades.
+  // Long-polling works everywhere (Vite proxy + production gunicorn).
   socket = io(socketUrl(), {
     path: "/socket.io",
-    transports: ["websocket", "polling"],
+    transports: ["polling"],
+    upgrade: false,
     withCredentials: true,
     autoConnect: true,
     reconnection: true,

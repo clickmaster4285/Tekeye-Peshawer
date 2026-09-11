@@ -140,10 +140,10 @@ export default defineConfig(({ mode }) => {
               "/api": { target: proxyTarget, changeOrigin: true, secure: false },
               "/media": { target: proxyTarget, changeOrigin: true, secure: false },
               "/socket.io": {
+                // Long-polling only (Django runserver cannot upgrade WebSocket).
                 target: proxyTarget,
                 changeOrigin: true,
                 secure: false,
-                ws: true,
               },
               // Browser MJPEG feeds use /ml/... (same-origin). Strip prefix → ML api_server.
               // Long-lived multipart streams need no proxy timeout / no buffering.

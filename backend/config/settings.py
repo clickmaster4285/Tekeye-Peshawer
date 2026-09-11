@@ -251,7 +251,6 @@ ML_SERVICE_PUBLIC_URL = os.getenv(
     "ML_SERVICE_PUBLIC_URL",
     os.getenv("ML_SERVICE_URL", ""),
 ).strip().rstrip("/")
-ML_ALLOW_LOOPBACK = os.getenv("ML_ALLOW_LOOPBACK", "false").strip()
 ML_SERVICE_TIMEOUT = int(os.getenv("ML_SERVICE_TIMEOUT", "60"))
 ML_VIDEO_SEARCH_TIMEOUT = int(os.getenv("ML_VIDEO_SEARCH_TIMEOUT", "3600"))
 ML_VIDEO_SEARCH_MAX_BYTES = int(
@@ -272,10 +271,8 @@ DETECTION_CLIP_REQUEUE_LIMIT = int(os.getenv("DETECTION_CLIP_REQUEUE_LIMIT", "50
 DETECTION_CLIP_MAX_WORKERS = int(os.getenv("DETECTION_CLIP_MAX_WORKERS", "1"))
 DETECTION_CLIP_MAX_QUEUE = int(os.getenv("DETECTION_CLIP_MAX_QUEUE", "50"))
 
-# Background worker throttling (sleep, CPU circuit breaker, ffmpeg spawn spacing)
+# Background worker throttling (cycle sleep + ffmpeg spawn spacing)
 WORKER_MIN_CYCLE_SLEEP_MS = int(os.getenv("WORKER_MIN_CYCLE_SLEEP_MS", "100"))
-WORKER_CPU_PAUSE_THRESHOLD = float(os.getenv("WORKER_CPU_PAUSE_THRESHOLD", "80"))
-WORKER_CPU_PAUSE_SEC = float(os.getenv("WORKER_CPU_PAUSE_SEC", "30"))
 FFMPEG_SNAPSHOT_MIN_INTERVAL_SEC = float(os.getenv("FFMPEG_SNAPSHOT_MIN_INTERVAL_SEC", "2"))
 FFMPEG_SNAPSHOT_TIMEOUT_SEC = int(os.getenv("FFMPEG_SNAPSHOT_TIMEOUT_SEC", "12"))
 FFMPEG_STIMEOUT_US = os.getenv("FFMPEG_STIMEOUT_US", "10000000")
