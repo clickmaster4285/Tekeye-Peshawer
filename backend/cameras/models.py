@@ -270,6 +270,16 @@ class DetectionEvent(models.Model):
     )
     confidence = models.FloatField()
     bbox = models.JSONField(default=list)
+    infer_frame_width = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Frame width the bbox was measured in (ML infer / scaled RTSP).",
+    )
+    infer_frame_height = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Frame height the bbox was measured in (ML infer / scaled RTSP).",
+    )
     is_alert = models.BooleanField(default=False)
     clip = models.FileField(
         upload_to="detection_clips/%Y/%m/%d/",

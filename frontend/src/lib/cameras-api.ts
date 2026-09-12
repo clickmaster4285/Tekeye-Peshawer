@@ -152,6 +152,8 @@ export type DetectionEvent = {
   track_event?: string;
   confidence: number;
   bbox: [number, number, number, number];
+  infer_frame_width?: number | null;
+  infer_frame_height?: number | null;
   is_alert: boolean;
   clip_status?: ClipStatus;
   clip_url?: string;

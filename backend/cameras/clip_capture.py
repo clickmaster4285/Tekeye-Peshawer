@@ -217,18 +217,36 @@ def _display_class(event: DetectionEvent) -> str:
 
 
 def _snapshot_label(event: DetectionEvent) -> str:
-    """Prefer recognized employee name on annotated snapshots."""
+    """Prefer '{global_id} {name}' on annotated snapshots."""
+    gid = (getattr(event, "person_qr", None) or "").strip()
     employee = (getattr(event, "employee_name", None) or "").strip()
-    if employee:
-        return employee[:80]
-
     label = (event.label or "").strip()
-    cls = (event.class_name or "").strip().lower()
+    cls = (event.class_name or "").strip()
     generic = {"", "unknown", "person", "face"}
-    if cls in ("person", "face") and label.lower() not in generic:
-        return label[:80]
 
-    return _display_class(event)
+    if employee:
+        name = employee
+    elif cls.lower() in ("person", "face") and label.lower() not in generic and not _is_global_id_label(label):
+        name = label
+    elif label and not _is_global_id_label(label) and label.lower() not in generic:
+        name = label
+    else:
+        name = cls or _display_class(event)
+
+    # Avoid "GP12 GP12" when label was previously overwritten with the ID
+    if gid and name and gid.lower() == name.lower():
+        name = cls or "person"
+    if gid and name and gid.lower() not in name.lower():
+        return f"{gid} {name}"[:80]
+    if gid:
+        return gid[:80]
+    return (name or _display_class(event))[:80]
+
+
+def _is_global_id_label(value: str) -> bool:
+    import re
+
+    return bool(re.match(r"^(?:gp|go|gv|t)\d+$", (value or "").strip(), re.IGNORECASE))
 
 
 def _fit_bbox_to_frame(bbox: list, frame_w: int, frame_h: int) -> list[int] | None:
@@ -382,7 +400,60 @@ def _draw_attendance_staff_on_frame(
     return output
 
 
-def _draw_detection_on_frame(frame, event: DetectionEvent):
+def _infer_size_for_event(event: DetectionEvent, frame_w: int, frame_h: int, camera=None) -> tuple[int, int]:
+    """Resolve the resolution the event bbox was measured in."""
+    try:
+        infer_w = int(getattr(event, "infer_frame_width", 0) or 0)
+        infer_h = int(getattr(event, "infer_frame_height", 0) or 0)
+    except (TypeError, ValueError):
+        infer_w = infer_h = 0
+
+    if infer_w <= 0 or infer_h <= 0:
+        try:
+            from ml.client import ml_live_detections_for_camera, ml_service_enabled
+
+            if camera is not None and getattr(camera, "ml_server_id", None) and ml_service_enabled():
+                payload = ml_live_detections_for_camera(camera)
+                infer_w = int(payload.get("frame_width") or 0)
+                infer_h = int(payload.get("frame_height") or 0)
+        except Exception:
+            pass
+
+    bbox = event.bbox or []
+    try:
+        x2 = float(bbox[2]) if len(bbox) >= 3 else 0.0
+        y2 = float(bbox[3]) if len(bbox) >= 4 else 0.0
+    except (TypeError, ValueError, IndexError):
+        x2 = y2 = 0.0
+
+    if infer_w <= 0 or infer_h <= 0:
+        # Common ML scaled sizes when bbox clearly isn't in native capture coords.
+        for cand_w, cand_h in ((1280, 720), (1920, 1080), (960, 540)):
+            if x2 > 0 and y2 > 0 and x2 <= cand_w * 1.02 and y2 <= cand_h * 1.02:
+                if frame_w > cand_w * 1.25 or frame_h > cand_h * 1.25:
+                    infer_w, infer_h = cand_w, cand_h
+                    break
+
+    if infer_w <= 0 or infer_h <= 0:
+        if x2 > frame_w or y2 > frame_h:
+            infer_w = max(int(x2 * 1.05), frame_w)
+            infer_h = max(int(y2 * 1.05), frame_h)
+        else:
+            infer_w, infer_h = frame_w, frame_h
+
+    return infer_w, infer_h
+
+
+def _event_bbox_on_frame(event: DetectionEvent, frame_w: int, frame_h: int, camera=None) -> list[int] | None:
+    """Map detection bbox from ML infer resolution onto the captured frame."""
+    bbox = event.bbox or []
+    infer_w, infer_h = _infer_size_for_event(event, frame_w, frame_h, camera=camera)
+    if abs(infer_w - frame_w) > 8 or abs(infer_h - frame_h) > 8:
+        return _map_bbox_to_capture_frame(bbox, infer_w, infer_h, frame_w, frame_h)
+    return _fit_bbox_to_frame(bbox, frame_w, frame_h)
+
+
+def _draw_detection_on_frame(frame, event: DetectionEvent, camera=None):
     import cv2
 
     output = frame.copy()
@@ -415,7 +486,8 @@ def _draw_detection_on_frame(frame, event: DetectionEvent):
         cv2.LINE_AA,
     )
 
-    fitted = _fit_bbox_to_frame(event.bbox or [], w, h)
+    cam = camera if camera is not None else getattr(event, "camera", None)
+    fitted = _event_bbox_on_frame(event, w, h, camera=cam)
     if fitted:
         x1, y1, x2, y2 = fitted
         cv2.rectangle(output, (x1, y1), (x2, y2), color, box_thickness)
@@ -654,7 +726,7 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
             _update_clip_status(event_id, ClipStatus.FAILED)
         return
 
-    annotated = _draw_detection_on_frame(frame, event)
+    annotated = _draw_detection_on_frame(frame, event, camera=camera)
     ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     if not ok or encoded is None:
         logger.warning("JPEG encode failed for detection event %s", event_id)

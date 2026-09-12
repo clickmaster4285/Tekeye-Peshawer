@@ -858,9 +858,17 @@ export function CameraManagementContent({
                               </Button>
                               <Button variant="ghost" size="icon" onClick={async () => {
                                 if (!window.confirm(`Remove camera ${cam.name}?`)) return
-                                await deleteCamera(cam.id)
-                                await load()
-                                notifyUpdated()
+                                try {
+                                  await deleteCamera(cam.id)
+                                  setCameras((prev) => prev.filter((c) => c.id !== cam.id))
+                                  if (editingCameraId === cam.id) {
+                                    setEditingCameraId(null)
+                                    setCameraForm(emptyCameraForm())
+                                  }
+                                  notifyUpdated()
+                                } catch (err) {
+                                  setError(err instanceof Error ? err.message : "Failed to delete camera")
+                                }
                               }}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>

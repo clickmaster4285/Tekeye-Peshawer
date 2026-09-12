@@ -153,6 +153,12 @@ def _resolve_crop_box(
         if isinstance(meta, dict):
             infer_w = int(meta.get("frame_width") or 0)
             infer_h = int(meta.get("frame_height") or 0)
+        if infer_w <= 0 or infer_h <= 0:
+            try:
+                infer_w = int(getattr(detection, "infer_frame_width", 0) or 0)
+                infer_h = int(getattr(detection, "infer_frame_height", 0) or 0)
+            except (TypeError, ValueError):
+                pass
 
     if infer_w <= 0 or infer_h <= 0:
         try:
@@ -180,13 +186,24 @@ def _resolve_crop_box(
 def _person_label(journey_event) -> str:
     person = journey_event.journey_person
     meta = journey_event.metadata or {}
+    name = ""
     if isinstance(meta, dict):
         face_label = str(meta.get("face_label") or meta.get("label") or "").strip()
         if face_label and face_label.lower() not in {"unknown", "person", "face", ""}:
-            return face_label[:80]
+            name = face_label
+    code = ""
     if person:
-        return (person.display_name or person.code or "Person")[:80]
-    return "Person"
+        code = (person.code or "").strip()
+        if not name:
+            name = (person.display_name or "").strip()
+        elif person.display_name and person.display_name.strip().lower() not in name.lower():
+            # Prefer enrolled display name when face_label is a raw key
+            display = person.display_name.strip()
+            if display.lower() not in {"unknown", "person", "face"}:
+                name = display
+    if code and name and code.lower() not in name.lower():
+        return f"{code} {name}"[:80]
+    return (code or name or "Person")[:80]
 
 
 def _extract_person_crop(frame, crop_box: list[int] | None):

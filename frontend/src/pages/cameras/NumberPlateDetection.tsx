@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { DetectionSnapshotThumb } from "@/components/cameras/detection-snapshot-thumb"
+import { DetectionSnapshotThumb, detectionDisplayLabel } from "@/components/cameras/detection-snapshot-thumb"
 import {
   fetchDetectionEventsPage,
   fetchCameras,
@@ -507,8 +507,8 @@ export default function NumberPlateDetectionPage() {
                             {row.class_name}
                           </Badge>
                         </TableCell>
-                        <TableCell className="max-w-[180px] truncate" title={row.label}>
-                          {row.label}
+                        <TableCell className="max-w-[180px] truncate" title={detectionDisplayLabel(row)}>
+                          {detectionDisplayLabel(row)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">

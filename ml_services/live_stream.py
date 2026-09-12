@@ -695,6 +695,25 @@ def create_camera_stream(
     return stream
 
 
+def _overlay_name(det: dict[str, Any]) -> str:
+    """Human-readable name/class — never replace this with the global ID alone."""
+    display_id = str(det.get("display_id") or det.get("global_object_id") or "").strip()
+    name = str(det.get("label") or "").strip()
+    cls = str(det.get("class_name") or "").strip()
+    if not name or (display_id and name.lower() == display_id.lower()) or _OBJECT_ID_LABEL.match(name):
+        name = cls or "object"
+    return name
+
+
+def _overlay_text(det: dict[str, Any]) -> str:
+    """Format live box text as '{global_id} {actual_label}' when both exist."""
+    display_id = str(det.get("display_id") or det.get("global_object_id") or "").strip()
+    name = _overlay_name(det)
+    if display_id and name and display_id.lower() not in name.lower():
+        return f"{display_id} {name}".strip()
+    return (display_id or name).strip()
+
+
 def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_scale: float = 0.55) -> np.ndarray:
     if not detections:
         return frame
@@ -706,8 +725,7 @@ def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_s
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     for det in detections:
-        display_id = str(det.get("display_id") or det.get("global_object_id") or "").strip()
-        name = str(det.get("label") or det.get("class_name") or "")
+        name = _overlay_name(det)
         conf = float(det.get("confidence", 0))
         x1, y1, x2, y2 = det.get("bbox", [0, 0, 0, 0])
         is_unknown = (
@@ -724,11 +742,7 @@ def draw_detections(frame: np.ndarray, detections: list[dict[str, Any]], label_s
         else:
             color = (0, 220, 0)
         cv2.rectangle(output, (int(x1), int(y1)), (int(x2), int(y2)), color, box_thickness)
-        if display_id and display_id.lower() not in name.lower():
-            name = f"{display_id} {name}".strip()
-        elif display_id and not name:
-            name = display_id
-        label = f"{name} {conf:.2f}".strip()
+        label = f"{_overlay_text(det)} {conf:.2f}".strip()
         (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
         text_x = int(x1)
         text_y = max(text_h + 4, int(y1) - 4)
@@ -757,7 +771,10 @@ def _is_generic_face_label(label: str) -> bool:
 
 
 def assign_overlay_ids(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Put a stable ID on every live box: GP/GO/GV from identity, else ByteTrack T#."""
+    """Put a stable ID on every live box: GP/GO/GV from identity, else ByteTrack T#.
+
+    Keeps the real label/class on the detection — never overwrite it with ID-only text.
+    """
     for det in detections or []:
         gid = str(det.get("global_object_id") or "").strip()
         tid = det.get("track_id")
@@ -769,11 +786,12 @@ def assign_overlay_ids(detections: list[dict[str, Any]]) -> list[dict[str, Any]]
         if display_id:
             det["display_id"] = display_id
 
-        cls = str(det.get("class_name") or "").strip().lower()
+        cls = str(det.get("class_name") or "").strip()
         label = str(det.get("label") or "").strip()
-        if cls in ("person", "face") and _is_generic_face_label(label):
+        if cls.lower() in ("person", "face") and _is_generic_face_label(label):
             det["is_unknown"] = True
-            det["label"] = display_id or "Unknown"
+            # Keep a readable class label; global ID stays in display_id only
+            det["label"] = cls or "person"
     return detections
 
 
@@ -1553,10 +1571,23 @@ class LiveStreamManager:
         return small, w / float(dw), h / float(dh)
 
     def _want_native_frame(self, camera_key: str) -> bool:
-        """Keep native camera resolution (4K) when RTSP scaling is disabled."""
+        """
+        Keep native camera resolution only when scaling is disabled.
+        With ML_RTSP_SCALE_* / ML_RTSP_FORCE_SCALE, always decode scaled (e.g. 1K)
+        — including ANPR — so live streams stay stable.
+        """
+        force = str(os.getenv("ML_RTSP_FORCE_SCALE", "") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if force:
+            return False
         w, h = _rtsp_scale_size()
-        if w <= 0 and h <= 0:
-            return True
+        if w > 0 or h > 0:
+            # Explicit scale target (e.g. 1280x720) → never open native 4K.
+            return False
         if self._plate_on_all:
             return True
         return "anpr" in self._purposes_for(camera_key)

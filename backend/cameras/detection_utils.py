@@ -325,6 +325,15 @@ def save_detection_batch(
 
         global_code = (global_obj.code if global_obj is not None else str(det.get("global_object_id") or ""))[:32]
 
+        try:
+            infer_w = int(det.get("frame_width") or 0) or None
+        except (TypeError, ValueError):
+            infer_w = None
+        try:
+            infer_h = int(det.get("frame_height") or 0) or None
+        except (TypeError, ValueError):
+            infer_h = None
+
         event = DetectionEvent.objects.create(
             camera=camera,
             class_name=class_name[:80],
@@ -333,6 +342,8 @@ def save_detection_batch(
             personal_number=personal_number,
             confidence=confidence,
             bbox=det.get("bbox") or [],
+            infer_frame_width=infer_w,
+            infer_frame_height=infer_h,
             is_alert=bool(det.get("alert")),
             clip_status=ClipStatus.PENDING if clip_enabled else ClipStatus.SKIPPED,
             local_track_id=track_id_i,
