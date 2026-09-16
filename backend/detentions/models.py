@@ -128,6 +128,30 @@ class DetentionMemoGoodsLine(models.Model):
     item_notes = models.TextField(blank=True)
     perishable = models.BooleanField(default=False)
 
+    # Where this item was found/detected (Item → Camera → Live View).
+    # Store camera PK — never only a free-text camera name.
+    located_camera = models.ForeignKey(
+        "cameras.Camera",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="detained_goods",
+        help_text="Camera where this detained item was located/detected.",
+    )
+    detected_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the item was detected or found at the located camera.",
+    )
+    detection_event = models.ForeignKey(
+        "cameras.DetectionEvent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="detention_goods_lines",
+        help_text="Optional AI DetectionEvent that sourced this goods line.",
+    )
+
     class Meta:
         ordering = ["id"]
 

@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams, Link } from "react-router-dom"
 import { MlCameraFeed } from "@/components/cameras/ml-camera-feed"
 import { MlSystemStatus } from "@/components/cameras/ml-system-status"
 import type { CameraRecord } from "@/lib/cameras-api"
 import { cameraSourceLabel } from "@/lib/cameras-api"
 import { useCameras } from "@/hooks/use-cameras"
 import { LOCATION_OPTIONS } from "@/lib/locations"
+import { ROUTES } from "@/routes/config"
 import {
   ALL_CITIES_CAMERAS_EVENT,
   getAllCitiesCameras,
@@ -68,14 +70,21 @@ function gridCount(layout: string): number {
 }
 
 export default function LiveCameraGridPage() {
+  const [searchParams] = useSearchParams()
+  const focusCameraId = Number(searchParams.get("cameraId") || "")
+  const evidenceUrl = (searchParams.get("evidenceUrl") || "").trim()
+  const itemLabel = (searchParams.get("itemLabel") || "").trim()
+  const detectedAt = (searchParams.get("detectedAt") || "").trim()
+  const hasFocusCamera = Number.isFinite(focusCameraId) && focusCameraId > 0
+
   const { cameras: allCameras } = useCameras({
     activeOnly: true,
-    onlineOnly: true,
-    allocatedOnly: true,
+    onlineOnly: !hasFocusCamera,
+    allocatedOnly: !hasFocusCamera,
   })
   const [cameras, setCameras] = useState<CameraRecord[]>([])
   const [locationFilter, setLocationFilter] = useState("all")
-  const [layout, setLayout] = useState("2x2")
+  const [layout, setLayout] = useState(hasFocusCamera ? "1x1" : "2x2")
   const [videoWallMode, setVideoWallMode] = useState(false)
   const [layoutName, setLayoutName] = useState("")
   const [cameraSearch, setCameraSearch] = useState("")
@@ -96,20 +105,31 @@ export default function LiveCameraGridPage() {
   const [speakerVolume, setSpeakerVolume] = useState(50)
   const [snapshotComment, setSnapshotComment] = useState("")
 
+  const focusedCamera = useMemo(
+    () => (hasFocusCamera ? allCameras.find((c) => c.id === focusCameraId) : undefined),
+    [allCameras, focusCameraId, hasFocusCamera]
+  )
+
   useEffect(() => {
+    if (hasFocusCamera) {
+      setLayout("1x1")
+      if (focusedCamera?.location) setLocationFilter(focusedCamera.location)
+      setCameras(focusedCamera ? [focusedCamera] : [])
+      return
+    }
     if (locationFilter === "all") setCameras(allCameras)
     else setCameras(allCameras.filter((c) => c.location === locationFilter))
-  }, [allCameras, locationFilter])
+  }, [allCameras, locationFilter, hasFocusCamera, focusedCamera])
 
   useEffect(() => {
     const onAllCities = (e: Event) => {
       const enabled = (e as CustomEvent<{ enabled: boolean }>).detail?.enabled
-      if (enabled) setLocationFilter("all")
+      if (enabled && !hasFocusCamera) setLocationFilter("all")
     }
-    if (getAllCitiesCameras()) setLocationFilter("all")
+    if (getAllCitiesCameras() && !hasFocusCamera) setLocationFilter("all")
     window.addEventListener(ALL_CITIES_CAMERAS_EVENT, onAllCities)
     return () => window.removeEventListener(ALL_CITIES_CAMERAS_EVENT, onAllCities)
-  }, [])
+  }, [hasFocusCamera])
 
   const sidebarCameras = useMemo(() => {
     const q = cameraSearch.trim().toLowerCase()
@@ -129,11 +149,40 @@ export default function LiveCameraGridPage() {
 
   return (
     <ModulePageLayout
-      title="Live View — Real-time camera monitoring and control"
-      description="Required: Yes = mandatory field. Field Type defines input widget. Developer notes: implementation context."
+      title={
+        hasFocusCamera
+          ? `Live View — ${focusedCamera?.name || focusedCamera?.code || `Camera ${focusCameraId}`}`
+          : "Live View — Real-time camera monitoring and control"
+      }
+      description={
+        hasFocusCamera
+          ? "Opened from a detained item. Live stream for the located camera, with detection evidence when available."
+          : "Required: Yes = mandatory field. Field Type defines input widget. Developer notes: implementation context."
+      }
       breadcrumbs={[{ label: "AI Analytics" }, { label: "Live View" }]}
     >
       <MlSystemStatus className="mb-4" />
+      {hasFocusCamera && (
+        <Card className="mb-4 border-sky-200 bg-sky-50/60">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+            <div>
+              <p className="font-medium text-sky-950">
+                Located camera: {focusedCamera?.code || `cam-${focusCameraId}`}
+                {focusedCamera?.name ? ` — ${focusedCamera.name}` : ""}
+              </p>
+              <p className="text-xs text-sky-900/80">
+                {[focusedCamera?.zone && `Zone ${focusedCamera.zone}`, focusedCamera?.location, itemLabel]
+                  .filter(Boolean)
+                  .join(" · ") || "Detained item camera"}
+                {detectedAt ? ` · Detected ${detectedAt}` : ""}
+              </p>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link to={ROUTES.LIVE_CAMERA_GRID}>Clear focus</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
       <div className="flex gap-4 flex-col lg:flex-row">
         <ScrollArea className="lg:w-80 shrink-0 border border-border rounded-lg bg-card">
           <div className="p-3 space-y-2">
@@ -352,45 +401,70 @@ export default function LiveCameraGridPage() {
             <CardContent className="p-4">
               {gridCameras.length === 0 ? (
                 <div className="aspect-video rounded-lg border border-dashed flex items-center justify-center text-sm text-muted-foreground">
-                  No allocated cameras. Assign cameras in Camera Distribution.
+                  {hasFocusCamera
+                    ? `Camera #${focusCameraId} not found or not available.`
+                    : "No allocated cameras. Assign cameras in Camera Distribution."}
                 </div>
               ) : (
                 <div
-                  className={`grid gap-2 rounded-lg border border-border bg-muted/20 p-2 ${
-                    layout === "1x1" ? "grid-cols-1" :
-                    layout === "2x2" ? "grid-cols-2" :
-                    layout === "3x3" ? "grid-cols-3" :
-                    layout === "4x4" ? "grid-cols-4" :
-                    layout === "6x6" ? "grid-cols-6" : "grid-cols-2"
-                  }`}
+                  className={
+                    hasFocusCamera && evidenceUrl
+                      ? "grid gap-3 lg:grid-cols-2"
+                      : undefined
+                  }
                 >
-                  {gridCameras.map((cam) => (
-                    <div
-                      key={cam.id}
-                      className="relative rounded overflow-hidden border border-border hover:border-[#A9D1EF]"
-                    >
-                      <MlCameraFeed
-                        camera={cam}
-                        pollMl={false}
-                        showOverlay={showBoundingBoxes}
-                        showBrandLogo
-                        showFullscreenButton
+                  <div
+                    className={`grid gap-2 rounded-lg border border-border bg-muted/20 p-2 ${
+                      layout === "1x1" ? "grid-cols-1" :
+                      layout === "2x2" ? "grid-cols-2" :
+                      layout === "3x3" ? "grid-cols-3" :
+                      layout === "4x4" ? "grid-cols-4" :
+                      layout === "6x6" ? "grid-cols-6" : "grid-cols-2"
+                    }`}
+                  >
+                    {gridCameras.map((cam) => (
+                      <div
+                        key={cam.id}
+                        className="relative rounded overflow-hidden border border-border hover:border-[#A9D1EF]"
+                      >
+                        <MlCameraFeed
+                          camera={cam}
+                          pollMl={false}
+                          showOverlay={showBoundingBoxes}
+                          showBrandLogo
+                          showFullscreenButton
+                        />
+                        {showCameraName && (
+                          <span className="absolute top-1 left-1 z-20 text-xs font-medium bg-black/60 text-white px-1.5 py-0.5 rounded pointer-events-none">
+                            {cam.name}
+                          </span>
+                        )}
+                        {showTimestamp && (
+                          <span className="absolute top-1 right-1 z-20 text-xs bg-black/60 text-white px-1.5 py-0.5 rounded pointer-events-none">
+                            {new Date().toLocaleTimeString()}
+                          </span>
+                        )}
+                        <span className="absolute bottom-1 left-1 z-20 text-xs text-white/90 bg-black/60 px-1.5 py-0.5 rounded pointer-events-none">
+                          {cam.location} • {cam.zone}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {hasFocusCamera && evidenceUrl ? (
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <p className="mb-2 text-sm font-medium">
+                        Evidence{itemLabel ? ` — ${itemLabel}` : ""}
+                      </p>
+                      {detectedAt ? (
+                        <p className="mb-2 text-xs text-muted-foreground">Detected: {detectedAt}</p>
+                      ) : null}
+                      <img
+                        src={evidenceUrl}
+                        alt={itemLabel || "Detection evidence"}
+                        className="max-h-[70vh] w-full rounded border object-contain bg-black"
                       />
-                      {showCameraName && (
-                        <span className="absolute top-1 left-1 z-20 text-xs font-medium bg-black/60 text-white px-1.5 py-0.5 rounded pointer-events-none">
-                          {cam.name}
-                        </span>
-                      )}
-                      {showTimestamp && (
-                        <span className="absolute top-1 right-1 z-20 text-xs bg-black/60 text-white px-1.5 py-0.5 rounded pointer-events-none">
-                          {new Date().toLocaleTimeString()}
-                        </span>
-                      )}
-                      <span className="absolute bottom-1 left-1 z-20 text-xs text-white/90 bg-black/60 px-1.5 py-0.5 rounded pointer-events-none">
-                        {cam.location} • {cam.zone}
-                      </span>
                     </div>
-                  ))}
+                  ) : null}
                 </div>
               )}
             </CardContent>

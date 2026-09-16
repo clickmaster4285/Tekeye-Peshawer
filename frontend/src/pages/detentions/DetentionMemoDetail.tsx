@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react"
 import { useParams, Link, useSearchParams, useLocation } from "react-router-dom"
-import { ArrowLeft, FileText, Package, QrCode, Users, Paperclip } from "lucide-react"
+import { ArrowLeft, FileText, Package, QrCode, Users, Paperclip, Camera } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { PrintMenu } from "@/components/seizure/print-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Table,
   TableBody,
@@ -14,28 +21,135 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ROUTES, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
 import DetentionMemoQRPrint from "@/components/detention/DetentionMemoQRPrint"
 import { DestructionRecordsPanel } from "@/components/warehouse/destruction-records-panel"
 import { WmsFlowOverviewPanel } from "@/components/warehouse/wms-flow-overview-panel"
-import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
+import { MlCameraFeed } from "@/components/cameras/ml-camera-feed"
+import {
+  fetchDetentionMemoById,
+  type DetentionMemoApiRecord,
+  type DetentionMemoGoodsLineApi,
+  type LocatedCameraApi,
+} from "@/lib/detention-memo-api"
+import { fetchCamera, cameraSourceLabel, type CameraRecord } from "@/lib/cameras-api"
 import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
 
-type GoodsLineItem = {
-  id: string
-  qrCodeNumber?: string
-  description: string
-  pctCode: string
-  quantity: string
-  unit: string
-  condition: string
-  assessableValuePkr: string
-  identificationRef: string
-  itemNotes: string
-  perishable?: boolean
-  images?: string[]
+type GoodsLineItem = DetentionMemoGoodsLineApi
+
+function locatedCameraId(item: GoodsLineItem): number | null {
+  const camId = item.locatedCameraId ?? item.locatedCamera?.id
+  return camId == null ? null : Number(camId)
+}
+
+function cameraLabel(cam: LocatedCameraApi | null | undefined, fallbackId?: number | null): string {
+  if (cam) {
+    const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
+    const zone = (cam.zone || "").trim()
+    return zone ? `${name} · ${zone}` : name
+  }
+  if (fallbackId != null) return `Camera #${fallbackId}`
+  return "—"
+}
+
+type ViewCameraTarget = {
+  cameraId: number
+  label: string
+  itemDescription?: string
+  detectedAt?: string
+  evidenceUrl?: string
+}
+
+function ViewLocatedCameraDialog({
+  target,
+  onClose,
+}: {
+  target: ViewCameraTarget | null
+  onClose: () => void
+}) {
+  const [camera, setCamera] = useState<CameraRecord | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!target) {
+      setCamera(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setCamera(null)
+    fetchCamera(target.cameraId)
+      .then((cam) => {
+        if (!cancelled) setCamera(cam)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load camera")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [target])
+
+  return (
+    <Dialog open={!!target} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[92vh] w-[min(96vw,72rem)] gap-3 overflow-y-auto p-4 sm:max-w-6xl sm:p-6">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Camera className="h-4 w-4 shrink-0" />
+            {target?.label || "Located camera"}
+          </DialogTitle>
+          <DialogDescription className="text-xs sm:text-sm">
+            {target?.itemDescription
+              ? `Live view for detained item: ${target.itemDescription}`
+              : "Live camera feed for this detained goods line."}
+            {target?.detectedAt ? ` · Detected ${target.detectedAt}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        {target?.evidenceUrl ? (
+          <div className="rounded-md border bg-muted/30 p-2">
+            <p className="mb-1.5 text-xs text-muted-foreground">Evidence snapshot</p>
+            <img
+              src={target.evidenceUrl}
+              alt="Detection evidence"
+              className="max-h-48 w-full rounded object-contain bg-black"
+            />
+          </div>
+        ) : null}
+
+        <div className="min-h-[min(70vh,560px)] overflow-hidden rounded-lg border bg-black">
+          {loading ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">Loading live feed…</p>
+          ) : error ? (
+            <p className="p-8 text-center text-sm text-destructive">{error}</p>
+          ) : camera ? (
+            <div className="space-y-2 p-2 sm:p-3">
+              <p className="px-1 text-xs text-muted-foreground">
+                {cameraSourceLabel(camera)}
+                {camera.zone ? ` · ${camera.zone}` : ""}
+              </p>
+              <MlCameraFeed
+                camera={camera}
+                className="min-h-[min(62vh,500px)] rounded-md"
+                showBrandLogo
+                showFullscreenButton
+              />
+            </div>
+          ) : (
+            <p className="p-8 text-center text-sm text-muted-foreground">No camera selected.</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function DetailRow({ label, value }: { label: string; value: string | undefined }) {
@@ -72,10 +186,12 @@ function GoodsInformationBlock({
   memoId,
   items,
   highlightQr,
+  onViewCamera,
 }: {
   memoId: string
   items: GoodsLineItem[]
   highlightQr?: string
+  onViewCamera?: (item: GoodsLineItem) => void
 }) {
   const highlight = highlightQr?.trim().toLowerCase() || ""
 
@@ -104,6 +220,7 @@ function GoodsInformationBlock({
               highlight &&
               ((item.qrCodeNumber || "").toLowerCase() === highlight ||
                 item.id.toLowerCase() === highlight)
+            const camId = locatedCameraId(item)
             return (
               <div
                 key={item.id}
@@ -127,9 +244,18 @@ function GoodsInformationBlock({
                   <div><span className="text-muted-foreground">Condition: </span>{item.condition || "—"}</div>
                   <div><span className="text-muted-foreground">Assessable Value (PKR): </span>{item.assessableValuePkr?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">Perishable: </span>{item.perishable ? "Yes" : "No"}</div>
+                  <div><span className="text-muted-foreground">Located Camera: </span>{item.locatedCamera?.name?.trim() || cameraLabel(item.locatedCamera, item.locatedCameraId)}</div>
+                  <div><span className="text-muted-foreground">Zone: </span>{item.locatedCamera?.zone?.trim() || "—"}</div>
+                  <div><span className="text-muted-foreground">Detected At: </span>{item.detectedAt?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">ID/Chassis: </span><span className="break-words">{item.identificationRef || "—"}</span></div>
                   <div><span className="text-muted-foreground">Notes: </span><GoodsLineText className="inline-block align-top max-h-20">{item.itemNotes || "—"}</GoodsLineText></div>
                 </div>
+                {camId != null && onViewCamera ? (
+                  <Button size="sm" className="mt-3 gap-1.5" onClick={() => onViewCamera(item)}>
+                    <Camera className="h-3.5 w-3.5" />
+                    View Camera
+                  </Button>
+                ) : null}
                 <div className="mt-3">
                   <p className="mb-1 text-xs text-muted-foreground">Images</p>
                   {item.images && item.images.length > 0 ? (
@@ -153,21 +279,22 @@ function GoodsInformationBlock({
         </div>
 
         <div className="hidden overflow-x-auto sm:block">
-          <ScrollArea className="w-full">
-            <Table className="table-fixed w-full">
+          <Table className="w-max min-w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead> QR Code</TableHead>
-                  <TableHead className="w-[22%]">Description</TableHead>
-                  <TableHead>PCT Code</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Condition</TableHead>
-                  <TableHead>Assessable Value (PKR)</TableHead>
-                  <TableHead>Perishable</TableHead>
-                  <TableHead>ID / Chassis</TableHead>
-                  <TableHead className="w-[16%]">Item Notes</TableHead>
-                  <TableHead>Images</TableHead>
+                  <TableHead className="min-w-[88px]">QR Code</TableHead>
+                  <TableHead className="min-w-[140px]">Description</TableHead>
+                  <TableHead className="min-w-[150px]">Located Camera</TableHead>
+                  <TableHead className="min-w-[96px]">PCT Code</TableHead>
+                  <TableHead className="min-w-[56px]">Qty</TableHead>
+                  <TableHead className="min-w-[56px]">Unit</TableHead>
+                  <TableHead className="min-w-[88px]">Condition</TableHead>
+                  <TableHead className="min-w-[140px]">Assessable Value (PKR)</TableHead>
+                  <TableHead className="min-w-[88px]">Perishable</TableHead>
+                  <TableHead className="min-w-[110px]">ID / Chassis</TableHead>
+                  <TableHead className="min-w-[120px]">Item Notes</TableHead>
+                  <TableHead className="min-w-[80px]">Images</TableHead>
+                  <TableHead className="min-w-[120px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -176,6 +303,7 @@ function GoodsInformationBlock({
                     highlight &&
                     ((item.qrCodeNumber || "").toLowerCase() === highlight ||
                       item.id.toLowerCase() === highlight)
+                  const camId = locatedCameraId(item)
                   return (
                     <TableRow
                       key={item.id}
@@ -196,14 +324,29 @@ function GoodsInformationBlock({
                       <TableCell className={`${goodsLineCellClass} font-medium`}>
                         <GoodsLineText>{item.description || "—"}</GoodsLineText>
                       </TableCell>
-                      <TableCell className="font-mono break-words">{item.pctCode?.trim() || "—"}</TableCell>
+                      <TableCell className="text-xs whitespace-normal">
+                        <div className="space-y-0.5">
+                          <p className="font-medium">
+                            {item.locatedCamera?.name?.trim() ||
+                              item.locatedCamera?.code ||
+                              (item.locatedCameraId != null ? `Camera #${item.locatedCameraId}` : "—")}
+                          </p>
+                          <p className="text-muted-foreground">
+                            Zone: {item.locatedCamera?.zone?.trim() || "—"}
+                          </p>
+                          {item.detectedAt ? (
+                            <p className="text-muted-foreground">{item.detectedAt}</p>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono break-words whitespace-normal">{item.pctCode?.trim() || "—"}</TableCell>
                       <TableCell>{item.quantity || "—"}</TableCell>
                       <TableCell>{item.unit || "—"}</TableCell>
                       <TableCell>{item.condition || "—"}</TableCell>
-                      <TableCell className="break-words min-w-[80px]">{item.assessableValuePkr?.trim() || "—"}</TableCell>
+                      <TableCell className="break-words whitespace-normal">{item.assessableValuePkr?.trim() || "—"}</TableCell>
                       <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                      <TableCell className="break-words min-w-[100px]">{item.identificationRef || "—"}</TableCell>
-                      <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                      <TableCell className="break-words whitespace-normal">{item.identificationRef || "—"}</TableCell>
+                      <TableCell className={`${goodsLineCellClass} text-muted-foreground whitespace-normal`}>
                         <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                       </TableCell>
                       <TableCell>
@@ -218,8 +361,29 @@ function GoodsInformationBlock({
                               />
                             ))}
                           </div>
+                        ) : item.evidenceUrl ? (
+                          <img
+                            src={item.evidenceUrl}
+                            alt="Evidence"
+                            className="h-8 w-8 sm:h-10 sm:w-10 object-cover rounded border"
+                          />
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {camId != null && onViewCamera ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1 whitespace-nowrap"
+                            onClick={() => onViewCamera(item)}
+                          >
+                            <Camera className="h-3.5 w-3.5" />
+                            View Camera
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -227,7 +391,6 @@ function GoodsInformationBlock({
                 })}
               </TableBody>
             </Table>
-          </ScrollArea>
         </div>
       </CardContent>
     </Card>
@@ -241,12 +404,25 @@ export default function DetentionMemoDetailPage() {
   const listSection = getDetentionMemoSectionCrumb(pathname)
   const [searchParams] = useSearchParams()
   const [row, setRow] = useState<DetentionMemoApiRecord | null | undefined>(undefined)
+  const [viewCamera, setViewCamera] = useState<ViewCameraTarget | null>(null)
   const printMode = searchParams.get("print")
   const autoPrint = searchParams.get("autoprint") === "1"
   const autoSavePdf = searchParams.get("savepdf") === "1"
   const isPrintMode = printMode === "qr" || printMode === "full"
   const goodsQrFilter = searchParams.get("goodsQr")?.trim() || ""
   const goodsOnlyView = searchParams.get("view") === "goods" && !!goodsQrFilter
+
+  const openViewCamera = (item: GoodsLineItem) => {
+    const camId = locatedCameraId(item)
+    if (camId == null) return
+    setViewCamera({
+      cameraId: camId,
+      label: cameraLabel(item.locatedCamera, camId),
+      itemDescription: item.description?.trim() || undefined,
+      detectedAt: item.detectedAt?.trim() || undefined,
+      evidenceUrl: item.evidenceUrl?.trim() || undefined,
+    })
+  }
 
   useEffect(() => {
     if (!id) {
@@ -412,7 +588,9 @@ export default function DetentionMemoDetailPage() {
             memoId={row.id}
             items={visibleGoods}
             highlightQr={goodsQrFilter}
+            onViewCamera={openViewCamera}
           />
+          <ViewLocatedCameraDialog target={viewCamera} onClose={() => setViewCamera(null)} />
         </div>
       </ModulePageLayout>
     )
@@ -666,7 +844,11 @@ export default function DetentionMemoDetailPage() {
             </Card>
 
             {row.goodsItems && row.goodsItems.length > 0 && (
-              <GoodsInformationBlock memoId={row.id} items={row.goodsItems} />
+              <GoodsInformationBlock
+                memoId={row.id}
+                items={row.goodsItems}
+                onViewCamera={openViewCamera}
+              />
             )}
 
             <WmsFlowOverviewPanel detentionMemoId={row.id} caseNo={row.caseNo} />
@@ -677,6 +859,8 @@ export default function DetentionMemoDetailPage() {
               title="Destruction history"
               description="All warehouse destruction sessions for this detention — view detailed reports with camera evidence and inventory deductions."
             />
+
+            <ViewLocatedCameraDialog target={viewCamera} onClose={() => setViewCamera(null)} />
 
             <Card>
               <CardHeader><CardTitle className="text-base">Additional Information</CardTitle></CardHeader>
