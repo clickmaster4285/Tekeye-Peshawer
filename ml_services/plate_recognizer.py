@@ -58,6 +58,16 @@ def _env_int(name: str, default: int) -> int:
 
 def _paddle_device(ml_device: str) -> str:
     """Map ML_DEVICE (0 / cuda:0 / cpu) to PaddleOCR device (gpu:0 / cpu)."""
+    try:
+        import paddle
+
+        if not paddle.is_compiled_with_cuda():
+            return "cpu"
+    except Exception:
+        pass
+    env = os.getenv("ML_PADDLE_DEVICE", "").strip().lower()
+    if env in {"cpu", "-1"}:
+        return "cpu"
     raw = (ml_device or "0").strip().lower()
     if raw in {"cpu", "-1"}:
         return "cpu"
@@ -639,6 +649,18 @@ class PlateEngine:
             print(f"[plate] Failed to load YOLO: {exc}")
             return
 
+        paddle_device = _paddle_device(self.device)
+        ocr_version = os.getenv("ML_PADDLE_OCR_VERSION", DEFAULT_OCR_VERSION).strip() or DEFAULT_OCR_VERSION
+        det_model = os.getenv("ML_PADDLE_DET_MODEL", DEFAULT_DET_MODEL).strip() or DEFAULT_DET_MODEL
+        rec_model = os.getenv("ML_PADDLE_REC_MODEL", DEFAULT_REC_MODEL).strip() or DEFAULT_REC_MODEL
+        kwargs: dict[str, Any] = {
+            "device": paddle_device,
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_detection_model_name": det_model,
+            "text_recognition_model_name": rec_model,
+        }
         try:
             import torch  # noqa: F401 — Windows: load CUDA DLLs before paddlepaddle-gpu
 
@@ -648,30 +670,37 @@ class PlateEngine:
 
             _patch_paddlex_opencv_extra()
 
-            paddle_device = _paddle_device(self.device)
-            ocr_version = os.getenv("ML_PADDLE_OCR_VERSION", DEFAULT_OCR_VERSION).strip() or DEFAULT_OCR_VERSION
-            det_model = os.getenv("ML_PADDLE_DET_MODEL", DEFAULT_DET_MODEL).strip() or DEFAULT_DET_MODEL
-            rec_model = os.getenv("ML_PADDLE_REC_MODEL", DEFAULT_REC_MODEL).strip() or DEFAULT_REC_MODEL
             self.ocr_backend = ocr_version
             self.ocr_device = paddle_device
-            kwargs: dict[str, Any] = {
-                "device": paddle_device,
-                "use_doc_orientation_classify": False,
-                "use_doc_unwarping": False,
-                "use_textline_orientation": False,
-                "text_detection_model_name": det_model,
-                "text_recognition_model_name": rec_model,
-            }
             self.reader = PaddleOCR(**kwargs)
             print(
                 f"[plate] PaddleOCR {ocr_version} ready "
                 f"(device={paddle_device}, det={det_model}, rec={rec_model})"
             )
         except Exception as exc:
-            print(f"[plate] Failed to load PaddleOCR PP-OCRv5: {exc}")
-            return
+            print(f"[plate] Failed to load PaddleOCR PP-OCRv5 on {paddle_device}: {exc}")
+            self.reader = None
+            if paddle_device != "cpu":
+                try:
+                    from paddleocr import PaddleOCR
 
-        self.available = True
+                    kwargs["device"] = "cpu"
+                    self.reader = PaddleOCR(**kwargs)
+                    self.ocr_device = "cpu"
+                    print(
+                        f"[plate] PaddleOCR {ocr_version} ready "
+                        f"(device=cpu fallback, det={det_model}, rec={rec_model})"
+                    )
+                except Exception as exc2:
+                    print(f"[plate] CPU PaddleOCR also failed: {exc2}")
+                    self.reader = None
+
+        # YOLO boxes still run without OCR; overlay shows PLATE until a read succeeds.
+        self.available = self.detector is not None
+        if not self.available:
+            return
+        if self.reader is None:
+            print("[plate] OCR unavailable — plate boxes will still be published without text")
         print(f"[plate] Media dir: {self._media_dir}")
         if self.osd_filter:
             print(f"[plate] OSD band skip enabled (top={self.osd_top:.0%}) — clock overlay will not be saved")
@@ -992,7 +1021,7 @@ class PlateEngine:
         vehicle_boxes: list[list[float]] | None = None,
     ) -> list[dict[str, Any]]:
         """Run plate YOLO + OCR on a BGR frame. Optionally save accepted plates to media."""
-        if not self.available or self.detector is None or frame is None or frame.size == 0:
+        if self.detector is None or frame is None or frame.size == 0:
             return []
 
         height, width = frame.shape[:2]
@@ -1053,17 +1082,19 @@ class PlateEngine:
                 if looks_like_datetime_ocr(plate_text) or looks_like_camera_overlay(
                     plate_text, camera_key=camera_key
                 ):
-                    continue
-                if not is_valid_plate(plate_text, self.min_plate_len, camera_key=camera_key):
-                    continue
+                    plate_text, ocr_conf = "", 0.0
+                valid_text = bool(plate_text) and is_valid_plate(
+                    plate_text, self.min_plate_len, camera_key=camera_key
+                )
+                if plate_text and not valid_text:
+                    plate_text, ocr_conf = "", 0.0
 
                 accepted = (
-                    ocr_conf >= self.min_ocr_conf
+                    valid_text
+                    and ocr_conf >= self.min_ocr_conf
                     and det_conf >= self.min_det_conf
                     and near_vehicle
                 )
-                if not accepted:
-                    continue
 
                 saved: dict[str, str] | None = None
                 # Only persist accepted reads — no OSD / non-vehicle bypass
@@ -1110,4 +1141,8 @@ def get_plate_engine() -> PlateEngine:
         with _engine_lock:
             if _engine is None:
                 _engine = PlateEngine()
+    elif _engine.detector is None:
+        with _engine_lock:
+            if _engine.detector is None:
+                _engine._load()
     return _engine

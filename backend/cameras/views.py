@@ -270,6 +270,11 @@ class CameraViewSet(viewsets.ModelViewSet):
             "pickup-van",
             "pickup_van",
             "pickupvan",
+            "license_plate",
+            "license plate",
+            "number_plate",
+            "number plate",
+            "plate",
         )
         if vehicle_only:
             class_q = Q()

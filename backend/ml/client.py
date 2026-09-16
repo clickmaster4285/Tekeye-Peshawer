@@ -33,32 +33,33 @@ def is_loopback_ml_url(url: str) -> bool:
 
 
 def _allow_loopback_ml() -> bool:
-    """Local-dev only. Production Django hosts must not talk to 127.0.0.1:8100."""
-    return str(getattr(settings, "ML_ALLOW_LOOPBACK", "") or os.getenv("ML_ALLOW_LOOPBACK", "")).strip().lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    """Allow 127.0.0.1 ML when explicitly enabled or when running Django DEBUG locally."""
+    flag = str(
+        getattr(settings, "ML_ALLOW_LOOPBACK", "") or os.getenv("ML_ALLOW_LOOPBACK", "")
+    ).strip().lower()
+    if flag in ("true", "1", "yes"):
+        return True
+    return bool(getattr(settings, "DEBUG", False))
 
 
 def known_ml_base_urls() -> list[str]:
     """
     Every ML node the backend should control:
-      - ML_SERVICE_URL (optional hub — must be a reachable remote if set)
-      - active RemoteServer rows in ML mode (ops camera distribution)
+      - ML_SERVICE_URL (optional hub)
+      - active RemoteServer ML URLs (always included — operator-configured, even loopback)
 
-    Loopback URLs (127.0.0.1 / localhost) are skipped unless ML_ALLOW_LOOPBACK=true,
-    because ml_services runs on separate hosts from Django in production.
+    Implicit loopback ML_SERVICE_URL is skipped in production unless ML_ALLOW_LOOPBACK
+    or DEBUG is set. Explicit Central Ops servers are never skipped.
     """
     urls: list[str] = []
     seen: set[str] = set()
     allow_loopback = _allow_loopback_ml()
 
-    def _add(raw: str) -> None:
+    def _add(raw: str, *, allow_loopback_url: bool) -> None:
         url = (raw or "").strip().rstrip("/")
         if not url or url in seen:
             return
-        if is_loopback_ml_url(url) and not allow_loopback:
+        if is_loopback_ml_url(url) and not allow_loopback_url:
             logger.warning(
                 "Skipping loopback ML URL %s (ml_services is remote; "
                 "fix Ops RemoteServer ml_base_url or set ML_ALLOW_LOOPBACK=true for local dev)",
@@ -68,14 +69,12 @@ def known_ml_base_urls() -> list[str]:
         seen.add(url)
         urls.append(url)
 
-    _add(getattr(settings, "ML_SERVICE_URL", "") or "")
+    _add(getattr(settings, "ML_SERVICE_URL", "") or "", allow_loopback_url=allow_loopback)
     try:
         from ops_central.models import RemoteServer
 
         for server in RemoteServer.objects.filter(is_active=True):
-            if hasattr(server, "is_ml_mode") and not server.is_ml_mode():
-                continue
-            _add(server.resolved_ml_base_url() or "")
+            _add(server.resolved_ml_base_url() or "", allow_loopback_url=True)
     except Exception:
         logger.debug("Could not enumerate RemoteServer ML URLs", exc_info=True)
     return urls
@@ -666,6 +665,35 @@ def ml_unregister_camera_at(
     if res.status_code != 200:
         raise MLServiceError(f"Failed to unregister camera {key} at {base_url}.", res.status_code)
     return res.json()
+
+
+def ml_unregister_camera_everywhere(
+    stream_key: str,
+    extra_urls: list[str] | None = None,
+    *,
+    timeout: float | tuple[float, float] = (2.0, 8.0),
+) -> None:
+    """Drop a camera from every known ML node (assigned + Central Ops + hub URL)."""
+    key = (stream_key or "").strip()
+    if not key:
+        return
+    urls: list[str] = []
+    seen: set[str] = set()
+    for raw in list(known_ml_base_urls()) + list(extra_urls or []):
+        url = (raw or "").strip().rstrip("/")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    for base in urls:
+        try:
+            ml_unregister_camera_at(base, key, timeout=timeout)
+        except Exception:
+            logger.debug("[ml] unregister %s at %s failed", key, base, exc_info=True)
+        try:
+            requests.delete(f"{base}/journey/cam/{key}", timeout=5)
+        except Exception:
+            logger.debug("[ml] journey unregister %s at %s failed", key, base, exc_info=True)
 
 
 def ml_register_cameras_bulk(entries: list[dict[str, str]]) -> dict[str, Any]:

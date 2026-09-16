@@ -789,7 +789,7 @@ def filter_enrolled_staff_detections(detections: list[dict[str, Any]]) -> list[d
             kept.append(det)
             continue
         cls = str(det.get("class_name") or det.get("label") or "").strip().lower()
-        if cls in ("license_plate", "license plate", "number_plate", "number plate"):
+        if cls in _PLATE_NAMES or cls in _WEAPON_NAMES:
             kept.append(det)
             continue
         if cls not in ("person", "face"):
@@ -824,6 +824,7 @@ _WEAPON_NAMES: frozenset[str] = frozenset(
         "weapon",
         "gun",
         "pistol",
+        "handgun",
         "rifle",
         "firearm",
         "knife",
@@ -831,6 +832,8 @@ _WEAPON_NAMES: frozenset[str] = frozenset(
         "sword",
         "machete",
         "heavy-weapon",
+        "heavy_weapon",
+        "heavyweapon",
     }
 )
 _PLATE_NAMES: frozenset[str] = frozenset(
@@ -840,6 +843,7 @@ _PLATE_NAMES: frozenset[str] = frozenset(
         "number_plate",
         "number plate",
         "plate",
+        "licenseplate",
     }
 )
 
@@ -1319,22 +1323,27 @@ class LiveStreamManager:
                 custom_weights = resolve_custom_weights_path()
                 smoke_weights = resolve_smoke_weights_path()
                 weapon_weights = resolve_weapon_weights_path()
-                if not any([coco_weights, custom_weights, smoke_weights, weapon_weights]):
-                    print("[live] No YOLO weights — live annotated streams disabled.")
-                    return
+                if any([coco_weights, custom_weights, smoke_weights, weapon_weights]):
+                    self._coco_model = get_yolo_coco_model()
+                    self._custom_model = get_yolo_custom_model()
+                    self._smoke_model = get_yolo_smoke_model()
+                    self._weapon_model = get_yolo_weapon_model()
+                else:
+                    print("[live] No YOLO weights — annotated AI overlays disabled; raw RTSP still runs.")
 
-                self._coco_model = get_yolo_coco_model()
-                self._custom_model = get_yolo_custom_model()
-                self._smoke_model = get_yolo_smoke_model()
-                self._weapon_model = get_yolo_weapon_model()
+                has_models = any(
+                    [
+                        self._coco_model is not None,
+                        self._custom_model is not None,
+                        self._smoke_model is not None,
+                        self._weapon_model is not None,
+                    ]
+                )
                 if (
-                    self._coco_model is None
-                    and self._custom_model is None
-                    and self._smoke_model is None
-                    and self._weapon_model is None
+                    any([coco_weights, custom_weights, smoke_weights, weapon_weights])
+                    and not has_models
                 ):
-                    print("[live] YOLO models unavailable.")
-                    return
+                    print("[live] YOLO models unavailable — serving raw RTSP only.")
 
                 self._device = resolve_ml_device()
                 cuda = get_cuda_status()
@@ -1349,15 +1358,19 @@ class LiveStreamManager:
                 plate_ok = bool(self._plate_engine and self._plate_engine.available)
                 self._running = True
                 self._infer_futures = []
-                self._infer_executor = ThreadPoolExecutor(
-                    max_workers=self._infer_workers,
-                    thread_name_prefix="live-infer",
-                )
-                for i in range(self._infer_workers):
-                    fut = self._infer_executor.submit(self._infer_shard_loop, i)
-                    self._infer_futures.append(fut)
                 self._infer_threads = []
                 self._infer_thread = None
+                if has_models:
+                    self._infer_executor = ThreadPoolExecutor(
+                        max_workers=self._infer_workers,
+                        thread_name_prefix="live-infer",
+                    )
+                    for i in range(self._infer_workers):
+                        fut = self._infer_executor.submit(self._infer_shard_loop, i)
+                        self._infer_futures.append(fut)
+                else:
+                    self._infer_executor = None
+                    print("[live] Infer workers skipped until YOLO weights are present.")
                 self._render_thread = threading.Thread(target=self._render_loop, daemon=True, name="live-render")
                 self._render_thread.start()
                 max_label = (
@@ -1366,10 +1379,10 @@ class LiveStreamManager:
                     else f"{self._max_width}x{self._max_height}"
                 )
                 print(
-                    "[live] Started partitioned infer workers "
+                    "[live] Started live ingest "
                     f"(device={self._device}, gpu={cuda.get('cuda_device_name') or 'n/a'}, "
                     f"fps={self._stream_fps}, infer_interval={self._infer_interval}s, "
-                    f"infer_workers={self._infer_workers} "
+                    f"infer_workers={self._infer_workers if has_models else 0} "
                     f"[Worker-i → contiguous camera shard], "
                     f"conf={self._conf}, imgsz={self._imgsz}, display={max_label}, "
                     f"osd_enrolled_staff_only={self._osd_enrolled_staff_only}, "
@@ -1436,7 +1449,9 @@ class LiveStreamManager:
             "running": self._running,
             "inference_device": self._device,
             "plate_only_mode": False,
-            "plate_model_loaded": bool(self._plate_engine and self._plate_engine.available),
+            "plate_model_loaded": bool(
+                self._plate_engine is not None and self._plate_engine.detector is not None
+            ),
             "triple_model_mode": (
                 self._coco_model is not None
                 and self._custom_model is not None
@@ -1501,7 +1516,7 @@ class LiveStreamManager:
         boundary = b"--frame\r\n"
         last: bytes | None = None
         while True:
-            frame = self.get_latest_jpeg(key)
+            frame = self.get_latest_jpeg(key) or self.get_raw_jpeg_bytes(key)
             if frame and frame is not last:
                 last = frame
                 yield boundary
@@ -1553,7 +1568,13 @@ class LiveStreamManager:
         return small, w / float(dw), h / float(dh)
 
     def _want_native_frame(self, camera_key: str) -> bool:
-        """Keep native camera resolution (4K) when RTSP scaling is disabled."""
+        """Keep native 4K only when scaling is off and ANPR needs it.
+
+        This workstation (many cameras + GTX 1080): set ML_LIVE_FORCE_SCALE=true
+        so ANPR purposes still use 1080p live ingest.
+        """
+        if os.getenv("ML_LIVE_FORCE_SCALE", "").strip().lower() in ("1", "true", "yes"):
+            return False
         w, h = _rtsp_scale_size()
         if w <= 0 and h <= 0:
             return True
@@ -1601,7 +1622,8 @@ class LiveStreamManager:
         return out
 
     def _should_run_plates(self, camera_key: str) -> bool:
-        if self._plate_engine is None or not self._plate_engine.available:
+        engine = self._plate_engine
+        if engine is None or engine.detector is None:
             return False
         if self._plate_on_all:
             return True

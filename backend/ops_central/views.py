@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from users.permissions import is_ops_viewer
 
 from .cache import (
+    bind_ml_cameras_to_django_registry as _bind_ml_cameras_to_django_registry,
     parse_camera_id as _parse_camera_id,
     prune_server_camera_cache as _prune_server_camera_cache,
     resolve_stream_key as _resolve_stream_key,
@@ -252,8 +253,11 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
         if not result.get("ok"):
             return Response(result, status=status.HTTP_502_BAD_GATEWAY)
 
-        cameras = _attach_proxy_urls(server.pk, result.get("cameras") or [])
-        server.cached_cameras = result.get("cameras") or []
+        bound = result.get("cameras") or []
+        if server.is_ml_mode():
+            bound = _bind_ml_cameras_to_django_registry(server, bound)
+        cameras = _attach_proxy_urls(server.pk, bound)
+        server.cached_cameras = bound
         server.cameras_fetched_at = timezone.now()
         server.save(update_fields=["cached_cameras", "cameras_fetched_at", "updated_at"])
         return Response(
@@ -504,11 +508,6 @@ class AllCitiesStreamsAPIView(APIView):
 
                 if result.get("ok"):
                     raw_cameras = list(result.get("cameras") or [])
-                    server.cached_cameras = raw_cameras
-                    server.cameras_fetched_at = timezone.now()
-                    server.save(
-                        update_fields=["cached_cameras", "cameras_fetched_at", "updated_at"]
-                    )
                     entry["ok"] = True
                     entry["source"] = result.get("source") or "live"
                 else:
@@ -517,6 +516,15 @@ class AllCitiesStreamsAPIView(APIView):
                         raw_cameras = list(server.cached_cameras or [])
                         entry["source"] = "cache_fallback"
                         entry["ok"] = True
+
+            if server.is_ml_mode():
+                raw_cameras = _bind_ml_cameras_to_django_registry(server, raw_cameras)
+            if not use_cache and entry.get("ok"):
+                server.cached_cameras = raw_cameras
+                server.cameras_fetched_at = timezone.now()
+                server.save(
+                    update_fields=["cached_cameras", "cameras_fetched_at", "updated_at"]
+                )
 
             cameras = _attach_proxy_urls(server.pk, raw_cameras)
             for cam in cameras:

@@ -53,6 +53,11 @@ const VEHICLE_CLASSES = new Set([
   "pickup-van",
   "pickup_van",
   "pickupvan",
+  "license_plate",
+  "license plate",
+  "number_plate",
+  "number plate",
+  "plate",
 ])
 
 type AppliedFilters = {

@@ -305,7 +305,7 @@ def register_cameras_bulk(
         entries.append(entry)
     result = _live.register_cameras_bulk(entries, replace=bool(replace))
     if not _live.ensure_started():
-        print("[live] Warning: camera registry updated but infer loops did not start")
+        print("[live] Warning: live ingest did not start after register")
     return result
 
 
@@ -328,7 +328,7 @@ def live_detections(
     key = camera_key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="camera_key required")
-    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes)
+    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes, require_engine=False)
     snapshot = _live.get_detection_snapshot(key)
     return {
         "ip": key,
@@ -422,7 +422,7 @@ def live_mjpeg(
     key = camera_key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="camera_key required")
-    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes)
+    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes, require_engine=False)
     return StreamingResponse(
         _live.iter_mjpeg(key),
         media_type="multipart/x-mixed-replace; boundary=frame",

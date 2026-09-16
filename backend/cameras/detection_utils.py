@@ -40,6 +40,7 @@ _WEAPON_NAMES = frozenset(
         "weapon",
         "gun",
         "pistol",
+        "handgun",
         "rifle",
         "firearm",
         "knife",
@@ -47,6 +48,8 @@ _WEAPON_NAMES = frozenset(
         "sword",
         "machete",
         "heavy-weapon",
+        "heavy_weapon",
+        "heavyweapon",
     }
 )
 # Must match ml_services/inference_engine.py ALLOWED_COCO_CLASS_NAMES (yolo26l allowlist).

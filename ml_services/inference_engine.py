@@ -126,6 +126,7 @@ HIGH_PRIORITY_CLASS_NAMES = frozenset(
         "weapon",
         "gun",
         "pistol",
+        "handgun",
         "rifle",
         "firearm",
         "sword",
@@ -276,7 +277,12 @@ def _resolve_weights(value: str) -> str | None:
 def resolve_coco_weights_path() -> str | None:
     if YOLO_WEIGHTS_ENV:
         return _resolve_weights(YOLO_WEIGHTS_ENV)
-    return _resolve_path(YOLO_WEIGHTS_COCO)
+    local = _resolve_path(YOLO_WEIGHTS_COCO)
+    if local:
+        return local
+    # Named Ultralytics file — auto-downloaded on first YOLO() load if missing.
+    fallback = (os.getenv("ML_YOLO_COCO_FALLBACK") or "yolov8n.pt").strip()
+    return _resolve_weights(fallback) if fallback else None
 
 
 def resolve_custom_weights_path() -> str | None:
