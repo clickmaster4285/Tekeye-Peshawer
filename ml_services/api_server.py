@@ -328,6 +328,20 @@ def live_detections(
     key = camera_key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="camera_key required")
+    # Warm-up: return empty 200 instead of 503 so clients can keep polling quietly.
+    if not _live.is_ready():
+        return {
+            "ip": key,
+            "key": key,
+            "detections": [],
+            "purposes": [],
+            "frame_width": 0,
+            "frame_height": 0,
+            "display_width": 0,
+            "display_height": 0,
+            "has_evidence": False,
+            "count": 0,
+        }
     _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes)
     snapshot = _live.get_detection_snapshot(key)
     return {
@@ -339,6 +353,7 @@ def live_detections(
         "frame_height": snapshot.get("frame_height") or 0,
         "display_width": snapshot.get("display_width") or 0,
         "display_height": snapshot.get("display_height") or 0,
+        "has_evidence": bool(snapshot.get("has_evidence")),
         "count": len(snapshot.get("detections") or []),
     }
 
@@ -383,6 +398,31 @@ def live_jpeg_raw(
     frame = _live.wait_for_raw_jpeg(key, timeout_sec=2.0)
     if not frame:
         raise HTTPException(status_code=503, detail="No frame yet")
+    return Response(
+        content=frame,
+        media_type="image/jpeg",
+        headers=_mjpeg_headers(),
+    )
+
+
+@app.get("/live/cam/{camera_key}/jpeg/evidence")
+def live_jpeg_evidence(
+    camera_key: str,
+    rtsp_url: str | None = None,
+    purpose: str = "",
+    purposes: str = "",
+):
+    """
+    Raw JPEG of the SAME frame YOLO last ran on (evidence buffer).
+    Use this for detection snapshots — do not re-open RTSP in Django.
+    """
+    key = camera_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="camera_key required")
+    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes, require_engine=False)
+    frame = _live.get_evidence_jpeg(key)
+    if not frame:
+        raise HTTPException(status_code=503, detail="No evidence frame yet")
     return Response(
         content=frame,
         media_type="image/jpeg",

@@ -171,6 +171,74 @@ def _max_clip_queue() -> int:
 _ffmpeg_spawn_lock = threading.Lock()
 _last_ffmpeg_spawn = 0.0
 
+# Same-frame evidence JPEG from ML (camera_id -> (monotonic_ts, jpeg_bytes))
+_evidence_guard = threading.Lock()
+_pending_evidence: dict[int, tuple[float, bytes]] = {}
+_EVIDENCE_TTL_SEC = 20.0
+
+
+def stash_evidence_jpeg(camera_id: int, jpeg_bytes: bytes) -> None:
+    """Cache ML same-frame evidence for pending detection snapshot jobs."""
+    if not jpeg_bytes or camera_id is None:
+        return
+    with _evidence_guard:
+        _pending_evidence[int(camera_id)] = (time.monotonic(), jpeg_bytes)
+
+
+def _take_stashed_evidence(camera_id: int) -> bytes | None:
+    with _evidence_guard:
+        item = _pending_evidence.get(int(camera_id))
+        if not item:
+            return None
+        ts, data = item
+        if time.monotonic() - ts > _EVIDENCE_TTL_SEC:
+            _pending_evidence.pop(int(camera_id), None)
+            return None
+        return data
+
+
+def _ml_evidence_jpeg_url(camera) -> str | None:
+    try:
+        from ml.client import MLServiceError, ml_live_jpeg_evidence_url_for_camera, ml_service_enabled
+    except ImportError:
+        return None
+    if not ml_service_enabled() or not getattr(camera, "ml_server_id", None):
+        return None
+    try:
+        return ml_live_jpeg_evidence_url_for_camera(camera)
+    except MLServiceError:
+        return None
+
+
+def _decode_jpeg_bytes(data: bytes):
+    import cv2
+    import numpy as np
+
+    if not data:
+        return None
+    arr = np.frombuffer(data, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    return frame
+
+
+def _read_ml_evidence_frame(camera) -> object | None:
+    """Fetch the YOLO infer-frame JPEG (same frame as current detections)."""
+    stashed = _take_stashed_evidence(getattr(camera, "pk", 0) or 0)
+    if stashed:
+        frame = _decode_jpeg_bytes(stashed)
+        if frame is not None:
+            return frame
+    url = _ml_evidence_jpeg_url(camera)
+    if not url:
+        return None
+    try:
+        resp = requests.get(url, timeout=(2.0, 4.0))
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200 or not resp.content:
+        return None
+    return _decode_jpeg_bytes(resp.content)
+
 
 def _ffmpeg_spawn_interval_sec() -> float:
     raw = os.getenv("FFMPEG_SNAPSHOT_MIN_INTERVAL_SEC", "2")
@@ -708,8 +776,10 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
     stream_url = camera.effective_stream_url()
     _release_db()
 
-    frame = None
-    if stream_url:
+    # Prefer ML same-frame evidence (YOLO frame) — avoids stale bbox on a later RTSP grab.
+    frame = _read_ml_evidence_frame(camera)
+
+    if frame is None and stream_url:
         frame = _read_rtsp_snapshot(stream_url)
 
     if frame is None and not _ml_on_cooldown(camera_id):

@@ -1034,6 +1034,9 @@ class LiveStreamManager:
         self._stream_fps = max(5, min(_env_int("ML_LIVE_STREAM_FPS", 12), 30))
         self._frame_interval = 1.0 / self._stream_fps
         self._detections: dict[str, list[dict[str, Any]]] = {}
+        # Same-frame evidence JPEG (raw infer frame) keyed with detections — for Django snapshots
+        self._evidence_jpeg: dict[str, bytes] = {}
+        self._evidence_wh: dict[str, tuple[int, int]] = {}
         self._det_lock = threading.Lock()
         self._start_lock = threading.Lock()
 
@@ -1100,6 +1103,8 @@ class LiveStreamManager:
     def _close_session(self, key: str) -> None:
         session = self._sessions.pop(key, None)
         self._detections.pop(key, None)
+        self._evidence_jpeg.pop(key, None)
+        self._evidence_wh.pop(key, None)
         self._plate_frame_counters.pop(key, None)
         self._last_plate_dets.pop(key, None)
         if self._plate_engine is not None:
@@ -1496,24 +1501,48 @@ class LiveStreamManager:
                 "frame_height": 0,
                 "display_width": 0,
                 "display_height": 0,
+                "has_evidence": False,
             }
         with self._det_lock:
             detections = list(self._detections.get(ip, []))
-        raw = session.stream.get_frame()
-        if raw is not None:
-            infer_h, infer_w = raw.shape[:2]
-            limited = self._limit_size(raw)
-            display_h, display_w = limited.shape[:2]
+            evidence_wh = self._evidence_wh.get(ip)
+            has_evidence = bool(self._evidence_jpeg.get(ip))
+        # Prefer dimensions of the frame the detections were computed on
+        if evidence_wh and evidence_wh[0] > 0 and evidence_wh[1] > 0:
+            infer_w, infer_h = int(evidence_wh[0]), int(evidence_wh[1])
+            limited_h, limited_w = infer_h, infer_w
+            if self._max_width > 0 or self._max_height > 0:
+                # display size matches _limit_size of that evidence frame
+                max_w = self._max_width if self._max_width > 0 else infer_w
+                max_h = self._max_height if self._max_height > 0 else infer_h
+                if infer_w > max_w or infer_h > max_h:
+                    scale = min(max_w / infer_w, max_h / infer_h)
+                    limited_w = int(infer_w * scale)
+                    limited_h = int(infer_h * scale)
+            display_w, display_h = limited_w, limited_h
         else:
-            infer_w, infer_h = 0, 0
-            display_w, display_h = 0, 0
+            raw = session.stream.get_frame()
+            if raw is not None:
+                infer_h, infer_w = raw.shape[:2]
+                limited = self._limit_size(raw)
+                display_h, display_w = limited.shape[:2]
+            else:
+                infer_w, infer_h = 0, 0
+                display_w, display_h = 0, 0
         return {
             "detections": detections,
             "frame_width": int(infer_w),
             "frame_height": int(infer_h),
             "display_width": int(display_w),
             "display_height": int(display_h),
+            "has_evidence": has_evidence,
         }
+
+    def get_evidence_jpeg(self, ip: str) -> bytes | None:
+        """Raw infer-frame JPEG stored with the current detection buffer (same frame as YOLO)."""
+        with self._det_lock:
+            data = self._evidence_jpeg.get(ip)
+            return data if data else None
 
     def iter_mjpeg(self, key: str) -> Iterator[bytes]:
         boundary = b"--frame\r\n"
@@ -1598,6 +1627,8 @@ class LiveStreamManager:
         stream.thread.start()
         self._sessions[key] = _CameraSession(key, stream, url)
         self._detections[key] = []
+        self._evidence_jpeg.pop(key, None)
+        self._evidence_wh.pop(key, None)
         tag = "native-4K" if keep_native else "scaled"
         print(f"[live] Opening: {key} ({tag})")
 
@@ -1844,10 +1875,30 @@ class LiveStreamManager:
         detections = assign_overlay_ids(detections)
         return detections
 
-    def _publish_results(self, camera_key: str, detections: list[dict[str, Any]]) -> None:
-        """Write Result Buffer (API snapshot + session cache)."""
+    def _publish_results(
+        self,
+        camera_key: str,
+        detections: list[dict[str, Any]],
+        frame: np.ndarray | None = None,
+    ) -> None:
+        """Write Result Buffer (API snapshot + same-frame evidence JPEG)."""
+        evidence: bytes | None = None
+        wh: tuple[int, int] = (0, 0)
+        if frame is not None and getattr(frame, "size", 0):
+            try:
+                h, w = frame.shape[:2]
+                wh = (int(w), int(h))
+                # Slightly higher quality than live preview — used for detection evidence.
+                q = max(75, min(92, int(self._jpeg_quality) + 10))
+                evidence = encode_jpeg(frame, q)
+            except Exception:
+                evidence = None
+                wh = (0, 0)
         with self._det_lock:
             self._detections[camera_key] = detections
+            if evidence:
+                self._evidence_jpeg[camera_key] = evidence
+                self._evidence_wh[camera_key] = wh
         session = self._sessions.get(camera_key)
         if session is not None:
             session.set_results(detections)
@@ -1914,7 +1965,7 @@ class LiveStreamManager:
             for det in detections:
                 det["frame_width"] = int(fw)
                 det["frame_height"] = int(fh)
-            self._publish_results(session.ip, detections)
+            self._publish_results(session.ip, detections, frame=frame)
             with session.infer_lock:
                 session.infer_seq_done = seq
         except Exception as exc:

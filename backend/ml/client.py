@@ -502,6 +502,17 @@ def ml_live_jpeg_raw_url_for_camera(camera) -> str:
     return f"{path}?{urlencode(params)}"
 
 
+def ml_live_jpeg_evidence_url_for_camera(camera) -> str:
+    """Same-frame evidence JPEG (YOLO infer frame) — preferred for detection snapshots."""
+    base = require_camera_ml_url(camera)
+    key = camera.stream_key
+    params = _live_rtsp_params(camera.effective_stream_url())
+    path = f"{base}/live/cam/{key}/jpeg/evidence"
+    if not params:
+        return path
+    return f"{path}?{urlencode(params)}"
+
+
 def ml_live_jpeg_attendance_url(
     stream_key: str,
     rtsp_url: str | None = None,

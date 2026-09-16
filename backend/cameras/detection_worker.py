@@ -107,8 +107,14 @@ def _active_camera_ids() -> list[int]:
 
 
 def _poll_camera(camera_id: int) -> int:
-    from ml.client import MLServiceError, ml_live_detections_for_camera, ml_service_enabled
+    from ml.client import (
+        MLServiceError,
+        ml_live_detections_for_camera,
+        ml_live_jpeg_evidence_url_for_camera,
+        ml_service_enabled,
+    )
 
+    from .clip_capture import stash_evidence_jpeg
     from .detection_utils import save_detection_batch
     from .models import Camera
 
@@ -132,6 +138,19 @@ def _poll_camera(camera_id: int) -> int:
     detections = result.get("detections") or []
     if not detections:
         return 0
+
+    # Same-frame evidence right after detections (ML keeps the YOLO infer JPEG).
+    if result.get("has_evidence"):
+        try:
+            import requests
+
+            url = ml_live_jpeg_evidence_url_for_camera(camera)
+            resp = requests.get(url, timeout=(1.5, 3.0))
+            if resp.status_code == 200 and resp.content:
+                stash_evidence_jpeg(camera.pk, resp.content)
+        except Exception:
+            logger.debug("Evidence fetch skipped for camera %s", camera_id, exc_info=True)
+
     return save_detection_batch(camera, detections)
 
 
