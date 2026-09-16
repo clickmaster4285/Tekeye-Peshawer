@@ -283,6 +283,13 @@ DETECTION_CLIP_ENABLED = os.getenv("DETECTION_CLIP_ENABLED", "true").strip().low
 DETECTION_CLIP_SECONDS = int(os.getenv("DETECTION_CLIP_SECONDS", "7"))
 # Min seconds before the same label/class on one camera is saved again (0 = save every poll)
 DETECTION_DEDUP_SECONDS = int(os.getenv("DETECTION_DEDUP_SECONDS", "5"))
+# Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
+CROWD_ALERT_ENABLED = os.getenv("CROWD_ALERT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+CROWD_ALERT_THRESHOLD = int(os.getenv("CROWD_ALERT_THRESHOLD", "10"))
+CROWD_ALERT_MIN_CONFIDENCE = float(os.getenv("CROWD_ALERT_MIN_CONFIDENCE", "0.25"))
+# Same episode technique for fire / smoke / weapon alerts (save once + notify once)
+ALERT_EPISODE_ENABLED = os.getenv("ALERT_EPISODE_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+ALERT_EPISODE_MIN_CONFIDENCE = float(os.getenv("ALERT_EPISODE_MIN_CONFIDENCE", "0.25"))
 
 # Attendance — InsightFace recognition + decision engine
 ATTENDANCE_FACE_MIN_CONFIDENCE = float(os.getenv("ATTENDANCE_FACE_MIN_CONFIDENCE", "0.25"))

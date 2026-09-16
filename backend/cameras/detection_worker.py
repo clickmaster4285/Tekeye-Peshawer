@@ -137,7 +137,14 @@ def _poll_camera(camera_id: int) -> int:
 
     detections = result.get("detections") or []
     if not detections:
-        return 0
+        # Still evaluate crowd / fire / smoke / weapon clear when the frame has no boxes.
+        try:
+            from .detection_utils import evaluate_camera_alerts
+
+            return evaluate_camera_alerts(camera, [])
+        except Exception:
+            logger.debug("Alert clear skipped for camera %s", camera_id, exc_info=True)
+            return 0
 
     # Same-frame evidence right after detections (ML keeps the YOLO infer JPEG).
     if result.get("has_evidence"):

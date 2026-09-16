@@ -140,6 +140,8 @@ def on_detection_event(sender, instance, created, **kwargs):
         from .models import JourneyEvent, JourneyEventType, JourneyPerson, PersonStatus
 
         cls = (instance.class_name or "").lower()
+        if cls in ("crowd", "fire", "smoke", "weapon"):
+            return
         weapon_classes = {"weapon", "gun", "knife", "pistol", "rifle", "firearm"}
         if cls not in weapon_classes and not instance.is_alert:
             return
