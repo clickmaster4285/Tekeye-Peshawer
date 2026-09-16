@@ -408,22 +408,22 @@ export default function DetentionMemoPage() {
               )}
             </div>
 
-            {/* Desktop table */}
+            {/* Desktop / tablet table — horizontal scroll so headers never overlap */}
             <div className="hidden w-full min-w-0 rounded-lg border bg-background md:block">
-              <div className="max-h-[65vh] w-full overflow-y-auto">
-                <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
-                  <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur-sm">
+              <div className="max-h-[65vh] w-full max-w-full overflow-x-auto overflow-y-auto">
+                <Table className="min-w-[1400px]">
+                  <TableHeader className="sticky top-0 z-[1] bg-muted/50 backdrop-blur-sm">
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[7%] font-semibold">Sr.No</TableHead>
-                      <TableHead className="w-[12%] font-semibold">Case Number</TableHead>
-                      <TableHead className="w-[14%] font-semibold">Detention Memo No</TableHead>
-                      <TableHead className="w-[13%] font-semibold">Detention Date/Time</TableHead>
-                      <TableHead className="w-[10%] font-semibold">Status</TableHead>
-                      <TableHead className="w-[11%] font-semibold">Posting Date</TableHead>
-                      <TableHead className="w-[11%] font-semibold">Updation Date</TableHead>
-                      <TableHead className="w-[7%] font-semibold">Alert</TableHead>
-                      <TableHead className="w-[9%] font-semibold">Created by</TableHead>
-                      <TableHead className="w-[7.5rem] text-right font-semibold">Actions</TableHead>
+                      <TableHead className="min-w-[4.5rem] font-semibold">Sr.No</TableHead>
+                      <TableHead className="min-w-[9rem] font-semibold">Case Number</TableHead>
+                      <TableHead className="min-w-[11rem] font-semibold">Detention Memo No</TableHead>
+                      <TableHead className="min-w-[10rem] font-semibold">Detention Date/Time</TableHead>
+                      <TableHead className="min-w-[7rem] font-semibold">Status</TableHead>
+                      <TableHead className="min-w-[8rem] font-semibold">Posting Date</TableHead>
+                      <TableHead className="min-w-[8rem] font-semibold">Updation Date</TableHead>
+                      <TableHead className="min-w-[5rem] font-semibold">Alert</TableHead>
+                      <TableHead className="min-w-[7rem] font-semibold">Created by</TableHead>
+                      <TableHead className="min-w-[7.5rem] text-right font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
