@@ -13,7 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { setAuthenticatedWithToken, goToSafeMediaNext } from "@/lib/auth"
+import { setAuthenticatedWithToken, goToSafeNext } from "@/lib/auth"
 import { queryClient } from "@/lib/query-client"
 import { login } from "@/lib/auth-api"
 import { getHomeRouteForRole } from "@/lib/role-access"
@@ -37,7 +37,7 @@ export default function LoginPage() {
       queryClient.clear()
       clearLegacyVmsLocalStorage()
       setAuthenticatedWithToken(token, user)
-      if (!goToSafeMediaNext(searchParams.get("next"))) {
+      if (!goToSafeNext(searchParams.get("next"), navigate)) {
         navigate(getHomeRouteForRole(user.role, user.allowed_modules), { replace: true })
       }
     } catch (err) {
