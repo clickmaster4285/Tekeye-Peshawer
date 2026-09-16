@@ -47,9 +47,9 @@ export function DashboardLayout() {
       {/* Socket.IO → React Query invalidation (replaces page polling) */}
       <RealtimeBridge />
       <Sidebar mobileOpen={mobileSidebarOpen} onMobileOpenChange={setMobileOpen} />
-      <div className="flex min-w-0 w-full max-w-full flex-1 flex-col md:ml-[333px]">
+      <div className="flex min-w-0 w-full max-w-full flex-1 flex-col md:ml-[240px] lg:ml-[280px] xl:ml-[333px]">
         <Header onMenuClick={openMobileSidebar} />
-        <main className="flex-1 min-w-0 w-full max-w-full px-3 pt-20 pb-4 sm:px-6 lg:px-8">
+        <main className="flex-1 min-w-0 w-full max-w-full px-3 pt-24 pb-4 sm:px-4 md:pt-20 lg:px-6 xl:px-8">
           <Outlet />
         </main>
       </div>

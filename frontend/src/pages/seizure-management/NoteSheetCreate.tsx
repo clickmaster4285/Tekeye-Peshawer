@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, Camera, ChevronDown, Copy, Eye, Plus, Send, Trash2, X } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -36,6 +36,8 @@ import { ROUTES, getSeizureMgmtNoteSheetDetailPath } from "@/routes/config"
 import { getStoredUser } from "@/lib/auth"
 import { locationLabel } from "@/lib/locations"
 import { fetchCurrentUser, pickUserContact } from "@/lib/users-api"
+import { useCameras } from "@/hooks/use-cameras"
+import type { CameraRecord } from "@/lib/cameras-api"
 import {
   EVIDENCE_OPTIONS,
   RECOMMENDATION_OPTIONS,
@@ -101,7 +103,47 @@ function emptyItem(): NoteSheetItem {
     remarks: "",
     images: [],
     imageFiles: [],
+    locatedZone: "",
+    locatedCameraId: null,
+    detectedAt: "",
+    detectionEventId: null,
   }
+}
+
+function normalizeLocationKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+}
+
+function camerasForOfficeLocation(cameras: CameraRecord[], office: string): CameraRecord[] {
+  const active = cameras.filter((c) => c.is_active)
+  const key = normalizeLocationKey(office)
+  if (!key) return active
+  return active.filter((c) => {
+    const loc = normalizeLocationKey(c.location || c.site_code || "")
+    const site = normalizeLocationKey(c.site_name || "")
+    return loc.includes(key) || key.includes(loc) || site.includes(key) || key.includes(site)
+  })
+}
+
+function uniqueCameraZones(cameras: CameraRecord[]): string[] {
+  const zones = new Set<string>()
+  for (const cam of cameras) {
+    const z = (cam.zone || "").trim()
+    if (z) zones.add(z)
+  }
+  return Array.from(zones).sort((a, b) => a.localeCompare(b))
+}
+
+function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
+  const z = zone.trim().toLowerCase()
+  if (!z) return []
+  return cameras.filter((c) => (c.zone || "").trim().toLowerCase() === z)
+}
+
+function cameraOptionLabel(cam: CameraRecord): string {
+  const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
+  const zone = (cam.zone || "").trim()
+  return zone ? `${name} · ${zone}` : name
 }
 
 type MediaKey = keyof NoteSheetCreateMedia
@@ -167,6 +209,28 @@ export default function NoteSheetCreatePage() {
 
   const [items, setItems] = useState<NoteSheetItem[]>([])
   const [previewQrData, setPreviewQrData] = useState<string | null>(null)
+
+  const { cameras: allCameras } = useCameras({ activeOnly: true, allocatedOnly: true })
+  const locationCameras = useMemo(
+    () => camerasForOfficeLocation(allCameras, office),
+    [allCameras, office]
+  )
+  const availableZones = useMemo(() => uniqueCameraZones(locationCameras), [locationCameras])
+
+  useEffect(() => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.locatedCameraId == null) return item
+        const cam = locationCameras.find((c) => c.id === item.locatedCameraId)
+        if (!cam) return { ...item, locatedCameraId: null, locatedZone: item.locatedZone }
+        const zone = (cam.zone || "").trim()
+        if (item.locatedZone && zone && item.locatedZone !== zone) {
+          return { ...item, locatedCameraId: null }
+        }
+        return item.locatedZone ? item : { ...item, locatedZone: zone }
+      })
+    )
+  }, [locationCameras])
 
   const [placeOfInspection, setPlaceOfInspection] = useState("")
   const [warehouseShop, setWarehouseShop] = useState("")
@@ -272,6 +336,12 @@ export default function NoteSheetCreatePage() {
                 remarks: it.remarks || it.itemNotes || "",
                 images: it.images || [],
                 imageFiles: [],
+                locatedZone: it.locatedCamera?.zone || "",
+                locatedCameraId: it.locatedCameraId ?? it.locatedCamera?.id ?? null,
+                locatedCamera: it.locatedCamera ?? null,
+                detectedAt: it.detectedAt || "",
+                detectionEventId: it.detectionEventId ?? null,
+                evidenceUrl: it.evidenceUrl || "",
               }))
             : [emptyItem()]
         )
@@ -300,7 +370,7 @@ export default function NoteSheetCreatePage() {
   const updateItem = (
     index: number,
     field: keyof NoteSheetItem,
-    value: string | boolean | File[] | string[]
+    value: string | boolean | File[] | string[] | number | null
   ) => {
     setItems((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)))
   }
@@ -700,7 +770,10 @@ export default function NoteSheetCreatePage() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <p className="text-sm text-muted-foreground mb-4">
-                  List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning. Click the eye button to preview a larger QR code.
+                  List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning.
+                  Pick <strong>Zone</strong> first, then <strong>Located Camera</strong> (filtered by Office / Region).
+                  Only <strong>assigned</strong> cameras are listed.
+                  {office ? ` Office: ${office}.` : " Set Office / Region to filter cameras by location."}
                 </p>
                 <div
                   id="ns-goods"
@@ -724,18 +797,22 @@ export default function NoteSheetCreatePage() {
                         <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
                         <TableHead className="w-[220px]">Item Notes</TableHead>
                         <TableHead className="w-[96px]">Images</TableHead>
+                        <TableHead className="w-[140px]">Camera Zone</TableHead>
+                        <TableHead className="w-[220px]">Located Camera</TableHead>
                         <TableHead className="w-[44px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {items.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={10} className="text-muted-foreground text-center py-6">
+                          <TableCell colSpan={12} className="text-muted-foreground text-center py-6">
                             No goods added. Click "Add line" to add seized/detained items.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        items.map((row, index) => (
+                        items.map((row, index) => {
+                          const zoneCameras = camerasForZone(locationCameras, row.locatedZone || "")
+                          return (
                           <TableRow key={row.clientLineId || index} className={index % 2 === 1 ? "bg-muted/10" : ""}>
                             <TableCell className="align-middle">
                               <div className="flex flex-col gap-1 items-start">
@@ -908,6 +985,84 @@ export default function NoteSheetCreatePage() {
                                 )}
                               </div>
                             </TableCell>
+                            <TableCell className="align-middle">
+                              <Select
+                                value={row.locatedZone || "__none__"}
+                                onValueChange={(v) => {
+                                  const zone = v === "__none__" ? "" : v
+                                  setItems((prev) =>
+                                    prev.map((item, i) =>
+                                      i === index
+                                        ? { ...item, locatedZone: zone, locatedCameraId: null }
+                                        : item
+                                    )
+                                  )
+                                }}
+                              >
+                                <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
+                                  <SelectValue placeholder="Select zone" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Select zone</SelectItem>
+                                  {availableZones.map((zone) => (
+                                    <SelectItem key={zone} value={zone}>
+                                      {zone}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!availableZones.length && (
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  No zones for this office.
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-middle">
+                              <Select
+                                value={row.locatedCameraId != null ? String(row.locatedCameraId) : "__none__"}
+                                onValueChange={(v) => {
+                                  if (v === "__none__") {
+                                    updateItem(index, "locatedCameraId", null)
+                                    return
+                                  }
+                                  const camId = Number(v)
+                                  const cam =
+                                    zoneCameras.find((c) => c.id === camId) ||
+                                    locationCameras.find((c) => c.id === camId)
+                                  setItems((prev) =>
+                                    prev.map((item, i) =>
+                                      i === index
+                                        ? {
+                                            ...item,
+                                            locatedCameraId: Number.isFinite(camId) ? camId : null,
+                                            locatedZone: cam?.zone?.trim() || item.locatedZone || "",
+                                          }
+                                        : item
+                                    )
+                                  )
+                                }}
+                                disabled={!row.locatedZone}
+                              >
+                                <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
+                                  <SelectValue
+                                    placeholder={row.locatedZone ? "Select camera" : "Pick zone first"}
+                                  />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">No camera</SelectItem>
+                                  {zoneCameras.map((cam) => (
+                                    <SelectItem key={cam.id} value={String(cam.id)}>
+                                      {cameraOptionLabel(cam)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {row.locatedZone && !zoneCameras.length && (
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  No assigned cameras in this zone.
+                                </p>
+                              )}
+                            </TableCell>
                             <TableCell className="align-middle text-center">
                               <div className="flex items-center justify-center">
                               <Button
@@ -923,7 +1078,8 @@ export default function NoteSheetCreatePage() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))
+                          )
+                        })
                       )}
                     </TableBody>
                   </Table>

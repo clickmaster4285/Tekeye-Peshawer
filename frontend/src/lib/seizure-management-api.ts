@@ -72,6 +72,21 @@ export const RECOMMENDATION_OPTIONS = [
   "Release Goods",
 ] as const
 
+export type NoteSheetLocatedCamera = {
+  id: number
+  code: string
+  name: string
+  zone: string
+  location: string
+  siteName?: string
+  nvrName?: string
+  nvrIp?: string
+  channel?: number
+  mlServerId?: number | null
+  mlServerName?: string
+  displayLabel?: string
+}
+
 export type NoteSheetItem = {
   id?: string
   clientLineId?: string
@@ -90,6 +105,13 @@ export type NoteSheetItem = {
   itemNotes?: string
   images?: string[]
   imageFiles?: File[]
+  /** UI-only until save — zone filter for located camera dropdown */
+  locatedZone?: string
+  locatedCameraId?: number | null
+  locatedCamera?: NoteSheetLocatedCamera | null
+  detectedAt?: string
+  detectionEventId?: number | null
+  evidenceUrl?: string
 }
 
 export type NoteSheetAttachment = {
@@ -490,6 +512,9 @@ function serializeNoteSheetItems(items?: NoteSheetItem[]) {
     remarks: it.remarks || it.itemNotes || "",
     itemNotes: it.itemNotes || it.remarks || "",
     sortOrder: idx,
+    locatedCameraId: it.locatedCameraId ?? null,
+    detectedAt: it.detectedAt || "",
+    detectionEventId: it.detectionEventId ?? null,
   }))
 }
 

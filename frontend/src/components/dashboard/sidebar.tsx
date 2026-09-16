@@ -225,7 +225,7 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
       />
       <aside
         className={cn(
-          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-30 md:w-[333px] md:translate-x-0",
+          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-30 md:w-[240px] md:translate-x-0 lg:w-[280px] xl:w-[333px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
           "md:flex"
         )}
@@ -241,12 +241,12 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
             decoding="async"
           />
           <div className="flex min-w-0 flex-col leading-[1.05]">
-            <span className="text-[14px] font-black uppercase tracking-[0.16em]">
+            <span className="text-[11px] font-black uppercase tracking-[0.12em] md:text-[11px] lg:text-[12px] xl:text-[14px] xl:tracking-[0.16em]">
               <span className="text-[#1D4ED8]">Customs</span>{" "}
               <span className="text-[#D4A73A]">Integrated</span>
             </span>
 
-            <span className="mt-[2px] text-[14px] font-black uppercase tracking-[0.08em]">
+            <span className="mt-[2px] text-[11px] font-black uppercase tracking-[0.06em] md:text-[11px] lg:text-[12px] xl:text-[14px] xl:tracking-[0.08em]">
               <span className="text-[#D4A73A]">Intelligence</span>{" "}
               <span className="text-[#1D4ED8]">Systems</span>
             </span>
