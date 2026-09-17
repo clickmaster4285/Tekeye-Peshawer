@@ -125,6 +125,7 @@ class CameraSerializer(serializers.ModelSerializer):
             "status",
             "passage_role",
             "is_active",
+            "health_roi",
             "ml_enabled",
             "is_rtsp",
             "ml_stream_key",
@@ -189,7 +190,7 @@ class CameraWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Camera
-        fields = ["name", "nvr", "channel", "zone", "purpose", "purposes", "status", "passage_role", "is_active"]
+        fields = ["name", "nvr", "channel", "zone", "purpose", "purposes", "status", "passage_role", "is_active", "health_roi"]
 
     def validate_channel(self, value: int) -> int:
         if value < 1:

@@ -163,6 +163,7 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: toChildPath(ROUTES.CUSTOM_REPORT_BUILDER), page: "Reports" },
   { path: toChildPath(ROUTES.EXPORT_CENTER), page: "Reports" },
   { path: toChildPath(ROUTES.PREDICTIVE_INSIGHTS), page: "PredictiveInsights" },
+  { path: toChildPath(ROUTES.AI_SUGGESTIONS), page: "AiSuggestions" },
   { path: toChildPath(ROUTES.DATA_VISUALIZATION), page: "DataVisualization" },
   // WMS Integration (reuse Integrations page)
   { path: toChildPath(ROUTES.WEBOC_SYNC), page: "Integrations" },

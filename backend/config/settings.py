@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "ops_central.apps.OpsCentralConfig",
     "gps_tracking.apps.GpsTrackingConfig",
     "video_recovery.apps.VideoRecoveryConfig",
+    "camera_health.apps.CameraHealthConfig",
     "realtime.apps.RealtimeConfig",
 ]
 
@@ -270,6 +271,14 @@ DETECTION_WORKER_CAMERA_REFRESH_SEC = int(os.getenv("DETECTION_WORKER_CAMERA_REF
 DETECTION_CLIP_REQUEUE_LIMIT = int(os.getenv("DETECTION_CLIP_REQUEUE_LIMIT", "50"))
 DETECTION_CLIP_MAX_WORKERS = int(os.getenv("DETECTION_CLIP_MAX_WORKERS", "1"))
 DETECTION_CLIP_MAX_QUEUE = int(os.getenv("DETECTION_CLIP_MAX_QUEUE", "50"))
+
+# Camera Health / AI Suggestions — OpenCV metrics on sampled frames
+CAMERA_HEALTH_WORKER_ENABLED = os.getenv("CAMERA_HEALTH_WORKER_ENABLED", "True").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+CAMERA_HEALTH_INTERVAL_SEC = float(os.getenv("CAMERA_HEALTH_INTERVAL_SEC", "45"))
 
 # Background worker throttling (cycle sleep + ffmpeg spawn spacing)
 WORKER_MIN_CYCLE_SLEEP_MS = int(os.getenv("WORKER_MIN_CYCLE_SLEEP_MS", "100"))

@@ -1449,7 +1449,7 @@ def capture_attendance_snapshot_sync(
     infer_frame_w: int = 0,
     infer_frame_h: int = 0,
 ) -> None:
-    """Record attendance clip with a label on the marked staff member only."""
+    """Capture one annotated JPEG snapshot for the attendance record (no video)."""
     from users.models import Attendance
 
     if not _attendance_snapshot_enabled():
@@ -1469,141 +1469,100 @@ def capture_attendance_snapshot_sync(
     try:
         import cv2
     except ImportError:
-        logger.warning("OpenCV not available for attendance clip capture")
+        logger.warning("OpenCV not available for attendance snapshot capture")
         _release_db()
         return
 
-    duration = _attendance_video_seconds()
-    fps = _attendance_video_fps()
     hd_width = _attendance_video_width()
     jpeg_q = _attendance_jpeg_quality()
     display_name = (employee_name or label or "staff").strip()[:80]
     stream_url = camera.effective_stream_url()
     skip_ml = _ml_on_cooldown(camera_id)
     _release_db()
-    frames: list = []
-    bbox_state: dict[str, object] = {
-        "bbox": None,
-        "conf": confidence,
-        "at": 0.0,
-        "infer_w": int(infer_frame_w or 0),
-        "infer_h": int(infer_frame_h or 0),
-    }
 
-    def _current_staff_box(frame_w: int, frame_h: int) -> tuple[list[int] | None, float]:
-        now = time.monotonic()
-        if bbox_state["bbox"] is None or now - float(bbox_state["at"]) >= 0.1:
-            fitted, conf = _staff_bbox_from_ml(
-                camera,
-                label,
-                employee_name,
-                frame_w,
-                frame_h,
-                bbox or [],
-                fallback_confidence=confidence,
-                infer_frame_w=int(bbox_state["infer_w"] or 0),
-                infer_frame_h=int(bbox_state["infer_h"] or 0),
-            )
-            bbox_state["bbox"] = fitted
-            bbox_state["conf"] = conf
-            bbox_state["at"] = now
-        return bbox_state["bbox"], float(bbox_state["conf"])  # type: ignore[return-value]
-
-    def _annotate_frame(frame):
-        h, w = frame.shape[:2]
-        fitted, conf = _current_staff_box(w, h)
-        return _draw_attendance_staff_on_frame(
-            frame,
-            bbox=fitted,
-            display_name=display_name,
-            confidence=conf,
-        )
+    frame = None
 
     if not skip_ml:
         _warm_ml_stream(camera)
 
-    # 1) HD main-stream via ML + label only the marked staff member.
+    # 1) Single HD frame from ML attendance JPEG/MJPEG endpoint
     attendance_url = None if skip_ml else _ml_attendance_mjpeg_url(camera, target_width=hd_width)
     if attendance_url:
-        frames = _read_mjpeg_clip(
-            attendance_url,
-            duration_sec=duration,
-            max_fps=fps,
-            on_frame=_annotate_frame,
-        )
+        frame = _read_mjpeg_snapshot(attendance_url, timeout_sec=6.0)
 
-    # 2) Raw MJPEG + single staff overlay.
-    if not frames and not skip_ml:
+    # 2) Raw MJPEG / JPEG
+    if frame is None and not skip_ml:
         raw_url = _ml_raw_mjpeg_url(camera)
         if raw_url:
-            frames = _read_mjpeg_clip(
-                raw_url,
-                duration_sec=duration,
-                max_fps=fps,
-                on_frame=_annotate_frame,
-            )
-            frames = _upscale_frames_to_hd(frames, hd_width)
+            frame = _read_mjpeg_snapshot(raw_url, timeout_sec=6.0)
+            if frame is not None and hd_width > 0:
+                upscaled = _upscale_frames_to_hd([frame], hd_width)
+                frame = upscaled[0] if upscaled else frame
 
-    # 3) Last resort: direct NVR main-stream RTSP (same URL as ML registration).
-    if not frames and stream_url:
-        frames = _read_rtsp_clip(
-            stream_url,
-            duration_sec=duration,
-            max_fps=fps,
-            target_width=hd_width,
-            on_frame=_annotate_frame,
-        )
+    # 3) Direct RTSP one-shot
+    if frame is None and stream_url:
+        if hd_width > 0:
+            frame = _read_rtsp_hd_snapshot(stream_url, target_width=hd_width)
+        if frame is None:
+            frame = _read_rtsp_snapshot(stream_url)
+            if frame is not None and hd_width > 0:
+                upscaled = _upscale_frames_to_hd([frame], hd_width)
+                frame = upscaled[0] if upscaled else frame
 
-    if not frames and stream_url:
-        single = _read_rtsp_snapshot(stream_url)
-        if single is not None:
-            frames = _upscale_frames_to_hd([_annotate_frame(single)], hd_width)
-
-    if not frames:
-        logger.warning("Could not capture attendance clip for record %s", attendance_id)
+    if frame is None:
+        logger.warning("Could not capture attendance snapshot for record %s", attendance_id)
         return
 
-    temp_dir = os.path.join(settings.MEDIA_ROOT, "attendance", "videos", "_tmp")
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_mp4 = os.path.join(temp_dir, f"attendance_{attendance_id}_{int(time.time())}.mp4")
+    h, w = frame.shape[:2]
+    fitted, conf = _staff_bbox_from_ml(
+        camera,
+        label,
+        employee_name,
+        w,
+        h,
+        bbox or [],
+        fallback_confidence=confidence,
+        infer_frame_w=int(infer_frame_w or 0),
+        infer_frame_h=int(infer_frame_h or 0),
+    )
+    annotated = _draw_attendance_staff_on_frame(
+        frame,
+        bbox=fitted,
+        display_name=display_name,
+        confidence=conf,
+    )
 
     try:
         attendance.refresh_from_db(fields=["image", "video"])
+        ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_q])
+        if not ok or encoded is None:
+            logger.warning("Failed to encode attendance JPEG for record %s", attendance_id)
+            return
 
-        if len(frames) > 1 and _encode_frames_to_mp4(
-            frames, temp_mp4, duration_sec=duration, nominal_fps=fps
-        ):
-            filename = f"attendance_{attendance_id}_{action}.mp4"
-            with open(temp_mp4, "rb") as fh:
-                attendance.video.save(filename, ContentFile(fh.read()), save=False)
-
-        poster = frames[0]
-        ok, encoded = cv2.imencode(".jpg", poster, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_q])
-        if ok and encoded is not None:
-            attendance.image.save(
-                f"attendance_{attendance_id}_{action}.jpg",
-                ContentFile(encoded.tobytes()),
-                save=False,
-            )
-
+        attendance.image.save(
+            f"attendance_{attendance_id}_{action}.jpg",
+            ContentFile(encoded.tobytes()),
+            save=False,
+        )
+        # Snapshots only — do not create or keep new video clips.
+        if attendance.video:
+            try:
+                attendance.video.delete(save=False)
+            except Exception:
+                attendance.video = None
         attendance.save(update_fields=["image", "video"])
         logger.info(
-            "Saved attendance clip for record %s video=%s action=%s frames=%s duration=%.1fs",
+            "Saved attendance snapshot for record %s image=%s action=%s size=%sx%s",
             attendance_id,
-            attendance.video.name if attendance.video else "none",
+            attendance.image.name if attendance.image else "none",
             action,
-            len(frames),
-            duration,
+            w,
+            h,
         )
     except Exception:
-        logger.exception("Failed to save attendance clip for record %s", attendance_id)
+        logger.exception("Failed to save attendance snapshot for record %s", attendance_id)
     finally:
         _release_db()
-        try:
-            if os.path.isfile(temp_mp4):
-                os.remove(temp_mp4)
-        except OSError:
-            pass
 
 
 def _process_attendance_jobs() -> None:
@@ -1641,7 +1600,7 @@ def schedule_attendance_snapshot(
     infer_frame_w: int = 0,
     infer_frame_h: int = 0,
 ) -> None:
-    """Capture attendance proof clip — only the marked staff member is labeled."""
+    """Queue a single attendance proof snapshot (JPEG only)."""
     global _attendance_workers
     if not _attendance_snapshot_enabled():
         return

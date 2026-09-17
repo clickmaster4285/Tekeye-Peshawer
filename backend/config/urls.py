@@ -25,6 +25,7 @@ urlpatterns = [
     path("api/", include("ops_central.urls")),
     path("api/", include("gps_tracking.urls")),
     path("api/", include("video_recovery.urls")),
+    path("api/", include("camera_health.urls")),
     # Detection clips, staff photos, attendance video, etc. — login required.
     re_path(r"^media/(?P<path>.*)$", protected_media, name="protected_media"),
 ]

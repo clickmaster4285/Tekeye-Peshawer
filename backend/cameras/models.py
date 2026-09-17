@@ -151,6 +151,12 @@ class Camera(models.Model):
         related_name="assigned_cameras",
         help_text="ML node that should run this camera (set by IT Super Admin).",
     )
+    health_roi = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Optional health/visibility ROI: {x1,y1,x2,y2} normalized 0–1 or pixels.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

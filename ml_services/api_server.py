@@ -222,6 +222,75 @@ async def detect(
     return {"detections": detections, "count": len(detections)}
 
 
+@app.post("/camera-health/analyze")
+async def camera_health_analyze(
+    image: UploadFile | None = File(None),
+    purposes: str = Form(""),
+    roi_json: str = Form(""),
+    detections_json: str = Form(""),
+    previous_fingerprint_json: str = Form(""),
+    rtsp_available: bool = Form(True),
+    fps: float | None = Form(None),
+    frame_age_sec: float | None = Form(None),
+    dropped_frames: int | None = Form(None),
+    camera_key: str = Form(""),
+):
+    """Analyze one camera frame for health / visibility (OpenCV + purpose checks)."""
+    import json
+
+    from cam_health import analyze_camera_health
+
+    frame = None
+    if image is not None:
+        data = await image.read()
+        if data:
+            try:
+                frame = decode_image(data)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    purpose_list = [p.strip() for p in purposes.split(",") if p.strip()]
+    roi = None
+    detections = None
+    prev_fp = None
+    try:
+        if roi_json.strip():
+            roi = json.loads(roi_json)
+        if detections_json.strip():
+            detections = json.loads(detections_json)
+        if previous_fingerprint_json.strip():
+            prev_fp = json.loads(previous_fingerprint_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON field: {exc}") from exc
+
+    # Prefer live detections when camera_key is registered
+    key = (camera_key or "").strip()
+    if key and _live.is_ready() and detections is None:
+        try:
+            snap = _live.get_detection_snapshot(key)
+            detections = snap.get("detections") or []
+            if frame is None:
+                jpeg = _live.get_raw_jpeg_bytes(key)
+                if jpeg:
+                    frame = decode_image(jpeg)
+        except Exception:
+            pass
+
+    result = analyze_camera_health(
+        frame,
+        purposes=purpose_list,
+        roi=roi if isinstance(roi, dict) else None,
+        detections=detections if isinstance(detections, list) else None,
+        previous_fingerprint=prev_fp if isinstance(prev_fp, list) else None,
+        rtsp_available=bool(rtsp_available),
+        fps=fps,
+        frame_age_sec=frame_age_sec,
+        dropped_frames=dropped_frames,
+    )
+    # Drop bulky fingerprint from HTTP response body (still returned nested under image)
+    return result
+
+
 @app.post("/plates/detect")
 async def detect_plates(
     image: UploadFile = File(...),

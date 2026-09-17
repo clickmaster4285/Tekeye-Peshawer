@@ -174,6 +174,7 @@ export const ROUTES = {
   CUSTOM_REPORT_BUILDER: "/reports/custom-builder",
   EXPORT_CENTER: "/reports/export-center",
   PREDICTIVE_INSIGHTS: "/predictive-insights",
+  AI_SUGGESTIONS: "/ai-suggestions",
   DATA_VISUALIZATION: "/data-visualization",
 
   // WMS Integration
@@ -664,6 +665,7 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
         label: "AI Analytics & Insights",
         children: [
           { label: "Reports & Analytics", href: ROUTES.REPORTS },
+          { label: "AI Suggestions", href: ROUTES.AI_SUGGESTIONS },
           { label: "Predictive Insights", href: ROUTES.PREDICTIVE_INSIGHTS },
           { label: "Data Visualization", href: ROUTES.DATA_VISUALIZATION },
         ],
