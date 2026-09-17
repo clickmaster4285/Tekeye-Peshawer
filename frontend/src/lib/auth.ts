@@ -44,6 +44,8 @@ export type AuthUser = {
   collectorate?: string;
   department?: string;
   is_active?: boolean;
+  /** Linked staff photo (/media/...) when available. */
+  profile_image?: string | null;
   /** Top-level sidebar modules; empty = no module access. ADMIN ignores this. */
   allowed_modules?: string[];
 };

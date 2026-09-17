@@ -40,6 +40,7 @@ import {
 import { fetchDetectionEventsPage, type DetectionEvent } from "@/lib/cameras-api"
 import { cn } from "@/lib/utils"
 import { REALTIME_INVALIDATE_EVENT } from "@/lib/realtime-socket"
+import { resolveMediaUrl } from "@/lib/cameras-api"
 
 interface HeaderProps {
   onMenuClick?: () => void
@@ -484,6 +485,8 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
     .join("")
     .slice(0, 2)
     .toUpperCase()
+  const profileImageRaw = (user?.profile_image || "").trim()
+  const profileImageSrc = profileImageRaw ? resolveMediaUrl(profileImageRaw) : ""
 
   return (
     <header className="fixed left-0 right-0 top-0 z-20 flex min-h-14 min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 border-b border-gray-100 bg-white px-2 py-2 sm:min-h-16 sm:gap-x-2 sm:px-3 sm:py-2 md:left-[240px] md:gap-x-2 lg:left-[280px] lg:px-4 xl:left-[333px] xl:flex-nowrap xl:gap-x-4 xl:px-8 xl:py-0">
@@ -781,12 +784,11 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
                   {roleLine}
                 </span>
               </div>
-              <Avatar className="h-8 w-8 shrink-0 rounded-full border-2 border-gray-100 sm:h-9 sm:w-9 xl:h-10 xl:w-10">
-                <AvatarImage
-                  src="https://randomuser.me/api/portraits/women/44.jpg"
-                  alt={displayName}
-                />
-                <AvatarFallback className="bg-gray-200 text-sm text-[#6B7280]">
+              <Avatar className="h-8 w-8 shrink-0 rounded-full border-2 border-gray-100 bg-gray-100 sm:h-9 sm:w-9 xl:h-10 xl:w-10">
+                {profileImageSrc ? (
+                  <AvatarImage src={profileImageSrc} alt={displayName} className="object-cover" />
+                ) : null}
+                <AvatarFallback className="bg-gray-100 text-sm text-[#6B7280]">
                   {initials || <User className="h-5 w-5" />}
                 </AvatarFallback>
               </Avatar>
