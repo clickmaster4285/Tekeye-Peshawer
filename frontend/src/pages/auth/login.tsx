@@ -18,6 +18,7 @@ import { queryClient } from "@/lib/query-client"
 import { login } from "@/lib/auth-api"
 import { getHomeRouteForRole } from "@/lib/role-access"
 import { clearLegacyVmsLocalStorage } from "@/lib/vms-list-api"
+import { CUSTOMS_LOGO_SRC } from "@/lib/brand"
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -68,7 +69,7 @@ export default function LoginPage() {
         <div className="relative z-10 flex items-center gap-3">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-white/30">
             <img
-              src="/custom-logo.jpeg"
+              src={CUSTOMS_LOGO_SRC}
               alt="Customs logo"
               width={56}
               height={56}
@@ -118,7 +119,7 @@ export default function LoginPage() {
           <div className="mb-10 flex items-center gap-3 lg:hidden">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-border/60">
               <img
-                src="/custom-logo.jpeg"
+                src={CUSTOMS_LOGO_SRC}
                 alt="Customs logo"
                 width={48}
                 height={48}

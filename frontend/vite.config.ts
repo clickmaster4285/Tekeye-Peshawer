@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
         // Prompt / silent wait — never force a full-page reload on every client.
         registerType: "prompt",
         includeAssets: [
-          "custom-logo.jpeg",
+          "custom-logo.PNG",
           "icon.svg",
           "models/blazeface/model.json",
           "models/blazeface/group1-shard1of1.bin",
@@ -65,15 +65,15 @@ export default defineConfig(({ mode }) => {
           dir: "ltr",
           icons: [
             {
-              src: "custom-logo.jpeg",
+              src: "custom-logo.PNG",
               sizes: "512x512",
-              type: "image/jpeg",
+              type: "image/png",
               purpose: "any",
             },
             {
-              src: "custom-logo.jpeg",
+              src: "custom-logo.PNG",
               sizes: "192x192",
-              type: "image/jpeg",
+              type: "image/png",
               purpose: "any",
             },
           ],

@@ -7,6 +7,7 @@ import { getNavSectionsForRole, getAncestorMenusForPath, type NavGroup } from "@
 import { prefetchRoute } from "@/routes/prefetch"
 import { getNodeKey, hasActiveDescendant, isNavGroup, type SidebarNode } from "@/components/dashboard/sidebar.helpers"
 import { renderMenuIcon } from "@/components/dashboard/sidebar.icons"
+import { CUSTOMS_LOGO_SRC } from "@/lib/brand"
 
 function onPrefetchHref(href: string) {
   prefetchRoute(href)
@@ -233,7 +234,7 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
       <div className="pb-2 border-b border-[#E5E7EB] shrink-0">
         <div className="flex items-center gap-3">
           <img
-            src="/custom-logo.jpeg"
+            src={CUSTOMS_LOGO_SRC}
             alt="Customs logo"
             width={80}
             height={80}
