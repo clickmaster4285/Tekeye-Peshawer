@@ -655,6 +655,8 @@ export type CreateStaffPayload = {
 
   // Files
   profile_image?: File | null;
+  /** When true, backend puts keep paths before new uploads so profile is an existing photo. */
+  profile_from_keep?: boolean;
   staff_photos?: File[] | null;
   staff_photos_keep?: string[] | null;
   resume_file?: File | null;
@@ -696,6 +698,7 @@ function buildStaffMultipartFormData(
     "staff_photos",
     "staff_photo_files",
     "staff_photos_keep",
+    "profile_from_keep",
     "cnic_front",
     "cnic_back",
     "appointment_letter",
@@ -760,6 +763,10 @@ function buildStaffMultipartFormData(
   const keep = r.staff_photos_keep;
   if (Array.isArray(keep) && keep.length > 0) {
     fd.append("staff_photos_keep", JSON.stringify(keep.filter(Boolean)));
+  }
+
+  if (r.profile_from_keep === true) {
+    fd.append("profile_from_keep", "1");
   }
 
   for (const [sourceKey, targetKey] of Object.entries(STAFF_FILE_FIELD_MAP)) {

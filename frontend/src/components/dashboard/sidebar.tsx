@@ -116,11 +116,15 @@ function SidebarChildren({
                 )}
               >
                 <span className="flex items-center whitespace-nowrap text-left pl-1">{label}</span>
-                {isExpanded ? <ChevronDown size={16} aria-hidden className={isActive ? "text-[#155DFC]" : undefined} /> : <ChevronRight size={16} aria-hidden className={isActive ? "text-[#155DFC]" : undefined} />}
+                {isExpanded ? (
+                  <ChevronDown size={16} aria-hidden className={cn("shrink-0", isActive && "text-[#155DFC]")} />
+                ) : (
+                  <ChevronRight size={16} aria-hidden className={cn("shrink-0", isActive && "text-[#155DFC]")} />
+                )}
               </button>
             </div>
             {isExpanded && (
-              <div className="ml-5 mt-0.5 space-y-0.5 border-l-2 border-[#C1D9F8] pl-2 overflow-visible">
+              <div className="ml-5 mt-0.5 space-y-0.5 border-l-2 border-[#C1D9F8] pl-2 overflow-hidden">
                 <SidebarChildren
                   nodes={node.children}
                   pathname={pathname}
@@ -218,7 +222,7 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
     <>
       <div
         className={cn(
-          "fixed inset-0 z-30 bg-black/40 transition-opacity md:hidden",
+          "fixed inset-0 z-[35] bg-black/40 transition-opacity md:hidden",
           mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={() => onMobileOpenChange?.(false)}
@@ -226,12 +230,12 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
       />
       <aside
         className={cn(
-          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-30 md:w-[240px] md:translate-x-0 lg:w-[280px] xl:w-[333px]",
+          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-20 md:w-[240px] md:translate-x-0 lg:w-[280px] xl:w-[333px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
           "md:flex"
         )}
       >
-      <div className="pb-2 border-b border-[#E5E7EB] shrink-0">
+      <div className="relative z-10 shrink-0 border-b border-[#E5E7EB] bg-white pb-2">
         <div className="flex items-center gap-3">
           <img
             src={CUSTOMS_LOGO_SRC}
@@ -263,7 +267,7 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
         </div>
       </div>
 
-      <nav className="flex-1 min-h-0 overflow-y-auto py-3 px-1" aria-label="Main">
+      <nav className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto py-3 px-1" aria-label="Main">
         {favorites.length > 0 && (
           <div className="mb-3">
             <div className="sidebar-section-heading px-3 py-2">
@@ -401,13 +405,13 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
                       <span className="whitespace-nowrap text-left">{label}</span>
                     </div>
                     {isExpanded(label) ? (
-                      <ChevronDown size={16} aria-hidden className={isActive ? "text-[#155DFC]" : "text-[#6B7280]"} />
+                      <ChevronDown size={16} aria-hidden className={cn("shrink-0", isActive ? "text-[#155DFC]" : "text-[#6B7280]")} />
                     ) : (
-                      <ChevronRight size={16} aria-hidden className={isActive ? "text-[#155DFC]" : "text-[#6B7280]"} />
+                      <ChevronRight size={16} aria-hidden className={cn("shrink-0", isActive ? "text-[#155DFC]" : "text-[#6B7280]")} />
                     )}
                   </button>
                   {isExpanded(label) && (
-                    <div className="ml-6 mt-1.5 space-y-1 border-l-2 border-[#C1D9F8] pl-2 overflow-visible">
+                    <div className="ml-6 mt-1.5 space-y-1 border-l-2 border-[#C1D9F8] pl-2 overflow-hidden">
                       <SidebarChildren
                         nodes={group.children}
                         pathname={pathname}

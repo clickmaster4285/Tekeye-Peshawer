@@ -489,7 +489,7 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
   const profileImageSrc = profileImageRaw ? resolveMediaUrl(profileImageRaw) : ""
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-20 flex min-h-14 min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 border-b border-gray-100 bg-white px-2 py-2 sm:min-h-16 sm:gap-x-2 sm:px-3 sm:py-2 md:left-[240px] md:gap-x-2 lg:left-[280px] lg:px-4 xl:left-[333px] xl:flex-nowrap xl:gap-x-4 xl:px-8 xl:py-0">
+    <header className="fixed left-0 right-0 top-0 z-30 flex min-h-14 min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 border-b border-gray-100 bg-white px-2 py-2 sm:min-h-16 sm:gap-x-2 sm:px-3 sm:py-2 md:left-[240px] md:gap-x-2 lg:left-[280px] lg:px-4 xl:left-[333px] xl:flex-nowrap xl:gap-x-4 xl:px-8 xl:py-0">
       {/* Left: menu + search */}
       <div className="flex min-w-0 flex-1 basis-[min(100%,12rem)] items-center gap-1.5 sm:gap-2 md:max-w-[10rem] lg:max-w-[14rem] xl:max-w-[452px]">
         <button
