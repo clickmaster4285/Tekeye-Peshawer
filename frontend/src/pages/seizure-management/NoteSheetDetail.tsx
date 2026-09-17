@@ -42,6 +42,12 @@ import { fetchCurrentUser } from "@/lib/users-api"
 import { toast } from "@/hooks/use-toast"
 import { reportMissingField } from "@/lib/form-missing-field"
 import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import {
+  ViewLocatedCameraDialog,
+  ViewCameraButton,
+  locatedCameraLabel,
+  type ViewCameraTarget,
+} from "@/components/detention/view-located-camera-dialog"
 import NoteSheetReportPrint from "@/components/seizure/NoteSheetReportPrint"
 
 function statusBadge(status: NoteSheetStatus) {
@@ -96,6 +102,7 @@ export default function NoteSheetDetailPage() {
   const [approvalRemarks, setApprovalRemarks] = useState("")
   const [rejectionReason, setRejectionReason] = useState("")
   const [invalidField, setInvalidField] = useState("")
+  const [viewCamera, setViewCamera] = useState<ViewCameraTarget | null>(null)
 
   const load = () => {
     if (!id) return
@@ -436,18 +443,20 @@ export default function NoteSheetDetailPage() {
           <CardContent>
             {row.items?.length ? (
               <div className="overflow-auto">
-                <Table className="table-fixed w-full">
+                <Table className="w-max min-w-full">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>QR Code</TableHead>
-                      <TableHead className="w-[22%]">Description</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Condition</TableHead>
-                      <TableHead>Perishable</TableHead>
-                      <TableHead>ID / Chassis No.</TableHead>
-                      <TableHead className="w-[16%]">Item Notes</TableHead>
-                      <TableHead>Images</TableHead>
+                      <TableHead className="min-w-[88px]">QR Code</TableHead>
+                      <TableHead className="min-w-[140px]">Description</TableHead>
+                      <TableHead className="min-w-[150px]">Located Camera</TableHead>
+                      <TableHead className="min-w-[56px]">Qty</TableHead>
+                      <TableHead className="min-w-[56px]">Unit</TableHead>
+                      <TableHead className="min-w-[88px]">Condition</TableHead>
+                      <TableHead className="min-w-[80px]">Perishable</TableHead>
+                      <TableHead className="min-w-[110px]">ID / Chassis No.</TableHead>
+                      <TableHead className="min-w-[120px]">Item Notes</TableHead>
+                      <TableHead className="min-w-[80px]">Images</TableHead>
+                      <TableHead className="min-w-[120px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -457,11 +466,24 @@ export default function NoteSheetDetailPage() {
                         <TableCell className={goodsLineCellClass}>
                           <GoodsLineText>{item.product || item.description || "—"}</GoodsLineText>
                         </TableCell>
+                        <TableCell className="text-xs whitespace-normal">
+                          <div className="space-y-0.5">
+                            <p className="font-medium">
+                              {locatedCameraLabel(item.locatedCamera, item.locatedCameraId)}
+                            </p>
+                            <p className="text-muted-foreground">
+                              Zone: {item.locatedCamera?.zone?.trim() || "—"}
+                            </p>
+                            {item.detectedAt ? (
+                              <p className="text-muted-foreground">{item.detectedAt}</p>
+                            ) : null}
+                          </div>
+                        </TableCell>
                         <TableCell>{item.quantity || "—"}</TableCell>
                         <TableCell>{item.unit || "—"}</TableCell>
                         <TableCell>{item.condition || "—"}</TableCell>
                         <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                        <TableCell>{item.identificationRef || "—"}</TableCell>
+                        <TableCell className="whitespace-normal">{item.identificationRef || "—"}</TableCell>
                         <TableCell className={goodsLineCellClass}>
                           <GoodsLineText>{item.remarks || item.itemNotes || "—"}</GoodsLineText>
                         </TableCell>
@@ -474,14 +496,24 @@ export default function NoteSheetDetailPage() {
                                 </a>
                               ))}
                             </div>
+                          ) : item.evidenceUrl ? (
+                            <img
+                              src={item.evidenceUrl}
+                              alt="Evidence"
+                              className="h-8 w-8 object-cover rounded border"
+                            />
                           ) : (
                             "—"
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <ViewCameraButton item={item} onView={setViewCamera} />
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
+                <ViewLocatedCameraDialog target={viewCamera} onClose={() => setViewCamera(null)} />
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No goods recorded.</p>

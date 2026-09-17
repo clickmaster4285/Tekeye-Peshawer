@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 import requests
 from django.http import StreamingHttpResponse

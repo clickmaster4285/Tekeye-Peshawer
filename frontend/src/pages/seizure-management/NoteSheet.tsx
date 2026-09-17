@@ -611,19 +611,20 @@ export default function NoteSheetPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
+          <div className="w-full max-w-full overflow-x-auto rounded-lg border">
+          <Table className="min-w-[1200px]">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[4.5rem]">Sr. No</TableHead>
-                <TableHead className="w-[12%]">Note Sheet No.</TableHead>
-                <TableHead className="w-[16%]">Subject</TableHead>
-                <TableHead className="w-[10%]">Case No</TableHead>
-                <TableHead className="w-[14%]">Office</TableHead>
-                <TableHead className="w-[8%]">Priority</TableHead>
-                <TableHead className="w-[12%]">Prepared By</TableHead>
-                <TableHead className="w-[8%]">Status</TableHead>
-                <TableHead className="w-[8%]">Detention Memo</TableHead>
-                <TableHead className="w-[7.5rem] text-right">Actions</TableHead>
+                <TableHead className="min-w-[4.5rem]">Sr. No</TableHead>
+                <TableHead className="min-w-[9rem]">Note Sheet No.</TableHead>
+                <TableHead className="min-w-[12rem]">Subject</TableHead>
+                <TableHead className="min-w-[8rem]">Case No</TableHead>
+                <TableHead className="min-w-[10rem]">Office</TableHead>
+                <TableHead className="min-w-[6rem]">Priority</TableHead>
+                <TableHead className="min-w-[9rem]">Prepared By</TableHead>
+                <TableHead className="min-w-[7rem]">Status</TableHead>
+                <TableHead className="min-w-[8rem]">Detention Memo</TableHead>
+                <TableHead className="min-w-[7.5rem] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -710,6 +711,7 @@ export default function NoteSheetPage() {
               )}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
       <div

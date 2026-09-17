@@ -10,6 +10,7 @@ import {
   type CameraRecord,
 } from "@/lib/cameras-api"
 import { cn } from "@/lib/utils"
+import { CUSTOMS_LOGO_SRC } from "@/lib/brand"
 
 type DetectionBox = {
   class_name?: string
@@ -33,7 +34,7 @@ type MlCameraFeedProps = {
   onScanStart?: () => void
 }
 
-const TEKEYE_LOGO_SRC = "/custom-logo.jpeg"
+const TEKEYE_LOGO_SRC = CUSTOMS_LOGO_SRC
 
 function StreamBrandMarks() {
   return (

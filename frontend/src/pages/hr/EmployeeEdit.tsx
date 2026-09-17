@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -21,6 +21,8 @@ import {
   primaryStaffPhotoFile,
   newStaffPhotoFiles,
   existingStaffPhotoPaths,
+  photosOrderedForProfile,
+  profileIsExistingPath,
   revokeStaffUploadBlobs,
 } from "@/lib/staff-photo-utils"
 import { useToast } from "@/hooks/use-toast"
@@ -98,6 +100,7 @@ export default function EmployeeEditPage() {
 
   const [form, setForm] = useState<CreateStaffPayload | null>(null)
   const [staffPhotos, setStaffPhotos] = useState<UploadValue[]>([])
+  const [profilePhotoKey, setProfilePhotoKey] = useState<string | null>(null)
   const [cameraOpen, setCameraOpen] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -124,10 +127,25 @@ export default function EmployeeEditPage() {
     additionalDocument,
   }
 
+  const profilePhotoIndex = useMemo(() => {
+    if (staffPhotos.length === 0) return 0
+    if (profilePhotoKey) {
+      const idx = staffPhotos.findIndex((p) => p.previewUrl === profilePhotoKey)
+      if (idx >= 0) return idx
+    }
+    return 0
+  }, [staffPhotos, profilePhotoKey])
+
+  const handleSetProfilePhoto = (index: number) => {
+    setProfilePhotoKey(staffPhotos[index]?.previewUrl ?? null)
+  }
+
   useEffect(() => {
     if (!staff || initialized) return
     setForm(staffToForm(staff))
-    setStaffPhotos(initialPhotosFromStaff(staff))
+    const photos = initialPhotosFromStaff(staff)
+    setStaffPhotos(photos)
+    setProfilePhotoKey(photos[0]?.previewUrl ?? null)
     setCnicFront(uploadValueFromPath(staff.id_proof_file))
     setCnicBack(uploadValueFromPath(staff.certificates_file))
     setAppointmentLetter(uploadValueFromPath(staff.joining_letter_file))
@@ -181,6 +199,11 @@ export default function EmployeeEditPage() {
     setStaffPhotos((prev) => {
       const item = prev[index]
       if (item?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(item.previewUrl)
+      if (item?.previewUrl && item.previewUrl === profilePhotoKey) {
+        const next = prev.filter((_, i) => i !== index)
+        setProfilePhotoKey(next[0]?.previewUrl ?? null)
+        return next
+      }
       return prev.filter((_, i) => i !== index)
     })
   }
@@ -194,7 +217,9 @@ export default function EmployeeEditPage() {
       for (const p of prev) {
         if (p.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(p.previewUrl)
       }
-      return initialPhotosFromStaff(staff)
+      const photos = initialPhotosFromStaff(staff)
+      setProfilePhotoKey(photos[0]?.previewUrl ?? null)
+      return photos
     })
     updateUploadValue(setCnicFront, null)
     updateUploadValue(setCnicBack, null)
@@ -219,6 +244,7 @@ export default function EmployeeEditPage() {
         ? form.qualification.join(", ")
         : form.qualification
 
+      const orderedPhotos = photosOrderedForProfile(staffPhotos, profilePhotoIndex)
       const payload: Partial<CreateStaffPayload> = {
         ...form,
         qualification,
@@ -226,9 +252,10 @@ export default function EmployeeEditPage() {
         street_address: form.address,
         date_of_joining: form.joining_date,
         emergency_contact_phone: form.emergency_contact_phone || form.emergency_contact,
-        profile_image: primaryStaffPhotoFile(staffPhotos),
-        staff_photos: newStaffPhotoFiles(staffPhotos),
-        staff_photos_keep: existingStaffPhotoPaths(staffPhotos),
+        profile_image: primaryStaffPhotoFile(orderedPhotos),
+        profile_from_keep: profileIsExistingPath(staffPhotos, profilePhotoIndex),
+        staff_photos: newStaffPhotoFiles(orderedPhotos),
+        staff_photos_keep: existingStaffPhotoPaths(orderedPhotos),
         cnic_front: cnicFront.file ?? undefined,
         cnic_back: cnicBack.file ?? undefined,
         appointment_letter: appointmentLetter.file ?? undefined,
@@ -321,6 +348,8 @@ export default function EmployeeEditPage() {
               form={form}
               updateForm={(patch) => setForm((f) => (f ? { ...f, ...patch } : f))}
               staffPhotos={staffPhotos}
+              profilePhotoIndex={profilePhotoIndex}
+              onSetProfilePhoto={handleSetProfilePhoto}
               cameraOpen={cameraOpen}
               onOpenCamera={() => setCameraOpen(true)}
               onCaptureFromCamera={handleImageCapture}

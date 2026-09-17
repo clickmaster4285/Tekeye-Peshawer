@@ -17,10 +17,9 @@ from rest_framework.views import APIView
 
 from ml.client import (
     MLServiceError,
+    ml_assigned_mjpeg_public_url,
     ml_detect_image,
-    ml_live_detections,
-    ml_live_mjpeg_public_url,
-    ml_live_mjpeg_raw_public_url,
+    ml_live_detections_for_camera,
     ml_service_enabled,
 )
 
@@ -133,9 +132,16 @@ class CameraViewSet(viewsets.ModelViewSet):
     serializer_class = CameraSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["nvr", "nvr__site", "location", "purpose", "status", "is_active"]
+    filterset_fields = ["nvr", "nvr__site", "location", "purpose", "status", "is_active", "ml_server"]
     search_fields = ["name", "code", "zone", "nvr__name", "nvr__site__code"]
     ordering_fields = ["name", "channel", "location", "created_at"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        allocated = str(self.request.query_params.get("allocated", "")).strip().lower()
+        if allocated in ("1", "true", "yes"):
+            qs = qs.filter(ml_server_id__isnull=False)
+        return qs
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -442,16 +448,38 @@ class CameraViewSet(viewsets.ModelViewSet):
                 {"detail": "ML service is not running. Restart the backend to auto-start models."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        if not camera.ml_server_id:
+            return Response(
+                {"detail": "Camera is not assigned to an ML server. Assign it in Camera Distribution first."},
+                status=status.HTTP_409_CONFLICT,
+            )
         try:
-            stream_url = camera.effective_stream_url()
-            result = ml_live_detections(
-                camera.stream_key,
-                rtsp_url=stream_url,
+            result = ml_live_detections_for_camera(
+                camera,
                 purpose=camera.purpose,
                 purposes=camera.purpose_list(),
             )
         except MLServiceError as exc:
-            return Response({"detail": str(exc)}, status=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE)
+            if exc.status_code == status.HTTP_409_CONFLICT:
+                # Camera is allocated in Django but the ML node's in-memory
+                # registry lost it (e.g. ML process restarted). Re-push this
+                # camera and retry once instead of surfacing a stale 409.
+                try:
+                    from ml.camera_sync import route_camera_to_ml_server
+
+                    route_camera_to_ml_server(camera)
+                    result = ml_live_detections_for_camera(
+                        camera,
+                        purpose=camera.purpose,
+                        purposes=camera.purpose_list(),
+                    )
+                except MLServiceError as retry_exc:
+                    return Response(
+                        {"detail": str(retry_exc)},
+                        status=retry_exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
+            else:
+                return Response({"detail": str(exc)}, status=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE)
 
         detections = result.get("detections") or []
         detections = filter_detections_for_camera(camera, detections)
@@ -557,38 +585,41 @@ class CameraStreamListView(APIView):
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
         cameras = []
-        for cam in Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site").order_by(
-            "nvr__site__name", "nvr__name", "channel"
-        ):
+        # Dashboard / live walls: allocated cameras only (idle until assigned in Distribution)
+        allocated_only = str(request.query_params.get("allocated", "1")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        qs = Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site", "ml_server")
+        if allocated_only:
+            qs = qs.filter(ml_server_id__isnull=False)
+        for cam in qs.order_by("nvr__site__name", "nvr__name", "channel"):
             cameras.append(
                 {
                     "id": cam.pk,
                     "code": cam.code,
+                    "name": cam.name,
                     "label": cam.name,
+                    "display_label": cam.display_label,
                     "location": cam.location or cam.nvr.site.code,
                     "site_label": cam.nvr.site.name,
                     "site_code": cam.nvr.site.code,
                     "nvr_name": cam.nvr.name,
                     "channel": cam.channel,
+                    "channel_label": f"Ch {cam.channel}",
                     "purpose": cam.purpose,
                     "purposes": cam.purpose_list(),
                     "purpose_label": cam.purpose_label,
                     "ml_enabled": cam.ml_enabled,
                     "is_rtsp": cam.is_rtsp,
                     "ml_stream_key": cam.stream_key,
-                    "ml_live_stream_url": ml_live_mjpeg_public_url(
-                        cam.stream_key,
-                        rtsp_url=cam.effective_stream_url(),
-                        purpose=cam.purpose,
-                        purposes=cam.purpose_list(),
-                    ),
-                    "raw_stream_url": ml_live_mjpeg_raw_public_url(
-                        cam.stream_key,
-                        rtsp_url=cam.effective_stream_url(),
-                        purpose=cam.purpose,
-                        purposes=cam.purpose_list(),
-                    ),
+                    "ml_server_id": cam.ml_server_id,
+                    "ml_live_stream_url": ml_assigned_mjpeg_public_url(cam, kind="live"),
+                    "raw_stream_url": ml_assigned_mjpeg_public_url(cam, kind="raw"),
                     "rtsp_url": cam.effective_stream_url(),
+                    "status": cam.status,
+                    "is_active": cam.is_active,
                 }
             )
 

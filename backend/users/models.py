@@ -264,7 +264,7 @@ class Attendance(models.Model):
         upload_to="attendance/videos/",
         null=True,
         blank=True,
-        help_text="Short camera clip captured when attendance was marked.",
+        help_text="Deprecated: attendance proof is image-only; kept for old records.",
     )
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)

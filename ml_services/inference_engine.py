@@ -16,7 +16,7 @@ WEIGHTS_DIR = BASE_DIR / "runs" / "train" / "stage3_finetune3" / "weights"
 # Multi-model live stack:
 # 1) yolo26l.pt — COCO pretrained (classes 0–79, allowlisted)
 # 2) best.pt — custom classes only (drop COCO 0–79)
-# 3) best_Smoke_Detection.pt — fire/smoke specialist
+# 3) best_Smoke_Detection.pt — fire/smoke specialist (replaced with Desktop "fire and smoke"/best.pt)
 # 4) best_weapon_detection.pt — weapon specialist
 YOLO_WEIGHTS_COCO = WEIGHTS_DIR / "yolo26l.pt"
 YOLO_WEIGHTS_CUSTOM = WEIGHTS_DIR / "best.pt"
@@ -457,7 +457,7 @@ def decode_image(file_bytes: bytes) -> np.ndarray:
 
 
 def is_fire_smoke_class(class_name: str) -> bool:
-    name = str(class_name).lower()
+    name = str(class_name).lower().strip()
     return any(keyword in name for keyword in FIRE_SMOKE_KEYWORDS)
 
 
@@ -468,14 +468,17 @@ def is_alert_detection(
     smoke_model: bool = False,
     weapon_model: bool = False,
 ) -> bool:
-    if smoke_model or weapon_model:
+    if weapon_model:
         return True
+    # Smoke specialist may include non-alert classes (e.g. "other") — only fire/smoke alert.
+    if smoke_model:
+        return is_fire_smoke_class(class_name)
     return cls_id in ALERT_CLASS_IDS or is_fire_smoke_class(class_name)
 
 
 def is_smoke_fire_detection(cls_id: int, class_name: str, *, smoke_model: bool = False) -> bool:
     if smoke_model:
-        return True
+        return is_fire_smoke_class(class_name)
     return cls_id in ALERT_CLASS_IDS or is_fire_smoke_class(class_name)
 
 
@@ -767,6 +770,9 @@ def parse_yolo_result(
             continue
         if smoke_model:
             if confidence < SMOKE_FIRE_MIN_CONF:
+                continue
+            # New fire/smoke weights include an "other" class — drop non fire/smoke hits.
+            if not is_fire_smoke_class(yolo_name):
                 continue
         elif weapon_model:
             if confidence < WEAPON_MIN_CONF:

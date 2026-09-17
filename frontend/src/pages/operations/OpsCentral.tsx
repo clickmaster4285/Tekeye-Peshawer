@@ -84,7 +84,14 @@ function OpsStreamTile({
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
           <p className="truncate text-sm font-medium text-white">{camera.name}</p>
           <p className="truncate text-xs text-white/70">
-            {[camera.site_name || camera.site_code, camera.status, camera.code]
+            {[
+              camera.display_label ||
+                [camera.site_name || camera.site_code, camera.nvr_name, camera.channel != null ? `Ch ${camera.channel}` : ""]
+                  .filter(Boolean)
+                  .join(" · "),
+              camera.status,
+              camera.code,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </p>
@@ -498,9 +505,7 @@ export default function OpsCentralPage() {
                     {selectedServer ? (
                       <div className="space-y-2 rounded-md border p-3 text-xs text-muted-foreground">
                         <div className="flex items-center gap-2">
-                          {["online", "ok", "healthy", "up"].includes(
-                            (selectedServer.last_health || "").toLowerCase()
-                          ) ? (
+                          {selectedServer.last_health === "online" ? (
                             <Wifi className="h-3.5 w-3.5 text-emerald-600" />
                           ) : (
                             <WifiOff className="h-3.5 w-3.5 text-amber-600" />

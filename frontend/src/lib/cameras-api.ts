@@ -81,6 +81,8 @@ export type CameraRecord = {
   id: number;
   code: string;
   name: string;
+  /** "{site} · {nvr} · Ch {channel}" — display only; code/cam-id unchanged */
+  display_label?: string;
   nvr: number;
   channel: number;
   channel_label: string;
@@ -101,8 +103,8 @@ export type CameraRecord = {
   ml_stream_key?: string;
   ml_live_stream_url?: string;
   raw_stream_url?: string;
-  /** Assigned ML node (IT Super Admin); read-only for site users */
   ml_server?: number | null;
+  ml_server_id?: number | null;
   ml_server_name?: string;
   /** @deprecated Use ml_live_stream_url — Django proxy removed */
   stream_path?: string;
@@ -150,6 +152,8 @@ export type DetectionEvent = {
   track_event?: string;
   confidence: number;
   bbox: [number, number, number, number];
+  infer_frame_width?: number | null;
+  infer_frame_height?: number | null;
   is_alert: boolean;
   clip_status?: ClipStatus;
   clip_url?: string;
@@ -319,9 +323,9 @@ export function resolveMediaUrl(url: string): string {
     }
   }
   const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-  return `${base}${path}`;   
+  return `${base}${path}`;
 }
-    
+
 // ——— Sites ———
 
 export async function fetchSites(): Promise<SiteRecord[]> {
@@ -427,15 +431,29 @@ export async function fetchCamera(id: number): Promise<CameraRecord> {
   return res.json();
 }
 
-export async function fetchCameras(params?: { nvr?: number; location?: string }): Promise<CameraRecord[]> {
+/** True when camera is assigned to an ML server via Camera Distribution. */
+export function isCameraAllocated(
+  cam: Pick<CameraRecord, "ml_server"> & { ml_server_id?: number | null }
+): boolean {
+  const id = cam.ml_server ?? cam.ml_server_id
+  return id != null && Number(id) > 0
+}
+
+export async function fetchCameras(params?: {
+  nvr?: number
+  location?: string
+  allocatedOnly?: boolean
+}): Promise<CameraRecord[]> {
   const search = new URLSearchParams();
   if (params?.nvr != null) search.set("nvr", String(params.nvr));
   if (params?.location) search.set("location", params.location);
+  if (params?.allocatedOnly) search.set("allocated", "1");
   const qs = search.toString() ? `?${search}` : "";
   const res = await fetch(`${API}/cameras/${qs}`, { headers: getAuthHeaders(), cache: "no-store" });
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) throw new Error(`Failed to load cameras (${res.status})`);
-  return parseList<CameraRecord>(await res.json());
+  const rows = await parseList<CameraRecord>(await res.json());
+  return params?.allocatedOnly ? rows.filter(isCameraAllocated) : rows;
 }
 
 export async function fetchCameraPurposes(): Promise<CameraPurposeOption[]> {
@@ -574,17 +592,36 @@ export async function fetchStreamCameras(): Promise<{
   ml_service_enabled: boolean;
   ml_service_public_url?: string;
 }> {
-  const res = await fetch(`${API}/cameras/streams/`, {
+  const res = await fetch(`${API}/cameras/streams/?allocated=1`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`Failed to load streams (${res.status})`);
-  return res.json();
+  const data = await res.json();
+  const cameras = Array.isArray(data.cameras)
+    ? data.cameras.filter(
+        (c: { ml_server_id?: number | null }) =>
+          c.ml_server_id != null && Number(c.ml_server_id) > 0
+      )
+    : [];
+  return { ...data, cameras };
 }
 
 /** Display label for camera source (no credentials exposed). */
-export function cameraSourceLabel(cam: Pick<CameraRecord, "site_name" | "nvr_name" | "channel" | "nvr_ip">): string {
-  return `${cam.site_name} · ${cam.nvr_name} · Ch ${cam.channel}`;
+export function cameraSourceLabel(
+  cam: Pick<CameraRecord, "display_label" | "site_name" | "site_code" | "nvr_name" | "channel" | "nvr_ip">
+): string {
+  const direct = (cam.display_label || "").trim()
+  if (direct) return direct
+  const site = (cam.site_name || cam.site_code || "").trim()
+  const nvr = (cam.nvr_name || "").trim()
+  const ch = cam.channel != null ? `Ch ${cam.channel}` : ""
+  return [site, nvr, ch].filter(Boolean).join(" · ")
+}
+
+/** Primary title + source subtitle for UI lists. */
+export function cameraListTitle(cam: Pick<CameraRecord, "name" | "code">): string {
+  return (cam.name || cam.code || "").trim() || "Camera"
 }
 
 export type PersonJourneySighting = {

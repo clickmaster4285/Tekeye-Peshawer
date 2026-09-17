@@ -1,4 +1,4 @@
-import { Camera, Loader2, X } from "lucide-react"
+import { Camera, Loader2, UserCircle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -377,6 +377,8 @@ export function AddStaffStep1PersonalInfo({
   form,
   updateForm,
   staffPhotos,
+  profilePhotoIndex = 0,
+  onSetProfilePhoto,
   cameraOpen,
   onOpenCamera,
   onCaptureFromCamera,
@@ -398,6 +400,8 @@ export function AddStaffStep1PersonalInfo({
   form: AddStaffStep1Form
   updateForm: (patch: Partial<AddStaffStep1Form>) => void
   staffPhotos: UploadValue[]
+  profilePhotoIndex?: number
+  onSetProfilePhoto?: (index: number) => void
   cameraOpen?: boolean
   onOpenCamera: () => void
   onCaptureFromCamera?: (file: File) => void
@@ -417,6 +421,8 @@ export function AddStaffStep1PersonalInfo({
   const maxPhotos = 5
   const filled = staffPhotos.slice(0, maxPhotos)
   const emptySlots = Math.max(0, maxPhotos - filled.length)
+  const activeProfileIndex =
+    filled.length === 0 ? 0 : Math.min(Math.max(0, profilePhotoIndex), filled.length - 1)
   const menuPortalTarget = typeof document !== "undefined" ? document.body : null
   
   // Use provided options or our categorized ones
@@ -749,8 +755,16 @@ export function AddStaffStep1PersonalInfo({
               <p className="text-sm font-medium text-muted-foreground">Captured images</p>
               <div className="overflow-x-auto overflow-y-hidden pb-2">
                 <div className="grid grid-cols-5 gap-3 min-w-[calc(12rem*5+0.75rem*4)] w-max">
-                  {filled.map((img, idx) => (
-                    <div key={idx} className="relative h-[14.5rem] w-48 shrink-0">
+                  {filled.map((img, idx) => {
+                    const isProfile = idx === activeProfileIndex
+                    return (
+                    <div
+                      key={idx}
+                      className={cn(
+                        "group relative h-[14.5rem] w-48 shrink-0",
+                        isProfile && "ring-2 ring-[#3366FF] rounded-md"
+                      )}
+                    >
                       {img.previewUrl ? (
                         <>
                           <img
@@ -765,10 +779,25 @@ export function AddStaffStep1PersonalInfo({
                               <span className="sr-only">Checking face…</span>
                             </div>
                           )}
+                          {isProfile && (
+                            <span className="absolute left-1 top-1 z-[1] rounded bg-[#3366FF] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow">
+                              Profile
+                            </span>
+                          )}
+                          {!img.validating && onSetProfilePhoto && !isProfile && (
+                            <button
+                              type="button"
+                              onClick={() => onSetProfilePhoto(idx)}
+                              className="absolute inset-x-1 bottom-1 z-[1] flex items-center justify-center gap-1 rounded-md bg-black/75 px-2 py-1.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                            >
+                              <UserCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              Set as profile image
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onRemovePhoto(idx)}
-                            className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow"
+                            className="absolute right-1 top-1 z-[2] flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow"
                             aria-label="Remove photo"
                           >
                             <X className="h-3 w-3" />
@@ -780,7 +809,8 @@ export function AddStaffStep1PersonalInfo({
                         </div>
                       )}
                     </div>
-                  ))}
+                    )
+                  })}
                   
                   {Array.from({ length: emptySlots }).map((_, i) => {
                     const slotNumber = filled.length + i + 1
@@ -795,7 +825,10 @@ export function AddStaffStep1PersonalInfo({
                   })}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">{filled.length} / {maxPhotos} images</p>
+              <p className="text-xs text-muted-foreground">
+                {filled.length} / {maxPhotos} images
+                {filled.length > 0 ? " · Hover a photo to set it as the profile image" : ""}
+              </p>
             </div>
           </div>
         </div>

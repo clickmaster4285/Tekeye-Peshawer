@@ -104,6 +104,17 @@ def _resolve_live_stream(
     # Do not block HTTP on YOLO load. Raw JPEG/RTSP can serve before infer is ready.
     if require_engine and not _live.is_ready():
         raise HTTPException(status_code=503, detail="Live engine still starting")
+    key = (key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing camera key")
+    if not _live.is_registered(key):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Camera {key} is not assigned to this ML server. "
+                "Assign it in Camera Distribution and sync; unassigned cameras stay idle."
+            ),
+        )
     purpose_list = [p.strip() for p in (purposes or "").split(",") if p.strip()]
     if purpose_list or (purpose or "").strip():
         applied = _live.set_camera_purposes(key, purpose=purpose, purposes=purpose_list)
@@ -211,6 +222,75 @@ async def detect(
     return {"detections": detections, "count": len(detections)}
 
 
+@app.post("/camera-health/analyze")
+async def camera_health_analyze(
+    image: UploadFile | None = File(None),
+    purposes: str = Form(""),
+    roi_json: str = Form(""),
+    detections_json: str = Form(""),
+    previous_fingerprint_json: str = Form(""),
+    rtsp_available: bool = Form(True),
+    fps: float | None = Form(None),
+    frame_age_sec: float | None = Form(None),
+    dropped_frames: int | None = Form(None),
+    camera_key: str = Form(""),
+):
+    """Analyze one camera frame for health / visibility (OpenCV + purpose checks)."""
+    import json
+
+    from cam_health import analyze_camera_health
+
+    frame = None
+    if image is not None:
+        data = await image.read()
+        if data:
+            try:
+                frame = decode_image(data)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    purpose_list = [p.strip() for p in purposes.split(",") if p.strip()]
+    roi = None
+    detections = None
+    prev_fp = None
+    try:
+        if roi_json.strip():
+            roi = json.loads(roi_json)
+        if detections_json.strip():
+            detections = json.loads(detections_json)
+        if previous_fingerprint_json.strip():
+            prev_fp = json.loads(previous_fingerprint_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON field: {exc}") from exc
+
+    # Prefer live detections when camera_key is registered
+    key = (camera_key or "").strip()
+    if key and _live.is_ready() and detections is None:
+        try:
+            snap = _live.get_detection_snapshot(key)
+            detections = snap.get("detections") or []
+            if frame is None:
+                jpeg = _live.get_raw_jpeg_bytes(key)
+                if jpeg:
+                    frame = decode_image(jpeg)
+        except Exception:
+            pass
+
+    result = analyze_camera_health(
+        frame,
+        purposes=purpose_list,
+        roi=roi if isinstance(roi, dict) else None,
+        detections=detections if isinstance(detections, list) else None,
+        previous_fingerprint=prev_fp if isinstance(prev_fp, list) else None,
+        rtsp_available=bool(rtsp_available),
+        fps=fps,
+        frame_age_sec=frame_age_sec,
+        dropped_frames=dropped_frames,
+    )
+    # Drop bulky fingerprint from HTTP response body (still returned nested under image)
+    return result
+
+
 @app.post("/plates/detect")
 async def detect_plates(
     image: UploadFile = File(...),
@@ -274,7 +354,10 @@ def live_status():
 
 
 @app.post("/live/register/bulk")
-def register_cameras_bulk(payload: list[CameraRegisterEntry]):
+def register_cameras_bulk(
+    payload: list[CameraRegisterEntry],
+    replace: bool = False,
+):
     entries = []
     for item in payload:
         if not item.key.strip() or not item.rtsp_url.strip():
@@ -289,7 +372,7 @@ def register_cameras_bulk(payload: list[CameraRegisterEntry]):
         if purposes:
             entry["purposes"] = purposes
         entries.append(entry)
-    result = _live.register_cameras_bulk(entries)
+    result = _live.register_cameras_bulk(entries, replace=bool(replace))
     if not _live.ensure_started():
         print("[live] Warning: camera registry updated but infer loops did not start")
     return result
@@ -314,6 +397,20 @@ def live_detections(
     key = camera_key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="camera_key required")
+    # Warm-up: return empty 200 instead of 503 so clients can keep polling quietly.
+    if not _live.is_ready():
+        return {
+            "ip": key,
+            "key": key,
+            "detections": [],
+            "purposes": [],
+            "frame_width": 0,
+            "frame_height": 0,
+            "display_width": 0,
+            "display_height": 0,
+            "has_evidence": False,
+            "count": 0,
+        }
     _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes)
     snapshot = _live.get_detection_snapshot(key)
     return {
@@ -325,6 +422,7 @@ def live_detections(
         "frame_height": snapshot.get("frame_height") or 0,
         "display_width": snapshot.get("display_width") or 0,
         "display_height": snapshot.get("display_height") or 0,
+        "has_evidence": bool(snapshot.get("has_evidence")),
         "count": len(snapshot.get("detections") or []),
     }
 
@@ -369,6 +467,31 @@ def live_jpeg_raw(
     frame = _live.wait_for_raw_jpeg(key, timeout_sec=2.0)
     if not frame:
         raise HTTPException(status_code=503, detail="No frame yet")
+    return Response(
+        content=frame,
+        media_type="image/jpeg",
+        headers=_mjpeg_headers(),
+    )
+
+
+@app.get("/live/cam/{camera_key}/jpeg/evidence")
+def live_jpeg_evidence(
+    camera_key: str,
+    rtsp_url: str | None = None,
+    purpose: str = "",
+    purposes: str = "",
+):
+    """
+    Raw JPEG of the SAME frame YOLO last ran on (evidence buffer).
+    Use this for detection snapshots — do not re-open RTSP in Django.
+    """
+    key = camera_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="camera_key required")
+    _resolve_live_stream(key, rtsp_url, purpose=purpose, purposes=purposes, require_engine=False)
+    frame = _live.get_evidence_jpeg(key)
+    if not frame:
+        raise HTTPException(status_code=503, detail="No evidence frame yet")
     return Response(
         content=frame,
         media_type="image/jpeg",

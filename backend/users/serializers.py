@@ -71,7 +71,22 @@ class LoginResponseSerializer(serializers.Serializer):
             "we_boc_role": user.we_boc_role or "",
             "is_active": user.is_active,
             "allowed_modules": list(user.allowed_modules or []) if user.role != "ADMIN" else [],
+            "profile_image": user_profile_image_url(user),
         }
+
+
+def user_profile_image_url(user) -> str | None:
+    """Public /media path for the linked staff photo, if any."""
+    try:
+        staff = getattr(user, "staff_profile", None)
+        if staff is None or not getattr(staff, "profile_image", None):
+            return None
+        name = str(getattr(staff.profile_image, "name", "") or "").strip()
+        if not name:
+            return None
+        return f"/media/{name.lstrip('/')}"
+    except Exception:
+        return None
 
 
 # -----------------------------
@@ -98,6 +113,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     date_joined = serializers.DateTimeField(read_only=True)
     last_login = serializers.DateTimeField(read_only=True)
     can_delete = serializers.SerializerMethodField()
+    profile_image = serializers.SerializerMethodField()
     allowed_modules = serializers.ListField(
         child=serializers.CharField(max_length=120),
         required=False,
@@ -119,6 +135,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "last_login",
             "can_delete",
             "allowed_modules",
+            "profile_image",
             *USER_PROFILE_FIELDS,
         ]
         extra_kwargs = {
@@ -135,6 +152,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
         if obj.role == LOCATION_ADMIN_ROLE:
             return bool(actor and is_global_admin(actor))
         return True
+
+    def get_profile_image(self, obj):
+        return user_profile_image_url(obj)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

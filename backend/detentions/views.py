@@ -182,7 +182,12 @@ def get_memo_queryset():
     return (
 
         DetentionMemo.objects.prefetch_related(
-            "goods_lines__images", "attachments").all()
+            "goods_lines__images",
+            "goods_lines__located_camera__nvr__site",
+            "goods_lines__located_camera__ml_server",
+            "goods_lines__detection_event",
+            "attachments",
+        ).all()
 
     )
 

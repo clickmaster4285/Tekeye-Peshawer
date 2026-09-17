@@ -35,8 +35,7 @@ export default function ObjectTrackingDetailPage() {
   const detailQuery = useQuery({
     queryKey: ["object-tracking-detail", uuid],
     queryFn: () => fetchTrackedObjectDetail(uuid),
-    enabled: Boolean(uuid),
-    refetchInterval: 8000,
+    enabled: Boolean(uuid)
   })
 
   const obj = detailQuery.data

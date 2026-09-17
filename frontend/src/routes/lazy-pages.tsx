@@ -178,6 +178,7 @@ export const PAGE_LOADERS = {
   AnomalyDetection: () => import("@/pages/cameras/AnomalyDetection").then((m) => ({ default: m.default })),
   Reports: () => import("@/pages/reports/Reports").then((m) => ({ default: m.default })),
   PredictiveInsights: () => import("@/pages/reports/PredictiveInsights").then((m) => ({ default: m.default })),
+  AiSuggestions: () => import("@/pages/operations/AiSuggestions").then((m) => ({ default: m.default })),
   DataVisualization: () => import("@/pages/reports/DataVisualization").then((m) => ({ default: m.default })),
   Employees: () => import("@/pages/hr/Employees").then((m) => ({ default: m.default })),
   Recruitment: () => import("@/pages/hr/Recruitment").then((m) => ({ default: m.default })),

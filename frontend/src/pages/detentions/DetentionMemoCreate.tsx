@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ChevronDown, Plus, Trash2, Copy, Eye, Camera, X } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -45,6 +45,8 @@ import {
 } from "@/components/goods/goods-line-text-field"
 import { getStoredUser } from "@/lib/auth"
 import { createDetentionMemo } from "@/lib/detention-memo-api"
+import { useCameras } from "@/hooks/use-cameras"
+import type { CameraRecord } from "@/lib/cameras-api"
 import {
   fetchNoteSheetById,
   fetchNoteSheets,
@@ -108,6 +110,12 @@ export type GoodsLineItem = {
   perishable: boolean
   images: string[]
   imageFiles: File[]
+  /** Camera zone used to filter the located-camera list. */
+  locatedZone: string
+  /** Camera DB id where this item was located/detected. */
+  locatedCameraId: number | null
+  detectedAt: string
+  detectionEventId: number | null
 }
 
 const emptyGoodsItem = (): GoodsLineItem => ({
@@ -124,7 +132,50 @@ const emptyGoodsItem = (): GoodsLineItem => ({
   perishable: false,
   images: [],
   imageFiles: [],
+  locatedZone: "",
+  locatedCameraId: null,
+  detectedAt: "",
+  detectionEventId: null,
 })
+
+function normalizeLocationKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+}
+
+function camerasForDetentionLocation(
+  cameras: CameraRecord[],
+  locationOfDetention: string
+): CameraRecord[] {
+  const active = cameras.filter((c) => c.is_active)
+  const key = normalizeLocationKey(locationOfDetention)
+  if (!key) return active
+  return active.filter((c) => {
+    const loc = normalizeLocationKey(c.location || c.site_code || "")
+    const site = normalizeLocationKey(c.site_name || "")
+    return loc.includes(key) || key.includes(loc) || site.includes(key) || key.includes(site)
+  })
+}
+
+function uniqueCameraZones(cameras: CameraRecord[]): string[] {
+  const zones = new Set<string>()
+  for (const cam of cameras) {
+    const z = (cam.zone || "").trim()
+    if (z) zones.add(z)
+  }
+  return Array.from(zones).sort((a, b) => a.localeCompare(b))
+}
+
+function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
+  const z = zone.trim().toLowerCase()
+  if (!z) return []
+  return cameras.filter((c) => (c.zone || "").trim().toLowerCase() === z)
+}
+
+function cameraOptionLabel(cam: CameraRecord): string {
+  const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
+  const zone = (cam.zone || "").trim()
+  return zone ? `${name} · ${zone}` : name
+}
 
 function noteSheetDateTime(value: string | undefined | null): string {
   if (!value?.trim()) return ""
@@ -218,6 +269,29 @@ export default function DetentionMemoCreatePage() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState("")
   const [invalidField, setInvalidField] = useState("")
+
+  const { cameras: allCameras } = useCameras({ activeOnly: true, allocatedOnly: true })
+  const locationCameras = useMemo(
+    () => camerasForDetentionLocation(allCameras, locationOfDetention),
+    [allCameras, locationOfDetention]
+  )
+  const availableZones = useMemo(() => uniqueCameraZones(locationCameras), [locationCameras])
+
+  // If location/zone list changes, drop cameras that no longer belong.
+  useEffect(() => {
+    setGoodsItems((prev) =>
+      prev.map((item) => {
+        if (item.locatedCameraId == null) return item
+        const cam = locationCameras.find((c) => c.id === item.locatedCameraId)
+        if (!cam) return { ...item, locatedCameraId: null, locatedZone: item.locatedZone }
+        const zone = (cam.zone || "").trim()
+        if (item.locatedZone && zone && item.locatedZone !== zone) {
+          return { ...item, locatedCameraId: null }
+        }
+        return item.locatedZone ? item : { ...item, locatedZone: zone }
+      })
+    )
+  }, [locationCameras])
 
   useEffect(() => {
     return () => {
@@ -412,6 +486,9 @@ export default function DetentionMemoCreatePage() {
         itemNotes: item.itemNotes,
         perishable: item.perishable,
         images: [],
+        locatedCameraId: item.locatedCameraId,
+        detectedAt: item.detectedAt || "",
+        detectionEventId: item.detectionEventId,
       })),
       seizingOfficerNotes,
       examiningOfficerNotes,
@@ -883,7 +960,12 @@ export default function DetentionMemoCreatePage() {
               <CollapsibleContent>
                 <CardContent className="pt-0">
                   <p className="text-sm text-muted-foreground mb-4">
-                    List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning. Click the eye button to preview a larger QR code.
+                    List of seized/detained goods. <strong>Each item gets a unique QR code</strong> for scanning.
+                    Pick <strong>Zone</strong> first, then <strong>Located Camera</strong> (name + zone).
+                    Only <strong>assigned</strong> cameras (Camera Distribution) are listed.
+                    {locationOfDetention
+                      ? ` Location: ${locationOfDetention}.`
+                      : " Select Location of Detention to load zones/cameras."}
                   </p>
                   <div
                     id="dm-goods"
@@ -899,26 +981,31 @@ export default function DetentionMemoCreatePage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[180px]">QR Code</TableHead>
-                          <TableHead className="w-[240px]">Description of Goods <span className="text-red-600">*</span></TableHead>
+                          <TableHead className="w-[200px]">Description of Goods <span className="text-red-600">*</span></TableHead>
                           <TableHead className="w-[88px]">Qty</TableHead>
                           <TableHead className="w-[110px]">Unit</TableHead>
                           <TableHead className="w-[190px]">Condition</TableHead>
                           <TableHead className="w-[92px]">Perishable</TableHead>
                           <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
-                          <TableHead className="w-[220px]">Item Notes</TableHead>
+                          <TableHead className="w-[180px]">Item Notes</TableHead>
                           <TableHead className="w-[96px]">Images</TableHead>
+                          <TableHead className="w-[140px]">Camera Zone</TableHead>
+                          <TableHead className="w-[220px]">Located Camera</TableHead>
                           <TableHead className="w-[44px]"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {goodsItems.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={10} className="text-muted-foreground text-center py-6">
+                            <TableCell colSpan={12} className="text-muted-foreground text-center py-6">
                               No goods added. Click "Add line" to add seized/detained items.
                             </TableCell>
                           </TableRow>
                         ) : (
-                          goodsItems.map((item, idx) => (
+                          goodsItems.map((item, idx) => {
+                            const zoneCameras = camerasForZone(locationCameras, item.locatedZone)
+                            const selectedCam = locationCameras.find((c) => c.id === item.locatedCameraId)
+                            return (
                             <TableRow key={item.id} className={idx % 2 === 1 ? "bg-muted/10" : ""}>
                               <TableCell className="align-middle">
                                 <div className="flex flex-col gap-1 items-start">
@@ -1073,6 +1160,87 @@ export default function DetentionMemoCreatePage() {
                                   )}
                                 </div>
                               </TableCell>
+                              <TableCell className="align-middle">
+                                <Select
+                                  value={item.locatedZone || "__none__"}
+                                  onValueChange={(v) => {
+                                    const zone = v === "__none__" ? "" : v
+                                    setGoodsItems((prev) =>
+                                      prev.map((row) =>
+                                        row.id === item.id
+                                          ? { ...row, locatedZone: zone, locatedCameraId: null }
+                                          : row
+                                      )
+                                    )
+                                  }}
+                                >
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
+                                    <SelectValue placeholder="Select zone" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Select zone</SelectItem>
+                                    {availableZones.map((zone) => (
+                                      <SelectItem key={zone} value={zone}>
+                                        {zone}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {!availableZones.length && (
+                                  <p className="mt-1 text-[10px] text-muted-foreground">
+                                    No zones from assigned cameras for this location
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Select
+                                  value={item.locatedCameraId != null ? String(item.locatedCameraId) : "__none__"}
+                                  onValueChange={(v) => {
+                                    const camId = v === "__none__" ? null : Number(v)
+                                    const cam =
+                                      camId != null
+                                        ? zoneCameras.find((c) => c.id === camId) ||
+                                          locationCameras.find((c) => c.id === camId)
+                                        : undefined
+                                    setGoodsItems((prev) =>
+                                      prev.map((row) =>
+                                        row.id === item.id
+                                          ? {
+                                              ...row,
+                                              locatedCameraId:
+                                                Number.isFinite(camId as number) ? (camId as number) : null,
+                                              locatedZone: cam?.zone?.trim() || row.locatedZone,
+                                            }
+                                          : row
+                                      )
+                                    )
+                                  }}
+                                  disabled={!item.locatedZone}
+                                >
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
+                                    <SelectValue placeholder={item.locatedZone ? "Select camera" : "Pick zone first"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Not set</SelectItem>
+                                    {zoneCameras.map((cam) => (
+                                      <SelectItem key={cam.id} value={String(cam.id)}>
+                                        {cameraOptionLabel(cam)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {selectedCam && (
+                                  <p className="mt-1 text-[10px] text-muted-foreground truncate max-w-[210px]">
+                                    {selectedCam.name}
+                                    {selectedCam.zone ? ` · Zone ${selectedCam.zone}` : ""}
+                                  </p>
+                                )}
+                                {item.locatedZone && !zoneCameras.length && (
+                                  <p className="mt-1 text-[10px] text-amber-700">
+                                    No cameras in this zone
+                                  </p>
+                                )}
+                              </TableCell>
                               <TableCell className="align-middle text-center">
                                 <div className="flex items-center justify-center">
                                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeGoodsLine(item.id)} aria-label="Remove line">
@@ -1081,7 +1249,8 @@ export default function DetentionMemoCreatePage() {
                                 </div>
                               </TableCell>
                             </TableRow>
-                          ))
+                          )
+                          })
                         )}
                       </TableBody>
                     </Table>

@@ -58,7 +58,7 @@ def _is_person_detection(class_name: str, label: str, employee_name: str = "") -
     lbl = (label or "").strip().lower()
     emp = (employee_name or "").strip()
 
-    if cls in _WEAPON_CLASSES or cls in _NON_PERSON_CLASSES:
+    if cls in _WEAPON_CLASSES or cls in _NON_PERSON_CLASSES or cls in ("crowd", "fire", "smoke", "weapon"):
         return False
     if cls in ("person", "face"):
         return True

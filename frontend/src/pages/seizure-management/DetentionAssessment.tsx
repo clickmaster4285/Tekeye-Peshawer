@@ -329,20 +329,21 @@ export default function DetentionAssessmentPage() {
             </div>
           </div>
 
-          <Table className="table-fixed w-full" containerClassName="overflow-x-hidden">
+          <div className="w-full max-w-full overflow-x-auto rounded-lg border">
+          <Table className="min-w-[1300px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[10%]">Case No</TableHead>
-                  <TableHead className="w-[12%]">Detention Memo No</TableHead>
-                  <TableHead className="w-[10%]">Detention Date</TableHead>
-                  <TableHead className="w-[12%]">Place</TableHead>
-                  <TableHead className="w-[8%]">Type</TableHead>
-                  <TableHead className="w-[10%]">Owner</TableHead>
-                  <TableHead className="w-[10%]">Goods</TableHead>
-                  <TableHead className="w-[8%]">Value</TableHead>
-                  <TableHead className="w-[8%]">Verification</TableHead>
-                  <TableHead className="w-[8%]">Assessment</TableHead>
-                  <TableHead className="w-[7.5rem] text-right">Actions</TableHead>
+                  <TableHead className="min-w-[8rem]">Case No</TableHead>
+                  <TableHead className="min-w-[10rem]">Detention Memo No</TableHead>
+                  <TableHead className="min-w-[8rem]">Detention Date</TableHead>
+                  <TableHead className="min-w-[9rem]">Place</TableHead>
+                  <TableHead className="min-w-[5.5rem]">Type</TableHead>
+                  <TableHead className="min-w-[8rem]">Owner</TableHead>
+                  <TableHead className="min-w-[8rem]">Goods</TableHead>
+                  <TableHead className="min-w-[6rem]">Value</TableHead>
+                  <TableHead className="min-w-[7rem]">Verification</TableHead>
+                  <TableHead className="min-w-[7rem]">Assessment</TableHead>
+                  <TableHead className="min-w-[7.5rem] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -471,6 +472,7 @@ export default function DetentionAssessmentPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
         </CardContent>
       </Card>
       <PdfExportHost hostRef={pdf.hostRef}>

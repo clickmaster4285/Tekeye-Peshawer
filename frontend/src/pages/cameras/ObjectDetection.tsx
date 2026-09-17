@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { MlSystemStatus } from "@/components/cameras/ml-system-status"
-import { DetectionSnapshotThumb } from "@/components/cameras/detection-snapshot-thumb"
+import { DetectionSnapshotThumb, detectionDisplayLabel } from "@/components/cameras/detection-snapshot-thumb"
 import {
   fetchDetectionEventsPage,
   fetchDetectionSummary,
@@ -106,8 +106,7 @@ export default function ObjectDetectionPage() {
 
   const { data: summary } = useQuery({
     queryKey: ["detection-summary"],
-    queryFn: fetchDetectionSummary,
-    refetchInterval: 15000,
+    queryFn: fetchDetectionSummary
   })
 
   const { data: sites = [] } = useQuery({
@@ -456,8 +455,8 @@ export default function ObjectDetectionPage() {
                             {row.class_name}
                           </Badge>
                         </TableCell>
-                        <TableCell className="max-w-[180px] truncate" title={row.label}>
-                          {row.label}
+                        <TableCell className="max-w-[180px] truncate" title={detectionDisplayLabel(row)}>
+                          {detectionDisplayLabel(row)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">

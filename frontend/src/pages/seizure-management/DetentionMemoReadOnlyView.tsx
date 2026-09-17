@@ -222,20 +222,20 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
           <CardContent className="rounded-lg border p-0">
             <div className="overflow-x-auto">
               <ScrollArea className="w-full">
-                <Table className="table-fixed w-full">
+                <Table className="min-w-[1100px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>QR Code</TableHead>
-                      <TableHead className="w-[22%]">Description</TableHead>
-                      <TableHead>PCT Code</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Condition</TableHead>
-                      <TableHead>Assessable Value (PKR)</TableHead>
-                      <TableHead>Perishable</TableHead>
-                      <TableHead>ID / Chassis</TableHead>
-                      <TableHead className="w-[16%]">Item Notes</TableHead>
-                      <TableHead>Images</TableHead>
+                      <TableHead className="min-w-[7rem]">QR Code</TableHead>
+                      <TableHead className="min-w-[12rem]">Description</TableHead>
+                      <TableHead className="min-w-[6rem]">PCT Code</TableHead>
+                      <TableHead className="min-w-[4rem]">Qty</TableHead>
+                      <TableHead className="min-w-[4rem]">Unit</TableHead>
+                      <TableHead className="min-w-[6rem]">Condition</TableHead>
+                      <TableHead className="min-w-[9rem]">Assessable Value (PKR)</TableHead>
+                      <TableHead className="min-w-[6rem]">Perishable</TableHead>
+                      <TableHead className="min-w-[7rem]">ID / Chassis</TableHead>
+                      <TableHead className="min-w-[10rem]">Item Notes</TableHead>
+                      <TableHead className="min-w-[5rem]">Images</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

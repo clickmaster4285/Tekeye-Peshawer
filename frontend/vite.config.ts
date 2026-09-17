@@ -42,9 +42,10 @@ export default defineConfig(({ mode }) => {
       basicSsl(),
       react(),
       VitePWA({
-        registerType: "autoUpdate",
+        // Prompt / silent wait — never force a full-page reload on every client.
+        registerType: "prompt",
         includeAssets: [
-          "custom-logo.jpeg",
+          "custom-logo.PNG",
           "icon.svg",
           "models/blazeface/model.json",
           "models/blazeface/group1-shard1of1.bin",
@@ -64,15 +65,15 @@ export default defineConfig(({ mode }) => {
           dir: "ltr",
           icons: [
             {
-              src: "custom-logo.jpeg",
+              src: "custom-logo.PNG",
               sizes: "512x512",
-              type: "image/jpeg",
+              type: "image/png",
               purpose: "any",
             },
             {
-              src: "custom-logo.jpeg",
+              src: "custom-logo.PNG",
               sizes: "192x192",
-              type: "image/jpeg",
+              type: "image/png",
               purpose: "any",
             },
           ],
@@ -138,6 +139,12 @@ export default defineConfig(({ mode }) => {
             proxy: {
               "/api": { target: proxyTarget, changeOrigin: true, secure: false },
               "/media": { target: proxyTarget, changeOrigin: true, secure: false },
+              "/socket.io": {
+                // Long-polling only (Django runserver cannot upgrade WebSocket).
+                target: proxyTarget,
+                changeOrigin: true,
+                secure: false,
+              },
               // Browser MJPEG feeds use /ml/... (same-origin). Strip prefix → ML api_server.
               // Long-lived multipart streams need no proxy timeout / no buffering.
               "/ml": {

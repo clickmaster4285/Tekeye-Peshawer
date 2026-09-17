@@ -79,6 +79,8 @@ INSTALLED_APPS = [
     "ops_central.apps.OpsCentralConfig",
     "gps_tracking.apps.GpsTrackingConfig",
     "video_recovery.apps.VideoRecoveryConfig",
+    "camera_health.apps.CameraHealthConfig",
+    "realtime.apps.RealtimeConfig",
 ]
 
 # -----------------------------
@@ -245,10 +247,10 @@ FFMPEG_PATH = _resolve_ffmpeg_path()
 # -----------------------------
 # ML inference service (external ml_services/ on Server 2 — HTTP client only)
 # -----------------------------
-ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://127.0.0.1:8100").strip()
+ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "").strip()
 ML_SERVICE_PUBLIC_URL = os.getenv(
     "ML_SERVICE_PUBLIC_URL",
-    os.getenv("ML_SERVICE_URL", "http://127.0.0.1:8100"),
+    os.getenv("ML_SERVICE_URL", ""),
 ).strip().rstrip("/")
 ML_SERVICE_TIMEOUT = int(os.getenv("ML_SERVICE_TIMEOUT", "60"))
 ML_VIDEO_SEARCH_TIMEOUT = int(os.getenv("ML_VIDEO_SEARCH_TIMEOUT", "3600"))
@@ -270,10 +272,16 @@ DETECTION_CLIP_REQUEUE_LIMIT = int(os.getenv("DETECTION_CLIP_REQUEUE_LIMIT", "50
 DETECTION_CLIP_MAX_WORKERS = int(os.getenv("DETECTION_CLIP_MAX_WORKERS", "1"))
 DETECTION_CLIP_MAX_QUEUE = int(os.getenv("DETECTION_CLIP_MAX_QUEUE", "50"))
 
-# Background worker throttling (sleep, CPU circuit breaker, ffmpeg spawn spacing)
+# Camera Health / AI Suggestions — OpenCV metrics on sampled frames
+CAMERA_HEALTH_WORKER_ENABLED = os.getenv("CAMERA_HEALTH_WORKER_ENABLED", "True").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+CAMERA_HEALTH_INTERVAL_SEC = float(os.getenv("CAMERA_HEALTH_INTERVAL_SEC", "45"))
+
+# Background worker throttling (cycle sleep + ffmpeg spawn spacing)
 WORKER_MIN_CYCLE_SLEEP_MS = int(os.getenv("WORKER_MIN_CYCLE_SLEEP_MS", "100"))
-WORKER_CPU_PAUSE_THRESHOLD = float(os.getenv("WORKER_CPU_PAUSE_THRESHOLD", "80"))
-WORKER_CPU_PAUSE_SEC = float(os.getenv("WORKER_CPU_PAUSE_SEC", "30"))
 FFMPEG_SNAPSHOT_MIN_INTERVAL_SEC = float(os.getenv("FFMPEG_SNAPSHOT_MIN_INTERVAL_SEC", "2"))
 FFMPEG_SNAPSHOT_TIMEOUT_SEC = int(os.getenv("FFMPEG_SNAPSHOT_TIMEOUT_SEC", "12"))
 FFMPEG_STIMEOUT_US = os.getenv("FFMPEG_STIMEOUT_US", "10000000")
@@ -284,6 +292,13 @@ DETECTION_CLIP_ENABLED = os.getenv("DETECTION_CLIP_ENABLED", "true").strip().low
 DETECTION_CLIP_SECONDS = int(os.getenv("DETECTION_CLIP_SECONDS", "7"))
 # Min seconds before the same label/class on one camera is saved again (0 = save every poll)
 DETECTION_DEDUP_SECONDS = int(os.getenv("DETECTION_DEDUP_SECONDS", "5"))
+# Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
+CROWD_ALERT_ENABLED = os.getenv("CROWD_ALERT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+CROWD_ALERT_THRESHOLD = int(os.getenv("CROWD_ALERT_THRESHOLD", "10"))
+CROWD_ALERT_MIN_CONFIDENCE = float(os.getenv("CROWD_ALERT_MIN_CONFIDENCE", "0.25"))
+# Same episode technique for fire / smoke / weapon alerts (save once + notify once)
+ALERT_EPISODE_ENABLED = os.getenv("ALERT_EPISODE_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+ALERT_EPISODE_MIN_CONFIDENCE = float(os.getenv("ALERT_EPISODE_MIN_CONFIDENCE", "0.25"))
 
 # Attendance — InsightFace recognition + decision engine
 ATTENDANCE_FACE_MIN_CONFIDENCE = float(os.getenv("ATTENDANCE_FACE_MIN_CONFIDENCE", "0.25"))

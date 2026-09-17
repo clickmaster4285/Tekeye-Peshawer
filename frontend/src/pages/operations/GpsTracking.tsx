@@ -105,13 +105,11 @@ export default function GpsTrackingPage() {
 
   const meQuery = useQuery({
     queryKey: ["gps-me"],
-    queryFn: fetchGpsMe,
-    refetchInterval: LIVE_POLL_MS,
+    queryFn: fetchGpsMe
   })
   const liveQuery = useQuery({
     queryKey: ["gps-live", station],
-    queryFn: () => fetchGpsLive(station),
-    refetchInterval: LIVE_POLL_MS,
+    queryFn: () => fetchGpsLive(station)
   })
   const historyQuery = useQuery({
     queryKey: ["gps-history", selectedUserId, historyHours],
