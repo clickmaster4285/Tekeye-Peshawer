@@ -84,8 +84,15 @@ class LoginView(APIView):
                         {"detail": str(exc), "code": "DEVICE_REVOKED"},
                         status=status.HTTP_403_FORBIDDEN,
                     )
+                except ValidationError:
+                    raise
+                except Exception:
+                    logger.exception("Mobile session registration failed during login")
             token, _ = Token.objects.get_or_create(user=user)
-            create_activity_log(user, request, "POST /api/auth/login (success)")
+            try:
+                create_activity_log(user, request, "POST /api/auth/login (success)")
+            except Exception:
+                logger.exception("Failed to write login activity log")
             payload = {"token": token.key, "user": user}
             if mobile_session:
                 payload["mobile_session"] = mobile_session
@@ -95,8 +102,19 @@ class LoginView(APIView):
             )
             return attach_media_auth_cookie(response, token.key, request)
         except ValidationError:
-            create_activity_log(None, request, "POST /api/auth/login (failed)")
+            try:
+                create_activity_log(None, request, "POST /api/auth/login (failed)")
+            except Exception:
+                logger.exception("Failed to write failed-login activity log")
             raise
+        except Exception:
+            logger.exception("Login crashed")
+            return Response(
+                {
+                    "detail": "Server error during login. Apply pending migrations (including mobile device tables) and check the Django log."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 # -----------------------------

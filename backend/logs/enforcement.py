@@ -244,7 +244,7 @@ def register_or_update_device(user, payload: dict, request=None) -> tuple[Mobile
         "pwa_version": (payload.get("pwa_version") or "")[:40],
         "last_seen_at": now,
         "last_heartbeat_at": now,
-        "last_ip": ip,
+        "last_ip": ip or None,
         "is_active": True,
         "status": MobileDevice.STATUS_ACTIVE,
     }
