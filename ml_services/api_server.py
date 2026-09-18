@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from load_env import load_ml_env
@@ -689,6 +689,100 @@ def search_video_status(job_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Search job not found.")
     return row
+
+
+def _form_flag(value: str, default: bool = True) -> bool:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
+@app.post("/analyze/video")
+async def analyze_video(
+    video: UploadFile | None = File(default=None),
+    video_path: str = Form(default=""),
+    person: str = Form(default="true"),
+    vehicle: str = Form(default="true"),
+    weapon: str = Form(default="true"),
+    fire: str = Form(default="true"),
+    match_staff: str = Form(default="true"),
+    sample_fps: float = 0.5,
+):
+    """Tag an uploaded video with person / vehicle / weapon / fire detections."""
+    from video_analyze_jobs import copy_upload, new_upload_dir, start_analyze_job
+
+    allowed_local = os.getenv("ML_ALLOW_LOCAL_VIDEO_PATHS", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    local_video = (video_path or "").strip()
+    upload_dir = new_upload_dir()
+    cleanup_video = True
+    stored_video = ""
+    if local_video:
+        if not allowed_local:
+            raise HTTPException(status_code=400, detail="Local video paths are disabled.")
+        if not os.path.isfile(local_video):
+            raise HTTPException(status_code=400, detail="Invalid local video path.")
+        normalized = os.path.normpath(local_video).replace("\\", "/")
+        if "video_analyze" not in normalized.lower():
+            raise HTTPException(status_code=400, detail="Invalid local video path.")
+        stored_video = local_video
+        cleanup_video = False
+    elif video is not None and video.filename:
+        stored_path = upload_dir / "source.mp4"
+        copy_upload(video.file, stored_path)
+        stored_video = str(stored_path)
+    else:
+        raise HTTPException(status_code=400, detail="video file is required.")
+
+    want_person = _form_flag(person)
+    want_vehicle = _form_flag(vehicle)
+    want_weapon = _form_flag(weapon)
+    want_fire = _form_flag(fire)
+    if not any([want_person, want_vehicle, want_weapon, want_fire]):
+        raise HTTPException(status_code=400, detail="Select at least one detection type.")
+
+    job_id = start_analyze_job(
+        stored_video,
+        person=want_person,
+        vehicle=want_vehicle,
+        weapon=want_weapon,
+        fire=want_fire,
+        match_staff=_form_flag(match_staff),
+        sample_fps=max(0.5, min(float(sample_fps or 0.5), 4.0)),
+        cleanup_video=cleanup_video,
+    )
+    return {"job_id": job_id, "status": "queued", "progress": 1, "message": "Queued"}
+
+
+@app.get("/analyze/video/{job_id}")
+def analyze_video_status(job_id: str):
+    from video_analyze_jobs import get_analyze_job
+
+    row = get_analyze_job(job_id.strip())
+    if not row:
+        raise HTTPException(status_code=404, detail="Analyze job not found.")
+    public = dict(row)
+    public.pop("output_path", None)
+    return public
+
+
+@app.get("/analyze/video/{job_id}/file")
+def analyze_video_file(job_id: str):
+    from video_analyze_jobs import get_analyze_job, get_output_path
+
+    row = get_analyze_job(job_id.strip())
+    if not row:
+        raise HTTPException(status_code=404, detail="Analyze job not found.")
+    if str(row.get("status") or "") != "done":
+        raise HTTPException(status_code=409, detail="Tagged video is not ready yet.")
+        path = get_output_path(job_id.strip())
+    if path is None:
+        raise HTTPException(status_code=404, detail="Tagged video file is missing.")
+    return FileResponse(str(path), media_type="video/mp4", filename=path.name)
 
 
 if __name__ == "__main__":

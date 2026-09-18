@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +157,12 @@ _face_db: KnownFaceDB | None = None
 _warmup_done = False
 _custom_class_ids_cache: list[int] | None = None
 _custom_class_names_cache: dict[int, str] | None = None
+_PREDICT_LOCK = threading.Lock()
+
+
+def gpu_predict_lock() -> threading.Lock:
+    """One lock for all YOLO predicts so live + video jobs cannot deadlock the GPU."""
+    return _PREDICT_LOCK
 
 
 def prefer_gpu() -> bool:
@@ -739,7 +746,8 @@ def _predict_model(
     }
     if classes is not None:
         kwargs["classes"] = list(classes)
-    return model.predict(**kwargs)
+    with _PREDICT_LOCK:
+        return model.predict(**kwargs)
 
 
 def parse_yolo_result(

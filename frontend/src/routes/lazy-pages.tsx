@@ -204,6 +204,7 @@ export const PAGE_LOADERS = {
   TableOfContents: () => import("@/pages/TableOfContents").then((m) => ({ default: m.default })),
   PlaybackSearch: () => import("@/pages/operations/PlaybackSearch").then((m) => ({ default: m.default })),
   VideoImageSearch: () => import("@/pages/operations/VideoImageSearch").then((m) => ({ default: m.default })),
+  VideoAiTest: () => import("@/pages/operations/VideoAiTest").then((m) => ({ default: m.default })),
   ThermalImaging: () => import("@/pages/operations/ThermalImaging").then((m) => ({ default: m.default })),
   AlertsNotifications: () => import("@/pages/operations/AlertsNotifications").then((m) => ({ default: m.default })),
   IncidentManagement: () => import("@/pages/operations/IncidentManagement").then((m) => ({ default: m.default })),

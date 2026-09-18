@@ -257,6 +257,9 @@ ML_VIDEO_SEARCH_TIMEOUT = int(os.getenv("ML_VIDEO_SEARCH_TIMEOUT", "3600"))
 ML_VIDEO_SEARCH_MAX_BYTES = int(
     os.getenv("ML_VIDEO_SEARCH_MAX_BYTES", str(8 * 1024 * 1024 * 1024))
 )  # 8GB — typical 1-hour CCTV export
+ML_VIDEO_ANALYZE_MAX_BYTES = int(
+    os.getenv("ML_VIDEO_ANALYZE_MAX_BYTES", str(1 * 1024 * 1024 * 1024))
+)  # 1GB — Video AI Test uploads
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/")
 
 # Video recovery — GPU acceleration (PyTorch CUDA + FFmpeg NVENC)
