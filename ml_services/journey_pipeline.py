@@ -89,10 +89,19 @@ class JourneyCameraPipeline:
         self._live = get_live_manager()
 
     def _read_frame(self) -> np.ndarray | None:
-        """Reuse the live stream reader — avoids a second RTSP/ffmpeg connection per camera."""
+        """Reuse shared Camera Session — never open a second RTSP/ffmpeg per camera."""
         self._live.ensure_started()
         if not self._live.ensure_camera(self.camera_key, self.rtsp_url):
             return None
+        # Prefer CameraSessionManager (same underlying FFmpeg as LiveStreamManager).
+        try:
+            from camera_session import get_camera_session_manager
+
+            frame = get_camera_session_manager().get_latest_frame(self.camera_key)
+            if frame is not None:
+                return frame
+        except Exception:
+            pass
         frame = self._live.get_raw_frame(self.camera_key)
         if frame is None:
             logger.debug("[journey] No frame yet for %s", self.camera_key)

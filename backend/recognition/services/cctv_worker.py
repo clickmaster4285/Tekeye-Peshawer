@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import cv2
+import numpy as np
 from django.conf import settings
 from django.db import close_old_connections
 
@@ -33,6 +34,77 @@ def _match_cooldown() -> int:
 def _cctv_infer_max_width() -> int:
     return max(0, int(getattr(settings, "ATTENDANCE_VIDEO_WIDTH", 3840)))
 
+
+def _cctv_use_shared_session() -> bool:
+    """Prefer ML Camera Session frames (one decode) over a second OpenCV RTSP."""
+    return str(getattr(settings, "ATTENDANCE_CCTV_FRAME_SOURCE", "shared")).strip().lower() in (
+        "shared",
+        "ml",
+        "session",
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _decode_jpeg_bgr(jpeg: bytes):
+    if not jpeg:
+        return None
+    arr = np.frombuffer(jpeg, dtype=np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
+def _fetch_shared_session_frame(camera_id: int, stream_key: str, rtsp_url: str):
+    """Pull one BGR frame from the shared ML Camera Session (no extra FFmpeg)."""
+    import requests
+    from urllib.parse import urlencode
+
+    from cameras.models import Camera
+    from ml.client import (
+        MLServiceError,
+        ml_live_jpeg_raw_url_for_camera,
+        ml_service_enabled,
+        require_camera_ml_url,
+    )
+
+    if not ml_service_enabled():
+        return None, "ML service disabled"
+
+    camera = Camera.objects.filter(pk=camera_id).select_related("nvr", "ml_server").first()
+    if camera is None:
+        return None, f"Camera {camera_id} not found"
+
+    urls: list[str] = []
+    try:
+        base = require_camera_ml_url(camera)
+        key = (stream_key or camera.stream_key or f"cam-{camera_id}").strip()
+        width = _cctv_infer_max_width() or 1280
+        params = {"width": str(max(640, min(4096, int(width))))}
+        if rtsp_url:
+            params["rtsp_url"] = rtsp_url
+        urls.append(f"{base}/live/cam/{key}/jpeg/attendance?{urlencode(params)}")
+        urls.append(ml_live_jpeg_raw_url_for_camera(camera))
+    except (MLServiceError, Exception) as exc:
+        return None, str(exc)
+
+    last_err = "No ML JPEG URL"
+    for url in urls:
+        if not url:
+            continue
+        try:
+            resp = requests.get(url, timeout=(2.0, 4.0))
+            if resp.status_code != 200 or not resp.content:
+                last_err = f"HTTP {resp.status_code}"
+                continue
+            frame = _decode_jpeg_bgr(resp.content)
+            if frame is None:
+                last_err = "JPEG decode failed"
+                continue
+            return frame, ""
+        except requests.RequestException as exc:
+            last_err = str(exc)
+            continue
+    return None, last_err
 
 def _emit_attendance_realtime(*, throttle_sec: float = 1.5) -> None:
     """Push monitor/dashboard refresh when in-memory CCTV runtime changes."""
@@ -114,6 +186,7 @@ class CCTVWorkerManager:
         name: str,
         rtsp_url: str,
         start_delay: float = 0.0,
+        stream_key: str = "",
     ) -> dict:
         with self._lock:
             existing = self._cameras.get(camera_id)
@@ -128,7 +201,7 @@ class CCTVWorkerManager:
             )
             thread = threading.Thread(
                 target=self._run_camera,
-                args=(state, rtsp_url, start_delay),
+                args=(state, rtsp_url, start_delay, stream_key or f"cam-{camera_id}"),
                 name=f"cctv-attendance-{camera_id}",
                 daemon=True,
             )
@@ -161,6 +234,7 @@ class CCTVWorkerManager:
                 c["name"],
                 c["rtsp_url"],
                 start_delay=i * 2.5,
+                stream_key=str(c.get("stream_key") or f"cam-{c['id']}"),
             )
             for i, c in enumerate(cameras)
         ]
@@ -256,7 +330,13 @@ class CCTVWorkerManager:
             return face.embedding, (face_w, face_h)
         return best.embedding, (face_w, face_h)
 
-    def _run_camera(self, state: CameraRuntimeState, rtsp_url: str, start_delay: float = 0.0):
+    def _run_camera(
+        self,
+        state: CameraRuntimeState,
+        rtsp_url: str,
+        start_delay: float = 0.0,
+        stream_key: str = "",
+    ):
         from users.attendance_service import AttendanceDecisionEngine
         from users.models import Attendance, Staff
 
@@ -275,37 +355,56 @@ class CCTVWorkerManager:
         reconnect_delay = 5
         cooldown = _match_cooldown()
         last_infer_at = 0.0
+        use_shared = _cctv_use_shared_session()
+        key = (stream_key or f"cam-{state.camera_id}").strip()
 
-        logger.info("Starting CCTV attendance worker for camera %s (%s)", state.camera_id, state.name)
+        logger.info(
+            "Starting CCTV attendance worker for camera %s (%s) frame_source=%s",
+            state.camera_id,
+            state.name,
+            "shared-session" if use_shared else "rtsp",
+        )
 
         while not state.stop_event.is_set():
             try:
-                if cap is None or not cap.isOpened():
-                    if cap is not None:
-                        cap.release()
-                        cap = None
-                    state.connected = False
-                    state.last_error = "Connecting to RTSP…"
-                    cap, info = open_rtsp_capture(rtsp_url)
-                    if cap is None:
-                        state.last_error = info or "Cannot open RTSP stream"
-                        logger.warning("Camera %s RTSP failed: %s", state.camera_id, state.last_error)
+                frame = None
+                if use_shared:
+                    close_old_connections()
+                    frame, err = _fetch_shared_session_frame(state.camera_id, key, rtsp_url)
+                    release_db()
+                    if frame is None:
+                        state.connected = False
+                        state.last_error = err or "Waiting for shared Camera Session…"
                         time.sleep(reconnect_delay)
                         continue
-                    state.connected = True
-                    state.last_error = ""
-                    logger.info("Camera %s connected (%s)", state.camera_id, info)
+                else:
+                    if cap is None or not cap.isOpened():
+                        if cap is not None:
+                            cap.release()
+                            cap = None
+                        state.connected = False
+                        state.last_error = "Connecting to RTSP…"
+                        cap, info = open_rtsp_capture(rtsp_url)
+                        if cap is None:
+                            state.last_error = info or "Cannot open RTSP stream"
+                            logger.warning("Camera %s RTSP failed: %s", state.camera_id, state.last_error)
+                            time.sleep(reconnect_delay)
+                            continue
+                        state.connected = True
+                        state.last_error = ""
+                        logger.info("Camera %s connected (%s)", state.camera_id, info)
 
-                ok, frame = cap.read()
-                if not ok or frame is None:
-                    state.connected = False
-                    state.last_error = "Frame read failed — reconnecting"
-                    cap.release()
-                    cap = None
-                    time.sleep(reconnect_delay)
-                    continue
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        state.connected = False
+                        state.last_error = "Frame read failed — reconnecting"
+                        cap.release()
+                        cap = None
+                        time.sleep(reconnect_delay)
+                        continue
 
                 state.connected = True
+                state.last_error = ""
                 state.last_frame_at = datetime.now().isoformat(timespec="seconds")
                 frame_index += 1
 
@@ -315,11 +414,12 @@ class CCTVWorkerManager:
                     if ok_jpg:
                         state.last_jpeg = buf.tobytes()
 
-                # Keep draining the stream at native FPS (no sleeps!) so the
-                # RTSP buffer never overflows; only pace the expensive
-                # inference by time.
+                # Shared session: pace by scan interval (no RTSP buffer to drain).
+                # Legacy RTSP: drain continuously; only pace inference.
                 now = time.time()
                 if now - last_infer_at < self._scan_interval:
+                    if use_shared:
+                        time.sleep(min(0.2, self._scan_interval))
                     continue
                 last_infer_at = now
                 from config.worker_throttle import maybe_pause_for_cpu

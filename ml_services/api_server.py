@@ -147,7 +147,21 @@ def root():
 def health():
     data = health_status()
     data["live_streams"] = _live.status()
+    try:
+        from camera_session import get_camera_session_manager
+
+        data["camera_sessions"] = get_camera_session_manager().status()
+    except Exception as exc:
+        data["camera_sessions"] = {"error": str(exc)}
     return data
+
+
+@app.get("/camera-sessions/status")
+def camera_sessions_status():
+    """One FFmpeg/NVDEC ingest per camera — shared frame buffer status."""
+    from camera_session import get_camera_session_manager
+
+    return get_camera_session_manager().status()
 
 
 @app.post("/reload/faces")

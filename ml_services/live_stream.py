@@ -2,12 +2,12 @@
 Live RTSP streams with purpose-gated multi-model YOLO inference + optional plate OCR.
 Only models relevant to each camera's purpose run on that feed.
 
-Pipeline (decoupled — capture / infer / render never block each other):
-  NVR main stream (4K) ──► FFmpeg NVDEC (native, no downscale)
-         ▼
-  Latest Frame Buffer
-         ├─► Partitioned Inference Workers → Result Buffer
-         └─► Render Thread → Browser MJPEG
+Shared Camera Session ingest (one decode per camera):
+  NVR main stream ──► ONE FFmpeg NVDEC ──► SHARED FRAME BUFFER
+         ├─► Partitioned Inference Workers → Result Buffer (AI FPS)
+         ├─► Render Thread → Browser MJPEG (live FPS)
+         ├─► Journey / attendance / evidence consumers
+         └─► Do not open a second FFmpeg for the same camera
 """
 from __future__ import annotations
 
@@ -1117,7 +1117,17 @@ class LiveStreamManager:
         if session is not None:
             with session.infer_lock:
                 session.infer_busy = False
-            session.stream.stop()
+        # Release shared ingest (one FFmpeg per camera) — do not stop stream twice.
+        try:
+            from camera_session import get_camera_session_manager
+
+            get_camera_session_manager().release(key)
+        except Exception:
+            if session is not None:
+                try:
+                    session.stream.stop()
+                except Exception:
+                    pass
 
     def is_registered(self, key: str) -> bool:
         return bool(self._registry.get((key or "").strip()))
@@ -1624,15 +1634,20 @@ class LiveStreamManager:
         return "anpr" in self._purposes_for(camera_key)
 
     def _open_session_locked(self, key: str, url: str) -> None:
+        """Open via CameraSessionManager so every feature shares one decode."""
         keep_native = self._want_native_frame(key)
-        stream = create_camera_stream(url, key, keep_native=keep_native)
-        stream.thread.start()
-        self._sessions[key] = _CameraSession(key, stream, url)
+        from camera_session import get_camera_session_manager
+
+        ingest = get_camera_session_manager().ensure(key, url, keep_native=keep_native)
+        if ingest is None:
+            print(f"[live] Failed to open shared session: {key}")
+            return
+        self._sessions[key] = _CameraSession(key, ingest.stream, url)
         self._detections[key] = []
         self._evidence_jpeg.pop(key, None)
         self._evidence_wh.pop(key, None)
         tag = "native-4K" if keep_native else "scaled"
-        print(f"[live] Opening: {key} ({tag})")
+        print(f"[live] Bound shared session: {key} ({tag})")
 
     def _predict(self, model, frame: np.ndarray, *, min_conf: float | None = None, classes=None):
         use_half = self._device != "cpu"

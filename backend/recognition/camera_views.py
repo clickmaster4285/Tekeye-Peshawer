@@ -111,6 +111,7 @@ class CCTVCameraActionView(APIView):
                 camera.id,
                 camera.name or camera.code or f"Camera {camera.id}",
                 url,
+                stream_key=camera.stream_key or f"cam-{camera.id}",
             )
             _emit_attendance_runtime()
             return Response({"camera": _camera_payload(camera, manager), "runtime": runtime})
