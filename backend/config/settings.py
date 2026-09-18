@@ -319,11 +319,15 @@ ATTENDANCE_WEBCAM_SIMILARITY_THRESHOLD = float(
 ATTENDANCE_CCTV_SIMILARITY_THRESHOLD = float(
     os.getenv("ATTENDANCE_CCTV_SIMILARITY_THRESHOLD", "0.38")
 )
-ATTENDANCE_CCTV_AUTOSTART = os.getenv("ATTENDANCE_CCTV_AUTOSTART", "True").lower() in (
+# Shared Camera Session architecture: keep False so attendance consumes ML frames
+# (face_recognition purpose) instead of opening a second OpenCV RTSP per camera.
+ATTENDANCE_CCTV_AUTOSTART = os.getenv("ATTENDANCE_CCTV_AUTOSTART", "False").lower() in (
     "true",
     "1",
     "yes",
 )
+# shared = pull JPEG from ML Camera Session; rtsp = legacy independent OpenCV decode
+ATTENDANCE_CCTV_FRAME_SOURCE = os.getenv("ATTENDANCE_CCTV_FRAME_SOURCE", "shared").strip().lower()
 ATTENDANCE_INSIGHTFACE_MODEL = os.getenv("ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
 # Comma-separated ONNX providers override, e.g. "CUDAExecutionProvider,TensorrtExecutionProvider,CPUExecutionProvider"
 ATTENDANCE_ONNX_PROVIDERS = os.getenv("ATTENDANCE_ONNX_PROVIDERS", "")
@@ -382,7 +386,8 @@ JOURNEY_REID_MATCH_THRESHOLD = float(os.getenv("JOURNEY_REID_MATCH_THRESHOLD", "
 JOURNEY_COMBINED_MATCH_THRESHOLD = float(os.getenv("JOURNEY_COMBINED_MATCH_THRESHOLD", "0.75"))
 JOURNEY_MAX_TRAVEL_SECONDS = int(os.getenv("JOURNEY_MAX_TRAVEL_SECONDS", "120"))
 JOURNEY_RECENT_WINDOW_SECONDS = int(os.getenv("JOURNEY_RECENT_WINDOW_SECONDS", "600"))
-# 3840 = 4K width cap; 0 = native camera resolution (no ffmpeg scale). Prefer native RTSP main stream.
+# 3840 = 4K width cap; 0 = native camera resolution (no ffmpeg scale).
+# Shared-session default: prefer ML Camera Session frames (JOURNEY_SNAPSHOT_NATIVE=False).
 JOURNEY_SNAPSHOT_WIDTH = int(os.getenv("JOURNEY_SNAPSHOT_WIDTH", "3840"))
 JOURNEY_SNAPSHOT_JPEG_QUALITY = int(os.getenv("JOURNEY_SNAPSHOT_JPEG_QUALITY", "98"))
 # Person Journey UI always shows the cropped person. When True, also store the
@@ -392,7 +397,7 @@ JOURNEY_SNAPSHOT_FULL_FRAME = os.getenv("JOURNEY_SNAPSHOT_FULL_FRAME", "True").l
     "1",
     "yes",
 )
-JOURNEY_SNAPSHOT_NATIVE = os.getenv("JOURNEY_SNAPSHOT_NATIVE", "True").lower() in (
+JOURNEY_SNAPSHOT_NATIVE = os.getenv("JOURNEY_SNAPSHOT_NATIVE", "False").lower() in (
     "true",
     "1",
     "yes",
@@ -400,6 +405,12 @@ JOURNEY_SNAPSHOT_NATIVE = os.getenv("JOURNEY_SNAPSHOT_NATIVE", "True").lower() i
 JOURNEY_SNAPSHOT_MAX_WORKERS = int(os.getenv("JOURNEY_SNAPSHOT_MAX_WORKERS", "1"))
 JOURNEY_SNAPSHOT_MAX_QUEUE = int(os.getenv("JOURNEY_SNAPSHOT_MAX_QUEUE", "40"))
 JOURNEY_SNAPSHOT_TASK_TIMEOUT_SEC = float(os.getenv("JOURNEY_SNAPSHOT_TASK_TIMEOUT_SEC", "30"))
+# When False, detection/journey/attendance snapshots never open a second FFmpeg RTSP.
+CLIP_ALLOW_DIRECT_RTSP = os.getenv("CLIP_ALLOW_DIRECT_RTSP", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 # CCTV stream FPS for ffmpeg proxy (RTSP URLs are built dynamically from NVR DB records)
 CAMERA_STREAM_FPS = int(os.getenv("ML_LIVE_STREAM_FPS", "25"))

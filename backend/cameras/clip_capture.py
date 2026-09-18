@@ -779,7 +779,7 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
     # Prefer ML same-frame evidence (YOLO frame) — avoids stale bbox on a later RTSP grab.
     frame = _read_ml_evidence_frame(camera)
 
-    if frame is None and stream_url:
+    if frame is None and stream_url and _allow_direct_rtsp():
         frame = _read_rtsp_snapshot(stream_url)
 
     if frame is None and not _ml_on_cooldown(camera_id):
@@ -958,7 +958,12 @@ def _journey_snapshot_width() -> int:
 
 
 def _journey_snapshot_native() -> bool:
-    return bool(getattr(settings, "JOURNEY_SNAPSHOT_NATIVE", True))
+    return bool(getattr(settings, "JOURNEY_SNAPSHOT_NATIVE", False))
+
+
+def _allow_direct_rtsp() -> bool:
+    """When False, snapshots must use the shared ML Camera Session (no second FFmpeg)."""
+    return bool(getattr(settings, "CLIP_ALLOW_DIRECT_RTSP", False))
 
 
 def _journey_jpeg_quality() -> int:
@@ -1084,26 +1089,14 @@ def _read_rtsp_hd_snapshot(stream_url: str, *, target_width: int) -> object | No
 
 
 def read_journey_hd_frame(camera: Camera) -> object | None:
-    """Full-resolution frame for journey snapshots (native RTSP main stream preferred)."""
+    """Full-resolution frame for journey snapshots — shared ML session first."""
     target_width = _journey_snapshot_width()
     prefer_native = _journey_snapshot_native() or target_width <= 0
     stream_url = camera.effective_stream_url() if camera else ""
-
-    if stream_url and prefer_native:
-        frame = _read_rtsp_native_snapshot(stream_url)
-        if frame is not None:
-            h, w = frame.shape[:2]
-            logger.debug("Journey snapshot native RTSP %sx%s from camera %s", w, h, camera.pk)
-            if target_width <= 0 or w >= target_width:
-                return frame
-            return _upscale_frame_to_hd(frame, target_width)
-
-    if stream_url and target_width > 0:
-        frame = _read_rtsp_hd_snapshot(stream_url, target_width=target_width)
-        if frame is not None:
-            return frame
-
     camera_id = getattr(camera, "pk", None)
+    allow_rtsp = _allow_direct_rtsp()
+
+    # 1) Shared Camera Session (same decode as live / YOLO) — preferred.
     if not _ml_on_cooldown(int(camera_id or 0)):
         ml_width = target_width if target_width > 0 else 3840
         attendance_url = _ml_attendance_mjpeg_url(camera, target_width=ml_width)
@@ -1115,22 +1108,38 @@ def read_journey_hd_frame(camera: Camera) -> object | None:
                 return frame
             _mark_ml_fail(camera_id)
 
-    if stream_url:
+        raw_url = _ml_raw_mjpeg_url(camera)
+        if raw_url and not _ml_on_cooldown(int(camera_id or 0)):
+            frame = _read_mjpeg_snapshot(raw_url, timeout_sec=4.0)
+            if frame is None:
+                _mark_ml_fail(camera_id)
+            elif target_width > 0:
+                return _upscale_frame_to_hd(frame, target_width)
+            else:
+                return frame
+
+    # 2) Optional direct RTSP (disabled under shared-session architecture).
+    if allow_rtsp and stream_url and prefer_native:
+        frame = _read_rtsp_native_snapshot(stream_url)
+        if frame is not None:
+            h, w = frame.shape[:2]
+            logger.debug("Journey snapshot native RTSP %sx%s from camera %s", w, h, camera.pk)
+            if target_width <= 0 or w >= target_width:
+                return frame
+            return _upscale_frame_to_hd(frame, target_width)
+
+    if allow_rtsp and stream_url and target_width > 0:
+        frame = _read_rtsp_hd_snapshot(stream_url, target_width=target_width)
+        if frame is not None:
+            return frame
+
+    if allow_rtsp and stream_url:
         frame = _read_rtsp_snapshot(stream_url)
         if frame is not None:
             if target_width > 0:
                 return _upscale_frame_to_hd(frame, target_width)
             return frame
 
-    raw_url = _ml_raw_mjpeg_url(camera)
-    if raw_url and not _ml_on_cooldown(int(camera_id or 0)):
-        frame = _read_mjpeg_snapshot(raw_url, timeout_sec=4.0)
-        if frame is None:
-            _mark_ml_fail(camera_id)
-        elif target_width > 0:
-            return _upscale_frame_to_hd(frame, target_width)
-        else:
-            return frame
     return None
 
 
@@ -1499,8 +1508,8 @@ def capture_attendance_snapshot_sync(
                 upscaled = _upscale_frames_to_hd([frame], hd_width)
                 frame = upscaled[0] if upscaled else frame
 
-    # 3) Direct RTSP one-shot
-    if frame is None and stream_url:
+    # 3) Direct RTSP one-shot (only when shared-session RTSP fallback is enabled)
+    if frame is None and stream_url and _allow_direct_rtsp():
         if hd_width > 0:
             frame = _read_rtsp_hd_snapshot(stream_url, target_width=hd_width)
         if frame is None:

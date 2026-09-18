@@ -36,8 +36,8 @@ python-multipart>=0.0.9
 # Install CUDA build: pip install torch --index-url https://download.pytorch.org/whl/cu118
 torch>=2.0.0
 
-# InsightFace attendance (webcam + CCTV)
+# InsightFace attendance (webcam + CCTV) — Windows uses DirectML GPU ONNX
 insightface>=0.7.3
 onnx>=1.14.0
 onnxruntime-directml>=1.15.0; platform_system=="Windows"
-onnxruntime>=1.15.0; platform_system!="Windows"
+onnxruntime-gpu>=1.15.0; platform_system!="Windows"
