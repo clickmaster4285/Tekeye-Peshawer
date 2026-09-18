@@ -212,11 +212,33 @@ def _use_nvdec(ffmpeg_path: str) -> bool:
 def _rtsp_scale_size() -> tuple[int, int]:
     """
     Live AI/view capture size after FFmpeg scale (NVR keeps original 4K recording).
-    Default 0x0 = native 3840x2160 main-stream passthrough.
+
+    Defaults to 1280x720 — missing env must NOT open native 4K MJPEG for multi-cam.
+    Set both width/height to 0 AND ML_RTSP_ALLOW_NATIVE=true to keep native.
     """
-    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 0))
-    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 0))
+    w = max(0, _env_int("ML_RTSP_SCALE_WIDTH", 1280))
+    h = max(0, _env_int("ML_RTSP_SCALE_HEIGHT", 720))
     return w, h
+
+
+def _force_rtsp_scale() -> bool:
+    """Default ON: always scale unless explicitly disabled."""
+    return str(os.getenv("ML_RTSP_FORCE_SCALE", "true") or "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _allow_native_rtsp() -> bool:
+    """Native 4K live path is opt-in only (dangerous at 24+ cameras)."""
+    return str(os.getenv("ML_RTSP_ALLOW_NATIVE", "false") or "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _ffmpeg_threads() -> str:
@@ -234,9 +256,10 @@ def _ffmpeg_timeout_cli_flag() -> str:
 
 
 def _mjpeg_quality(*, keep_native: bool) -> str:
+    # Higher -q:v = cheaper JPEG. Avoid q:v 2 on live (was crushing 24-cam servers).
     if keep_native:
-        return os.getenv("ML_MJPEG_QUALITY_NATIVE", "2").strip() or "2"
-    return os.getenv("ML_MJPEG_QUALITY", "8").strip() or "8"
+        return os.getenv("ML_MJPEG_QUALITY_NATIVE", "5").strip() or "5"
+    return os.getenv("ML_MJPEG_QUALITY", "7").strip() or "7"
 
 
 def _rtsp_stream_input_flags() -> list[str]:
@@ -253,10 +276,14 @@ def _rtsp_stream_input_flags() -> list[str]:
 
 
 def _rtsp_scale_filter(use_cuda_scale: bool) -> str | None:
-    """FFmpeg -vf string to downscale to ~1080p before MJPEG pipe / YOLO."""
+    """FFmpeg -vf string to downscale before MJPEG pipe / YOLO."""
     w, h = _rtsp_scale_size()
     if w <= 0 and h <= 0:
-        return None
+        # Safety net: never return None when force-scale is on.
+        if _force_rtsp_scale() or not _allow_native_rtsp():
+            w, h = 1280, 720
+        else:
+            return None
     if w <= 0:
         w = -2
     if h <= 0:
@@ -478,6 +505,9 @@ class FfmpegCameraStream:
         vf = None
         if not self.keep_native:
             vf = _rtsp_scale_filter(use_cuda_scale=bool(self._use_nvdec and self._use_cuda_scale))
+            if not vf:
+                # Last-resort CPU scale — never pipe native 4K MJPEG by accident.
+                vf = "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2"
         if vf:
             cmd += ["-vf", vf]
 
@@ -567,7 +597,9 @@ class FfmpegCameraStream:
         if self.keep_native:
             scale_note = "native-4K"
         else:
-            scale_note = f"scale={sw}x{sh}" if (sw or sh) else "native"
+            if not (sw or sh):
+                sw, sh = 1280, 720
+            scale_note = f"scale={sw}x{sh}"
         if self._use_nvdec:
             print(
                 f"[live] {self.label} opening GPU NVDEC + FFmpeg {scale_note} "
@@ -1613,21 +1645,17 @@ class LiveStreamManager:
 
     def _want_native_frame(self, camera_key: str) -> bool:
         """
-        Keep native camera resolution only when scaling is disabled.
-        With ML_RTSP_SCALE_* / ML_RTSP_FORCE_SCALE, always decode scaled (e.g. 1K)
-        — including ANPR — so live streams stay stable.
+        Native 4K live is opt-in only.
+
+        Default: always scale to ML_RTSP_SCALE_* (1280x720) — including ANPR —
+        so 24+ camera MJPEG does not flood CPU/RAM. NVR recording stays 4K.
         """
-        force = str(os.getenv("ML_RTSP_FORCE_SCALE", "") or "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        if force:
+        if _force_rtsp_scale():
+            return False
+        if not _allow_native_rtsp():
             return False
         w, h = _rtsp_scale_size()
         if w > 0 or h > 0:
-            # Explicit scale target (e.g. 1280x720) → never open native 4K.
             return False
         if self._plate_on_all:
             return True
