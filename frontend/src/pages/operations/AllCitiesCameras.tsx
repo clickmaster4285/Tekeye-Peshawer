@@ -52,6 +52,7 @@ import {
 import {
   fetchAllCitiesSelection,
   fetchAllCitiesStreams,
+  opsMjpegUrlToJpeg,
   saveAllCitiesSelection,
   withOpsStreamToken,
   type OpsCamera,
@@ -209,7 +210,7 @@ function GridLayoutSelect({
         className={cn(
           "h-8 w-[9.5rem] gap-2 text-xs font-medium",
           dark &&
-            "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/10 focus:ring-white/20 [&>svg]:text-white/70"
+          "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/10 focus:ring-white/20 [&>svg]:text-white/70"
         )}
         aria-label="Grid layout"
       >
@@ -256,36 +257,95 @@ const StreamTile = memo(function StreamTile({
   canManage?: boolean
   onRemove?: () => void
   removing?: boolean
-  /** When false, show a placeholder instead of opening an MJPEG connection. */
+  /** When false, show a placeholder instead of opening a stream connection. */
   liveEnabled?: boolean
 }) {
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [now, setNow] = useState(() => new Date())
+  const [jpegSrc, setJpegSrc] = useState<string | null>(null)
+  const [hasFrame, setHasFrame] = useState(false)
   const imgRef = useRef<HTMLImageElement | null>(null)
   const retryTimerRef = useRef<number | null>(null)
+  const pollTimerRef = useRef<number | null>(null)
+  const hasFrameRef = useRef(false)
   const raw = (camera.ml_live_stream_url || "").trim()
-  const tokenized = raw ? withOpsStreamToken(raw) : null
-  const src =
-    (liveEnabled || isFullscreen) && tokenized
-      ? `${tokenized}${tokenized.includes("?") ? "&" : "?"}r=${retry}`
+  const tokenizedMjpeg = raw ? withOpsStreamToken(raw) : null
+  const tokenizedJpeg = raw ? withOpsStreamToken(opsMjpegUrlToJpeg(raw)) : null
+  // Fullscreen: continuous MJPEG. Grid: JPEG snapshots (browser ~6 MJPEG conn limit).
+  const useMjpeg = isFullscreen
+  const mjpegSrc =
+    useMjpeg && (liveEnabled || isFullscreen) && tokenizedMjpeg
+      ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}`
       : null
+  const src = useMjpeg ? mjpegSrc : jpegSrc
 
   useEffect(() => {
     return () => {
       if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+      if (pollTimerRef.current != null) window.clearTimeout(pollTimerRef.current)
     }
   }, [])
 
   useEffect(() => {
     if (liveEnabled) return
     setError(false)
+    setHasFrame(false)
+    hasFrameRef.current = false
+    setJpegSrc(null)
     if (retryTimerRef.current != null) {
       window.clearTimeout(retryTimerRef.current)
       retryTimerRef.current = null
     }
+    if (pollTimerRef.current != null) {
+      window.clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
   }, [liveEnabled])
+
+  useEffect(() => {
+    if (useMjpeg || !liveEnabled || !tokenizedJpeg) {
+      if (!useMjpeg) setJpegSrc(null)
+      return
+    }
+    let cancelled = false
+    const key = `${camera.server_id ?? 0}:${camera.id}:${camera.code}`
+    let stagger = 0
+    for (let i = 0; i < key.length; i++) stagger = (stagger + key.charCodeAt(i) * (i + 1)) % 900
+    const intervalMs = 900
+
+    const tick = () => {
+      if (cancelled) return
+      const next = `${tokenizedJpeg}${tokenizedJpeg.includes("?") ? "&" : "?"}t=${Date.now()}&r=${retry}`
+      const probe = new Image()
+      probe.onload = () => {
+        if (cancelled) return
+        setJpegSrc(next)
+        hasFrameRef.current = true
+        setHasFrame(true)
+        setError(false)
+        pollTimerRef.current = window.setTimeout(tick, intervalMs)
+      }
+      probe.onerror = () => {
+        if (cancelled) return
+        if (!hasFrameRef.current) setError(true)
+        pollTimerRef.current = window.setTimeout(tick, intervalMs + 500)
+      }
+      probe.src = next
+    }
+
+    pollTimerRef.current = window.setTimeout(tick, stagger)
+    return () => {
+      cancelled = true
+      if (pollTimerRef.current != null) {
+        window.clearTimeout(pollTimerRef.current)
+        pollTimerRef.current = null
+      }
+    }
+    // hasFrame intentionally omitted — avoid resetting the poll loop every frame
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useMjpeg, liveEnabled, tokenizedJpeg, retry, camera.server_id, camera.id, camera.code])
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
@@ -310,6 +370,8 @@ const StreamTile = memo(function StreamTile({
 
   const refreshStream = () => {
     setError(false)
+    setHasFrame(false)
+    hasFrameRef.current = false
     setRetry((n) => n + 1)
   }
 
@@ -339,14 +401,16 @@ const StreamTile = memo(function StreamTile({
         "overflow-hidden rounded-lg border border-border bg-black",
         wallMode && "flex h-full min-h-0 min-w-0 flex-col rounded-md",
         wallMode && wallLayout === "1x1" && "rounded-none border-0",
-        isFullscreen && "fixed inset-0 z-[200] flex flex-col rounded-none border-0",
+        // Shorter than the viewport so clock + exit bar are never clipped under browser chrome.
+        isFullscreen &&
+          "fixed inset-x-0 top-4 bottom-4 z-[250] flex max-h-[calc(100dvh-2rem)] w-full flex-col border-0",
       )}
     >
       <div
         className={cn(
           "relative aspect-video w-full",
           wallMode && wallTileMediaClass(wallLayout),
-          isFullscreen && "flex-1 aspect-auto min-h-0 max-h-none max-w-none",
+          isFullscreen && "min-h-0 max-h-none max-w-none flex-1 aspect-auto",
         )}
       >
         {src && !error ? (
@@ -358,15 +422,21 @@ const StreamTile = memo(function StreamTile({
               "h-full w-full object-center",
               wallMode || isFullscreen ? "object-cover" : "object-contain",
             )}
+            onLoad={() => {
+              setError(false)
+              hasFrameRef.current = true
+              setHasFrame(true)
+            }}
             onError={() => {
               setError(true)
-              // Cap reconnect storms — too many cameras retrying freezes the tab
-              if (retry >= 4) return
+              hasFrameRef.current = false
+              setHasFrame(false)
+              if (retry >= 8) return
               if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
               retryTimerRef.current = window.setTimeout(() => {
                 setError(false)
                 setRetry((n) => n + 1)
-              }, 3000 + retry * 1500)
+              }, 2000 + retry * 1000)
             }}
           />
         ) : (
@@ -374,10 +444,10 @@ const StreamTile = memo(function StreamTile({
             {!liveEnabled && !isFullscreen
               ? "Paused (stream limit) — open fullscreen or next page"
               : error
-                ? retry >= 4
+                ? retry >= 8
                   ? "Stream unavailable"
                   : "Reconnecting…"
-                : "No stream URL"}
+                : "Connecting…"}
           </div>
         )}
 
@@ -385,8 +455,10 @@ const StreamTile = memo(function StreamTile({
           <Badge className="max-w-full truncate bg-sky-700/90 text-white">
             {camera.server_name || "Server"}
           </Badge>
-          {src && !error ? (
+          {hasFrame || (useMjpeg && src && !error) ? (
             <Badge className="bg-emerald-600/90 text-white">Live</Badge>
+          ) : src && !error ? (
+            <Badge className="bg-amber-600/90 text-white">Loading</Badge>
           ) : null}
         </div>
 
@@ -450,19 +522,25 @@ const StreamTile = memo(function StreamTile({
         </div>
 
         {(showTimestamp || isFullscreen) && (
-          <span className="absolute bottom-12 right-2 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/90 sm:bottom-14">
+          <span
+            className={cn(
+              "absolute z-20 rounded bg-black/80 px-2 py-1 text-xs font-semibold tabular-nums text-white shadow-md",
+              // Fullscreen: top-left under badges so it cannot sit under the exit bar.
+              isFullscreen ? "left-2 top-12" : "bottom-12 right-2 sm:bottom-14",
+            )}
+          >
             {now.toLocaleTimeString()}
           </span>
         )}
 
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
+        <div className="absolute bottom-0 left-0 right-0 z-[5] bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
           <p className="truncate text-sm font-medium text-white">{camera.name}</p>
-          <p className="truncate text-xs text-white/70">
+          <p className="truncate pr-16 text-xs text-white/70">
             {[
               camera.display_label ||
-                [camera.site_name || camera.site_code, camera.nvr_name, camera.channel_label || (camera.channel != null ? `Ch ${camera.channel}` : "")]
-                  .filter(Boolean)
-                  .join(" · "),
+              [camera.site_name || camera.site_code, camera.nvr_name, camera.channel_label || (camera.channel != null ? `Ch ${camera.channel}` : "")]
+                .filter(Boolean)
+                .join(" · "),
               camera.status,
               camera.code,
             ]
@@ -473,7 +551,11 @@ const StreamTile = memo(function StreamTile({
       </div>
 
       {isFullscreen && (
-        <div className="flex shrink-0 items-center justify-center gap-3 border-t border-white/10 bg-black/90 px-4 py-2 text-xs text-white/80">
+        <div className="flex shrink-0 items-center justify-center gap-3 border-t border-white/10 bg-black px-4 py-2.5 text-xs text-white/80">
+          <span className="rounded bg-white/10 px-2 py-0.5 text-sm font-semibold tabular-nums text-white">
+            {now.toLocaleTimeString()}
+          </span>
+          <span className="text-white/40">·</span>
           <span>
             {camera.name}
             {camera.server_name ? ` · ${camera.server_name}` : ""}
@@ -590,33 +672,33 @@ export default function AllCitiesCamerasPage() {
     if (!allowed) return
     let cancelled = false
     selectionHydratedRef.current = false
-    ;(async () => {
-      try {
-        let keys = await fetchAllCitiesSelection()
-        if (keys.length === 0) {
-          const legacy = readLegacyLocalSelection()
-          if (legacy.length > 0) {
-            keys = await saveAllCitiesSelection(legacy)
+      ; (async () => {
+        try {
+          let keys = await fetchAllCitiesSelection()
+          if (keys.length === 0) {
+            const legacy = readLegacyLocalSelection()
+            if (legacy.length > 0) {
+              keys = await saveAllCitiesSelection(legacy)
+              clearLegacyLocalSelection()
+            }
+          } else {
             clearLegacyLocalSelection()
           }
-        } else {
-          clearLegacyLocalSelection()
+          if (cancelled) return
+          lastSavedKeysRef.current = JSON.stringify(keys)
+          setSelectedCameraKeys(keys)
+        } catch {
+          if (cancelled) return
+          const legacy = readLegacyLocalSelection()
+          lastSavedKeysRef.current = JSON.stringify(legacy)
+          setSelectedCameraKeys(legacy)
+        } finally {
+          if (!cancelled) {
+            selectionHydratedRef.current = true
+            setSelectionReady(true)
+          }
         }
-        if (cancelled) return
-        lastSavedKeysRef.current = JSON.stringify(keys)
-        setSelectedCameraKeys(keys)
-      } catch {
-        if (cancelled) return
-        const legacy = readLegacyLocalSelection()
-        lastSavedKeysRef.current = JSON.stringify(legacy)
-        setSelectedCameraKeys(legacy)
-      } finally {
-        if (!cancelled) {
-          selectionHydratedRef.current = true
-          setSelectionReady(true)
-        }
-      }
-    })()
+      })()
     return () => {
       cancelled = true
     }
@@ -862,7 +944,7 @@ export default function AllCitiesCamerasPage() {
     <div className={cn("space-y-8", wallFullscreen && "h-full min-h-0 space-y-2")}>
       {grouped.map(({ server, cameras: cams }) => (
         <section key={server?.id ?? "unknown"} className={wallFullscreen ? "flex min-h-0 flex-1 flex-col" : undefined}>
-          <div className={cn("mb-3 flex flex-wrap items-center gap-2", wallFullscreen && "mb-1 shrink-0")}> 
+          <div className={cn("mb-3 flex flex-wrap items-center gap-2", wallFullscreen && "mb-1 shrink-0")}>
             <Video className="h-4 w-4 text-foreground" />
             <h2 className="text-lg font-semibold text-foreground">{server?.name || "Server"}</h2>
             {server?.location_code ? (
@@ -906,21 +988,21 @@ export default function AllCitiesCamerasPage() {
   const autoRows = Math.max(1, Math.ceil(Math.max(pagedCameras.length, 1) / autoCols))
   const fixedRows =
     layout === "1x1" ? 1
-    : layout === "2x2" ? 2
-    : layout === "3x3" ? 3
-    : layout === "4x4" ? 4
-    : layout === "6x6" ? 6
-    : layout === "8x8" ? 8
-    : layout === "10x10" ? 10
-    : 1
+      : layout === "2x2" ? 2
+        : layout === "3x3" ? 3
+          : layout === "4x4" ? 4
+            : layout === "6x6" ? 6
+              : layout === "8x8" ? 8
+                : layout === "10x10" ? 10
+                  : 1
   const fixedRowMin =
     layout === "2x2" ? "44vh"
-    : layout === "3x3" ? "30vh"
-    : layout === "4x4" ? "23vh"
-    : layout === "6x6" ? "15vh"
-    : layout === "8x8" ? "11vh"
-    : layout === "10x10" ? "9vh"
-    : "0"
+      : layout === "3x3" ? "30vh"
+        : layout === "4x4" ? "23vh"
+          : layout === "6x6" ? "15vh"
+            : layout === "8x8" ? "11vh"
+              : layout === "10x10" ? "9vh"
+                : "0"
 
   const wallCameraGrid = (
     <div
@@ -933,17 +1015,17 @@ export default function AllCitiesCamerasPage() {
       style={
         layout === "auto"
           ? {
-              gridTemplateColumns: `repeat(${autoCols}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${autoRows}, minmax(0, 1fr))`,
-            }
+            gridTemplateColumns: `repeat(${autoCols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${autoRows}, minmax(0, 1fr))`,
+          }
           : layout === "1x1"
             ? {
-                gridTemplateColumns: "minmax(0, 1fr)",
-                gridTemplateRows: "minmax(0, 1fr)",
-              }
+              gridTemplateColumns: "minmax(0, 1fr)",
+              gridTemplateRows: "minmax(0, 1fr)",
+            }
             : {
-                gridTemplateRows: `repeat(${fixedRows}, minmax(${fixedRowMin}, 1fr))`,
-              }
+              gridTemplateRows: `repeat(${fixedRows}, minmax(${fixedRowMin}, 1fr))`,
+            }
       }
     >
       {pagedCameras.map((camera) => {
@@ -1353,7 +1435,7 @@ export default function AllCitiesCamerasPage() {
       )}
 
       {wallFullscreen && visibleCameras.length > 0 && (
-        <div className="fixed inset-0 z-[190] flex flex-col bg-black">
+        <div className="fixed inset-x-0 top-4 bottom-4 z-[250] flex max-h-[calc(100dvh-2rem)] w-full flex-col border-0 bg-black">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
             <p className="truncate text-sm font-medium text-white">
               All Cities Wall · {visibleCameras.length} camera

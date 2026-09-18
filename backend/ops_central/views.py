@@ -6,7 +6,7 @@ from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 from urllib.parse import urlencode, urljoin
 
 import requests
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
@@ -113,7 +113,7 @@ def _resolve_stream_rtsp_url(server: RemoteServer, stream_key: str) -> str:
     return ""
 
 
-def _ml_mjpeg_upstream_candidates(
+def _ml_stream_upstream_candidates(
     *,
     ml_base: str,
     django_base: str,
@@ -121,11 +121,15 @@ def _ml_mjpeg_upstream_candidates(
     kind: str,
     rtsp_url: str = "",
 ) -> list[str]:
-    path = (
-        f"/live/cam/{stream_key}/mjpeg/raw"
-        if kind == "raw"
-        else f"/live/cam/{stream_key}/mjpeg"
-    )
+    kind_l = (kind or "live").strip().lower()
+    if kind_l in ("jpeg", "snapshot"):
+        path = f"/live/cam/{stream_key}/jpeg"
+    elif kind_l in ("jpeg_raw", "raw_jpeg"):
+        path = f"/live/cam/{stream_key}/jpeg/raw"
+    elif kind_l == "raw":
+        path = f"/live/cam/{stream_key}/mjpeg/raw"
+    else:
+        path = f"/live/cam/{stream_key}/mjpeg"
     params: dict[str, str] = {}
     if (rtsp_url or "").strip():
         params["rtsp_url"] = rtsp_url.strip()
@@ -134,6 +138,24 @@ def _ml_mjpeg_upstream_candidates(
     if django_base and django_base.rstrip("/") != ml_base.rstrip("/"):
         urls.append(urljoin(django_base.rstrip("/") + "/", f"ml{path}") + qs)
     return urls
+
+
+# Backward-compatible alias
+def _ml_mjpeg_upstream_candidates(
+    *,
+    ml_base: str,
+    django_base: str,
+    stream_key: str,
+    kind: str,
+    rtsp_url: str = "",
+) -> list[str]:
+    return _ml_stream_upstream_candidates(
+        ml_base=ml_base,
+        django_base=django_base,
+        stream_key=stream_key,
+        kind=kind,
+        rtsp_url=rtsp_url,
+    )
 
 
 def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]:
@@ -719,7 +741,7 @@ class QuickConnectView(APIView):
 
 
 class RemoteMjpegProxyView(APIView):
-    """Proxy annotated MJPEG from a saved remote server's ML service."""
+    """Proxy MJPEG (or single JPEG snapshot) from a saved remote server's ML service."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -745,13 +767,14 @@ class RemoteMjpegProxyView(APIView):
 
         ml_base = server.resolved_ml_base_url()
         rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
-        candidates = _ml_mjpeg_upstream_candidates(
+        candidates = _ml_stream_upstream_candidates(
             ml_base=ml_base,
             django_base=server.normalized_base_url(),
             stream_key=stream_key,
             kind=kind,
             rtsp_url=rtsp_url,
         )
+        is_jpeg = kind in ("jpeg", "snapshot", "jpeg_raw", "raw_jpeg")
 
         upstream = None
         last_err = ""
@@ -759,9 +782,9 @@ class RemoteMjpegProxyView(APIView):
             try:
                 upstream = requests.get(
                     url,
-                    stream=True,
-                    timeout=(10, 60),
-                    headers={"Accept": "*/*"},
+                    stream=not is_jpeg,
+                    timeout=(8, 12) if is_jpeg else (10, 60),
+                    headers={"Accept": "image/jpeg,*/*" if is_jpeg else "*/*"},
                 )
                 if upstream.status_code == 200:
                     break
@@ -777,6 +800,16 @@ class RemoteMjpegProxyView(APIView):
                 {"detail": f"Could not open remote stream: {last_err}"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+        if is_jpeg:
+            try:
+                body = upstream.content
+            finally:
+                upstream.close()
+            response = HttpResponse(body, content_type="image/jpeg")
+            response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response["Pragma"] = "no-cache"
+            return response
 
         content_type = upstream.headers.get(
             "Content-Type", "multipart/x-mixed-replace; boundary=frame"

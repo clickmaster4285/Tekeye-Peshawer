@@ -202,6 +202,32 @@ export function withOpsStreamToken(url: string): string {
   return `${url}${sep}token=${encodeURIComponent(token)}`
 }
 
+/**
+ * Convert an ops MJPEG proxy URL to a single-frame JPEG snapshot URL.
+ * Grid views should poll JPEG — browsers only allow ~6 concurrent MJPEG connections per host.
+ */
+export function opsMjpegUrlToJpeg(url: string): string {
+  if (!url) return url
+  try {
+    const u = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://local")
+    const kind = (u.searchParams.get("kind") || "live").toLowerCase()
+    if (kind === "raw" || kind === "jpeg_raw" || kind === "raw_jpeg") {
+      u.searchParams.set("kind", "jpeg_raw")
+    } else {
+      u.searchParams.set("kind", "jpeg")
+    }
+    return `${u.pathname}${u.search}`
+  } catch {
+    if (/([?&])kind=raw\b/i.test(url)) {
+      return url.replace(/([?&])kind=raw\b/i, "$1kind=jpeg_raw")
+    }
+    if (/[?&]kind=/i.test(url)) {
+      return url.replace(/([?&])kind=[^&]*/i, "$1kind=jpeg")
+    }
+    return `${url}${url.includes("?") ? "&" : "?"}kind=jpeg`
+  }
+}
+
 export async function listRemoteServers(): Promise<RemoteServerRecord[]> {
   const res = await fetch(`${API}/ops/servers/`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(await parseError(res, "Failed to load servers"))
