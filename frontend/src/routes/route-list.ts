@@ -175,8 +175,10 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: toChildPath(ROUTES.ACTIVITY_LOGS), page: "ActivityLogs" },
   // HR
   { path: toChildPath(ROUTES.EMPLOYEES), page: "Employees" },
+  { path: toChildPath(ROUTES.MOBILE_ALERTS), page: "MobileAlerts" },
   { path: toChildPath(ROUTES.RECRUITMENT), page: "Recruitment" },
   { path: toChildPath(ROUTES.ADD_STAFF), page: "AddStaff" },
+  { path: "employees/:id/device", page: "EmployeeDevice" },
   { path: "employees/:id", page: "EmployeeDetail" },
   { path: "employees/:id/edit", page: "EmployeeEdit" },
   { path: toChildPath(ROUTES.ATTENDANCE), page: "Attendance" },

@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { CreateEmployeeLoginForm } from "@/components/hr/CreateEmployeeLoginForm"
 import { useToast } from "@/hooks/use-toast"
 import { getStoredToken } from "@/lib/api"
 import { getStoredUser } from "@/lib/auth"
@@ -120,11 +121,15 @@ export default function UserFormPage() {
   const actorIsLocationAdmin = isLocationAdmin(actor?.role)
   const locationLocked = actorIsLocationAdmin
 
-  const [form, setForm] = useState<FormState>(emptyForm)
-  const [saving, setSaving] = useState(false)
+  const [fromEmployee, setFromEmployee] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState<FormState>(() => ({
+    ...emptyForm,
+    location: actorIsLocationAdmin && actor?.location ? actor.location : "",
+  }))
 
   const availableRoles = useMemo(() => {
     if (actorIsLocationAdmin) {
@@ -362,9 +367,55 @@ export default function UserFormPage() {
         className="w-full space-y-6"
         onSubmit={(e) => {
           e.preventDefault()
+          if (!isEditing && fromEmployee) return
           void onSave()
         }}
       >
+        {!isEditing ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Create login from employee</CardTitle>
+              <CardDescription>
+                Search the employee by name, then edit the name-based user ID and set a password. Role and location are asked only when they are missing on the employee record.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={fromEmployee ? "default" : "outline"}
+                  onClick={() => setFromEmployee(true)}
+                >
+                  From employee
+                </Button>
+                <Button
+                  type="button"
+                  variant={!fromEmployee ? "default" : "outline"}
+                  onClick={() => setFromEmployee(false)}
+                >
+                  Standalone user
+                </Button>
+              </div>
+              {fromEmployee ? (
+                <CreateEmployeeLoginForm
+                  allowSelectEmployee
+                  onSuccess={async (loginId, staffName) => {
+                    toast({
+                      title: "Login created",
+                      description: `${staffName} can sign in as ${loginId}.`,
+                    })
+                    await queryClient.invalidateQueries({ queryKey: ["users"] })
+                    await queryClient.invalidateQueries({ queryKey: ["staff"] })
+                    navigate(ROUTES.USER_ROLE_MANAGEMENT)
+                  }}
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {isEditing || !fromEmployee ? (
+        <>
         <Card>
           <CardHeader>
             <CardTitle>Personal Information</CardTitle>
@@ -691,6 +742,8 @@ export default function UserFormPage() {
           </Button>
           </div>
         </div>
+        </>
+        ) : null}
       </form>
 
       {isEditing && user && (

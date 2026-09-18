@@ -190,6 +190,8 @@ export const ROUTES = {
   // HR
   EMPLOYEES: "/employees",
   ADD_STAFF: "/employees/add",
+  MOBILE_ALERTS: "/employees/mobile-alerts",
+  EMPLOYEE_DEVICE: "/employees/:id/device",
   RECRUITMENT: "/recruitment",
   VISITOR_EDIT: "/visitors/:id/edit",
   /** Path for employee detail; use getEmployeeDetailPath(id) for links */
@@ -243,6 +245,10 @@ export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES]
 /** Build path to employee detail page */
 export function getEmployeeDetailPath(id: number): string {
   return `/employees/${id}`
+}
+
+export function getEmployeeDevicePath(id: number): string {
+  return `/employees/${id}/device`
 }
 
 /** Person journey lookup by PQR code */
@@ -554,6 +560,7 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
     label: "Human Resource",
     children: [
       { label: "Employees", href: ROUTES.EMPLOYEES },
+      { label: "Mobile Alerts", href: ROUTES.MOBILE_ALERTS },
       { label: "Face Enrollment", href: ROUTES.FACE_ENROLLMENT },
       { label: "Attendance Monitor", href: ROUTES.ATTENDANCE_MONITOR },
       { label: "Attendance Dashboard", href: ROUTES.ATTENDANCE_DASHBOARD },

@@ -46,6 +46,10 @@ class LoginSerializer(serializers.Serializer):
 class LoginResponseSerializer(serializers.Serializer):
     token = serializers.CharField(read_only=True)
     user = serializers.SerializerMethodField()
+    mobile_session = serializers.SerializerMethodField()
+
+    def get_mobile_session(self, obj):
+        return obj.get("mobile_session")
 
     def get_user(self, obj):
         user = obj["user"]
@@ -318,6 +322,14 @@ class StaffSerializer(serializers.ModelSerializer):
     user_details = serializers.SerializerMethodField(read_only=True)
     national_id = serializers.SerializerMethodField(read_only=True)
     staff_photo_urls = serializers.SerializerMethodField(read_only=True)
+    mobile_app_installed = serializers.SerializerMethodField(read_only=True)
+    mobile_logged_in = serializers.SerializerMethodField(read_only=True)
+
+    def get_mobile_app_installed(self, obj):
+        return _staff_mobile_flag(obj, "mobile_app_installed")
+
+    def get_mobile_logged_in(self, obj):
+        return _staff_mobile_flag(obj, "mobile_logged_in", logged_in=True)
 
     class Meta:
         model = Staff
@@ -511,10 +523,27 @@ class StaffUpdateSerializer(serializers.ModelSerializer):
 # -----------------------------
 # Staff List Serializer (Lightweight – only fields that exist in original schema so list works before/after migration)
 # -----------------------------
+def _staff_mobile_flag(obj, attr: str, *, logged_in: bool = False) -> bool:
+    if hasattr(obj, attr):
+        return bool(getattr(obj, attr))
+    user_id = getattr(obj, "user_id", None)
+    if not user_id:
+        return False
+    from logs.models import MobileAccessSession, MobileDevice
+
+    if logged_in:
+        return MobileAccessSession.objects.filter(
+            user_id=user_id, status=MobileAccessSession.STATUS_ACTIVE
+        ).exists()
+    return MobileDevice.objects.filter(user_id=user_id, is_revoked=False, is_active=True).exists()
+
+
 class StaffListSerializer(serializers.ModelSerializer):
     national_id = serializers.SerializerMethodField(read_only=True)
     face_enrolled = serializers.SerializerMethodField(read_only=True)
     staff_photo_urls = serializers.SerializerMethodField(read_only=True)
+    mobile_app_installed = serializers.SerializerMethodField(read_only=True)
+    mobile_logged_in = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Staff
@@ -546,7 +575,15 @@ class StaffListSerializer(serializers.ModelSerializer):
             "employment_type",
             "job_status",
             "record_source",
+            "mobile_app_installed",
+            "mobile_logged_in",
         ]
+
+    def get_mobile_app_installed(self, obj):
+        return _staff_mobile_flag(obj, "mobile_app_installed")
+
+    def get_mobile_logged_in(self, obj):
+        return _staff_mobile_flag(obj, "mobile_logged_in", logged_in=True)
 
     def get_national_id(self, obj):
         # Prefer model field if present (after migration), else cnic

@@ -18,6 +18,7 @@ import {
   revokeStaffUploadBlobs,
 } from "@/lib/staff-photo-utils"
 import { useToast } from "@/hooks/use-toast"
+import { inferLocationCode } from "@/lib/locations"
 import {
   STAFF_BPS_OPTIONS,
   STAFF_DEPARTMENT_OPTIONS,
@@ -33,6 +34,7 @@ const emptyForm: CreateStaffPayload = {
   password: "",
   email: "",
   role: "RECEPTIONIST",
+  location: "",
   phone: "",
   full_name: "",
   father_name: "",
@@ -390,6 +392,9 @@ export default function AddStaffPage() {
         cnic_back: cnicBack.file ?? undefined,
         appointment_letter: appointmentLetter.file ?? undefined,
         additional_document: additionalDocument.file ?? undefined,
+        location:
+          form.location ||
+          inferLocationCode(form.branch_location, form.current_posting, form.city),
       }
 
       if (!form.has_login) {
@@ -514,6 +519,7 @@ export default function AddStaffPage() {
                 formEl?.requestSubmit()
               }}
               submitting={submitting}
+              generatedLoginId={(form.personal_number || form.employee_id || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase()}
             />
           )}
               </div>
