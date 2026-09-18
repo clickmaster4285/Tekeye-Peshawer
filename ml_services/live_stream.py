@@ -57,6 +57,7 @@ from inference_engine import (
     get_yolo_custom_model,
     get_yolo_smoke_model,
     get_yolo_weapon_model,
+    gpu_predict_lock,
     keep_custom_classes_only,
     merge_triple_detections,
     parse_yolo_result,
@@ -1014,7 +1015,8 @@ class LiveStreamManager:
         self._infer_interval = 0.15
         # Partition cameras across workers (e.g. 5 workers → ~5 cams each when 25 cams).
         self._infer_workers = max(1, min(_env_int("ML_LIVE_INFER_WORKERS", 5), 16))
-        self._predict_lock = threading.Lock()
+        self._predict_lock = gpu_predict_lock()
+        self._offline_pause = False
         # Browser preview defaults: smaller/faster JPEGs (override via env).
         self._jpeg_quality = 50
         self._face_threshold = 0.28
@@ -1646,8 +1648,7 @@ class LiveStreamManager:
         }
         if classes is not None:
             kwargs["classes"] = list(classes)
-        # Serialize GPU predict across workers; OCR/post-process can overlap.
-        with self._predict_lock:
+        with gpu_predict_lock():
             return model.predict(frame, **kwargs)
 
     def _purposes_for(self, camera_key: str) -> list[str]:
@@ -1927,8 +1928,17 @@ class LiveStreamManager:
         size = base + (1 if worker_id < rem else 0)
         return sessions[start : start + size]
 
+    def pause_for_offline(self) -> None:
+        """Stop live YOLO while an offline video job owns the GPU."""
+        self._offline_pause = True
+
+    def resume_after_offline(self) -> None:
+        self._offline_pause = False
+
     def _run_camera_inference(self, session: _CameraSession) -> None:
         """Infer newest frame only for one camera; write Result Buffer. Never encodes JPEG."""
+        if self._offline_pause:
+            return
         now = time.time()
         with session.infer_lock:
             if session.infer_busy:

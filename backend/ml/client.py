@@ -732,3 +732,77 @@ def ml_poll_video_search(job_id: str) -> dict[str, Any]:
         detail = res.text[:400]
         raise MLServiceError(f"Video search status failed: {detail}", res.status_code)
     return res.json()
+
+
+def ml_start_video_analyze(
+    *,
+    video_path: str,
+    person: bool = True,
+    vehicle: bool = True,
+    weapon: bool = True,
+    fire: bool = True,
+    match_staff: bool = True,
+    sample_fps: float = 1.0,
+) -> dict[str, Any]:
+    form: dict[str, str] = {
+        "person": str(bool(person)).lower(),
+        "vehicle": str(bool(vehicle)).lower(),
+        "weapon": str(bool(weapon)).lower(),
+        "fire": str(bool(fire)).lower(),
+        "match_staff": str(bool(match_staff)).lower(),
+        "sample_fps": str(sample_fps),
+    }
+    files: dict[str, Any] = {}
+    handles: list[Any] = []
+    if _ml_is_local():
+        form["video_path"] = video_path
+    else:
+        video_handle = open(video_path, "rb")
+        handles.append(video_handle)
+        files["video"] = ("source.mp4", video_handle, "application/octet-stream")
+    try:
+        res = _request(
+            "POST",
+            "/analyze/video",
+            files=files or None,
+            data=form,
+            timeout=_video_search_timeout(),
+        )
+    finally:
+        for handle in handles:
+            try:
+                handle.close()
+            except Exception:
+                pass
+    if res.status_code != 200:
+        detail = res.text[:400]
+        raise MLServiceError(f"Video AI test failed: {detail}", res.status_code)
+    return res.json()
+
+
+def ml_poll_video_analyze(job_id: str) -> dict[str, Any]:
+    res = _request("GET", f"/analyze/video/{job_id.strip()}", timeout=30)
+    if res.status_code != 200:
+        detail = res.text[:400]
+        raise MLServiceError(f"Video AI status failed: {detail}", res.status_code)
+    return res.json()
+
+
+def ml_download_video_analyze(job_id: str, dest: str) -> None:
+    from pathlib import Path
+
+    dest_path = Path(dest)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    res = _request(
+        "GET",
+        f"/analyze/video/{job_id.strip()}/file",
+        timeout=_video_search_timeout(),
+        stream=True,
+    )
+    if res.status_code != 200:
+        detail = res.text[:400]
+        raise MLServiceError(f"Tagged video download failed: {detail}", res.status_code)
+    with dest_path.open("wb") as out:
+        for chunk in res.iter_content(chunk_size=1024 * 256):
+            if chunk:
+                out.write(chunk)
