@@ -15,3 +15,16 @@ export function locationLabel(code: string | null | undefined): string {
   const found = LOCATION_OPTIONS.find((o) => o.value === code);
   return found?.label ?? code.replace(/_/g, " ");
 }
+
+/** Map free-text posting / branch fields onto a system location code when possible. */
+export function inferLocationCode(...parts: Array<string | null | undefined>): LocationCode | "" {
+  const blobs = parts.filter(Boolean).join(" ").toUpperCase();
+  if (!blobs) return "";
+  const normalized = blobs.replace(/\s+/g, "_");
+  for (const opt of LOCATION_OPTIONS) {
+    if (normalized.includes(opt.value) || blobs.includes(opt.label.toUpperCase())) {
+      return opt.value;
+    }
+  }
+  return "";
+}

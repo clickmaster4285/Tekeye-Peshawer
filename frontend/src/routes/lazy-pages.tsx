@@ -180,6 +180,8 @@ export const PAGE_LOADERS = {
   PredictiveInsights: () => import("@/pages/reports/PredictiveInsights").then((m) => ({ default: m.default })),
   DataVisualization: () => import("@/pages/reports/DataVisualization").then((m) => ({ default: m.default })),
   Employees: () => import("@/pages/hr/Employees").then((m) => ({ default: m.default })),
+  MobileAlerts: () => import("@/pages/hr/MobileAlerts").then((m) => ({ default: m.default })),
+  EmployeeDevice: () => import("@/pages/hr/EmployeeDevice").then((m) => ({ default: m.default })),
   Recruitment: () => import("@/pages/hr/Recruitment").then((m) => ({ default: m.default })),
   AddStaff: () => import("@/pages/hr/AddStaff").then((m) => ({ default: m.default })),
   EmployeeDetail: () => import("@/pages/hr/EmployeeDetail").then((m) => ({ default: m.default })),

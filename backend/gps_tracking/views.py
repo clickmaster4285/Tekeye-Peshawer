@@ -83,6 +83,39 @@ class GpsPingAPIView(APIView):
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
         data = ser.validated_data
+
+        from logs.enforcement import (
+            DeviceRevoked,
+            SessionRevoked,
+            remember_event_id,
+            require_active_mobile_session,
+            touch_gps,
+        )
+        from logs.models import MobileAccessSession
+
+        event_id = (data.get("event_id") or request.data.get("event_id") or "").strip() or None
+        if event_id and not remember_event_id(request.user, event_id, "gps"):
+            row = OfficerGpsLatest.objects.filter(user=request.user).first()
+            return Response({**me_payload(request.user, row), "duplicate": True})
+
+        session_id = (data.get("session_id") or "").strip() or None
+        device_uuid = (data.get("device_uuid") or "").strip() or None
+        has_sessions = MobileAccessSession.objects.filter(user=request.user).exists()
+        session = None
+        if session_id or device_uuid or has_sessions:
+            try:
+                session = require_active_mobile_session(request.user, session_id, device_uuid)
+            except SessionRevoked as exc:
+                return Response(
+                    {"detail": str(exc), "code": "SESSION_REVOKED"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            except DeviceRevoked as exc:
+                return Response(
+                    {"detail": str(exc), "code": "DEVICE_REVOKED"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         accuracy = data.get("accuracy")
         if accuracy is not None and accuracy > MAX_ACCURACY_M:
             return Response(
@@ -101,12 +134,19 @@ class GpsPingAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        recorded_at = data.get("recordedAt") or timezone.now()
+        recorded_at = data.get("recordedAt") or data.get("client_timestamp") or timezone.now()
         battery = data.get("batteryPct")
+        if battery is None:
+            battery = data.get("battery_level")
         speed = data.get("speedKmh")
+        if speed is None:
+            speed = data.get("speed")
         heading = data.get("headingDeg")
+        if heading is None:
+            heading = data.get("heading")
         altitude = data.get("altitudeM")
         loc = _user_location(request.user)
+        server_now = timezone.now()
 
         with transaction.atomic():
             row, _created = OfficerGpsLatest.objects.select_for_update().get_or_create(
@@ -159,9 +199,17 @@ class GpsPingAPIView(APIView):
                 altitude_m=altitude,
                 recorded_at=recorded_at,
                 battery_pct=battery,
+                event_id=event_id,
+                device_uuid=device_uuid or "",
+                session_id=session_id or (session.session_id if session else ""),
+                client_timestamp=data.get("client_timestamp") or recorded_at,
+                server_timestamp=server_now,
             )
             cutoff = timezone.now() - timedelta(days=HISTORY_KEEP_DAYS)
             OfficerGpsHistory.objects.filter(user=request.user, recorded_at__lt=cutoff).delete()
+
+        if session:
+            touch_gps(session, lat, lng, accuracy, battery)
 
         return Response(me_payload(request.user, row))
 

@@ -16,6 +16,11 @@ SKIP_LOG_PATHS = (
     "/api/activity-logs/report/",
     "/api/activity-logs/report",
     "/api/mobile-sessions/",
+    "/api/mobile/heartbeat/",
+    "/api/mobile/heartbeat",
+    "/api/mobile/gps/",
+    "/api/gps/ping/",
+    "/api/gps/heartbeat/",
     "/favicon.ico",
     "/media/",
 )

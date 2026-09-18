@@ -2,11 +2,24 @@ import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useState } from "react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { LOCATION_OPTIONS, inferLocationCode } from "@/lib/locations"
 
 export type AddStaffStep3Form = {
   has_login?: boolean
   login_username?: string
   password?: string
+  role?: string
+  location?: string
+  current_posting?: string
+  branch_location?: string
+  city?: string
 }
 
 export function AddStaffStep3LoginAccess({
@@ -19,6 +32,7 @@ export function AddStaffStep3LoginAccess({
   submitting,
   mode = "create",
   hasExistingLogin = false,
+  generatedLoginId,
 }: {
   form: AddStaffStep3Form
   updateForm: (patch: Partial<AddStaffStep3Form>) => void
@@ -29,26 +43,30 @@ export function AddStaffStep3LoginAccess({
   submitting: boolean
   mode?: "create" | "edit"
   hasExistingLogin?: boolean
+  generatedLoginId?: string
 }) {
-  const [errors, setErrors] = useState<{ username?: string; password?: string }>({})
+  const [errors, setErrors] = useState<{ password?: string; location?: string }>({})
+  const inferredLocation =
+    form.location || inferLocationCode(form.branch_location, form.current_posting, form.city)
+  const needsLocation = Boolean(form.has_login) && form.role !== "ADMIN" && !inferredLocation
 
   const validateForm = (): boolean => {
     if (!form.has_login) {
       return true
     }
 
-    const newErrors: { username?: string; password?: string } = {}
-
-    if (!form.login_username?.trim()) {
-      newErrors.username = "Username is required"
-    }
+    const newErrors: { password?: string; location?: string } = {}
 
     if (!form.password?.trim()) {
       if (!(mode === "edit" && hasExistingLogin)) {
         newErrors.password = "Password is required"
       }
-    } else if (form.password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters"
+    } else if (form.password.length < 6) {
+      newErrors.password = "Password must be at least 6 characters"
+    }
+
+    if (needsLocation && !(mode === "edit" && hasExistingLogin)) {
+      newErrors.location = "Location is required because this employee has no posting location yet"
     }
 
     setErrors(newErrors)
@@ -73,7 +91,7 @@ export function AddStaffStep3LoginAccess({
               <p className="text-sm text-muted-foreground">
                 {mode === "edit" && hasExistingLogin
                   ? "Leave password blank to keep the current password. Enter a new one only to change it."
-                  : "If enabled, they can sign in using provided credentials. Username and password are required."}
+                  : "If enabled, a unique login ID is generated from this employee’s name. You can edit it, then set a password."}
               </p>
             </div>
             <Switch
@@ -89,26 +107,19 @@ export function AddStaffStep3LoginAccess({
           {form.has_login ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
               <div className="space-y-2">
-                <Label className="text-base text-foreground">
-                  Login Username
-                  {form.has_login && <span className="text-destructive ml-1">*</span>}
-                </Label>
+                <Label className="text-base text-foreground">Unique login ID</Label>
                 <Input
-                  placeholder="e.g. ahsan.khan"
-                  value={form.login_username || ""}
-                  onChange={(e) => {
-                    updateForm({ login_username: e.target.value })
-                    if (errors.username) {
-                      setErrors({ ...errors, username: undefined })
-                    }
-                  }}
-                  className={`h-10 text-base bg-background border-border ${errors.username ? "border-destructive" : ""}`}
+                  readOnly
+                  value={
+                    hasExistingLogin
+                      ? form.login_username || ""
+                      : generatedLoginId || form.login_username || "Generated after save from Personal No. / Employee ID"
+                  }
+                  className="h-10 text-base bg-muted border-border"
                 />
-                {errors.username ? (
-                  <p className="text-sm text-destructive">{errors.username}</p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">(Username for system login)</p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  Generated from the employee record. Do not invent a username.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label className="text-base text-foreground">
@@ -132,9 +143,51 @@ export function AddStaffStep3LoginAccess({
                 {errors.password ? (
                   <p className="text-sm text-destructive">{errors.password}</p>
                 ) : (
-                  <p className="text-sm text-muted-foreground">(Minimum 8 characters)</p>
+                  <p className="text-sm text-muted-foreground">(Minimum 6 characters)</p>
                 )}
               </div>
+              {form.role ? (
+                <p className="text-sm text-muted-foreground md:col-span-2">
+                  Role from employee: {form.role.replace(/_/g, " ")}
+                </p>
+              ) : null}
+              {!needsLocation && inferredLocation && form.role !== "ADMIN" ? (
+                <p className="text-sm text-muted-foreground md:col-span-2">
+                  Location from employee: {inferredLocation.replace(/_/g, " ")}
+                </p>
+              ) : null}
+              {needsLocation ? (
+                <div className="space-y-2 md:col-span-2">
+                  <Label className="text-base text-foreground">
+                    Location <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={form.location || ""}
+                    onValueChange={(value) => {
+                      updateForm({ location: value })
+                      if (errors.location) setErrors({ ...errors, location: undefined })
+                    }}
+                  >
+                    <SelectTrigger className={errors.location ? "border-destructive" : ""}>
+                      <SelectValue placeholder="Select office location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOCATION_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.location ? (
+                    <p className="text-sm text-destructive">{errors.location}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Required because this employee does not have a posting location yet.
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="mt-4 text-sm text-muted-foreground bg-white/50 p-3 rounded-md border border-border">

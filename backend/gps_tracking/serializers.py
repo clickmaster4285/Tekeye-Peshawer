@@ -46,10 +46,17 @@ class GpsPingSerializer(serializers.Serializer):
     longitude = serializers.FloatField(min_value=-180, max_value=180)
     accuracy = serializers.FloatField(required=False, allow_null=True, min_value=0)
     recordedAt = serializers.DateTimeField(required=False, allow_null=True)
+    client_timestamp = serializers.DateTimeField(required=False, allow_null=True)
     batteryPct = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
+    battery_level = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
     speedKmh = serializers.FloatField(required=False, allow_null=True, min_value=0)
+    speed = serializers.FloatField(required=False, allow_null=True, min_value=0)
     headingDeg = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=360)
+    heading = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=360)
     altitudeM = serializers.FloatField(required=False, allow_null=True)
+    event_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=64)
+    device_uuid = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=64)
+    session_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=64)
 
 
 class GpsDutySerializer(serializers.Serializer):

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  createStaffUser,
   fetchStaffById,
   resolveStaffMediaUrl,
   resolveStaffPhotoGallery,
@@ -24,6 +25,7 @@ import {
   revokeStaffUploadBlobs,
 } from "@/lib/staff-photo-utils"
 import { useToast } from "@/hooks/use-toast"
+import { inferLocationCode } from "@/lib/locations"
 import {
   STAFF_BPS_OPTIONS,
   STAFF_DEPARTMENT_OPTIONS,
@@ -46,7 +48,8 @@ function staffToForm(staff: StaffRecord): CreateStaffPayload {
     login_username: staff.user_details?.username ?? "",
     password: "",
     email: staff.email ?? "",
-    role: staff.role ?? staff.user_details?.role ?? "RECEPTIONIST",
+    role: staff.role ?? staff.user_details?.role ?? staff.role_access_level ?? "RECEPTIONIST",
+    location: inferLocationCode(staff.branch_location, staff.current_posting, staff.city),
     phone: staff.phone_primary ?? staff.phone ?? "",
     full_name: staff.full_name ?? "",
     father_name: staff.father_name ?? "",
@@ -236,6 +239,16 @@ export default function EmployeeEditPage() {
       }
 
       await updateStaff(staffId, payload)
+      if (form.has_login && !hasExistingLogin && form.password) {
+        await createStaffUser(staffId, {
+          password: form.password,
+          role: form.role || undefined,
+          location:
+            form.location ||
+            inferLocationCode(form.branch_location, form.current_posting, form.city) ||
+            undefined,
+        })
+      }
       toast({ title: "Employee updated", description: "Changes have been saved." })
       void queryClient.invalidateQueries({ queryKey: ["staff", staffId] })
       void queryClient.invalidateQueries({ queryKey: ["staff"] })
@@ -373,6 +386,7 @@ export default function EmployeeEditPage() {
               submitting={submitting}
               mode="edit"
               hasExistingLogin={hasExistingLogin}
+              generatedLoginId={(form.personal_number || form.employee_id || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase()}
             />
           )}
         </div>
