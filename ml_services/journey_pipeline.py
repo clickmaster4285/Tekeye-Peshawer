@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from camera_byte_tracker import CameraByteTrackerPool
 from face_recognizer import KnownFaceDB
 from inference_engine import (
     WEAPON_MIN_CONF,
@@ -17,6 +18,7 @@ from inference_engine import (
     get_yolo_coco_model,
     get_yolo_custom_model,
     get_yolo_weapon_model,
+    gpu_predict_lock,
     resolve_ml_device,
 )
 from live_stream import get_live_manager
@@ -87,6 +89,8 @@ class JourneyCameraPipeline:
         self._tracks: dict[int, TrackedPersonState] = {}
         self._running = False
         self._live = get_live_manager()
+        # Per-pipeline ByteTrack — never call Ultralytics model.track() on the shared YOLO.
+        self._byte_trackers = CameraByteTrackerPool(track_buffer=90)
 
     def _read_frame(self) -> np.ndarray | None:
         """Reuse shared Camera Session — never open a second RTSP/ffmpeg per camera."""
@@ -111,36 +115,47 @@ class JourneyCameraPipeline:
         if self._coco is None:
             return []
 
-        results = self._coco.track(
-            frame,
-            persist=True,
-            conf=self._conf,
-            iou=self._iou,
-            imgsz=self._imgsz,
-            device=self._device,
-            classes=[0],
-            tracker="bytetrack.yaml",
-            verbose=False,
-        )
-        out: list[dict[str, Any]] = []
+        # predict() + local ByteTrack keeps the shared YOLO singleton stable across cameras.
+        with gpu_predict_lock():
+            results = self._coco.predict(
+                frame,
+                conf=self._conf,
+                iou=self._iou,
+                imgsz=self._imgsz,
+                device=self._device,
+                classes=[0],
+                verbose=False,
+            )
+        dets: list[dict[str, Any]] = []
         if not results:
-            return out
+            return dets
         r0 = results[0]
         boxes = r0.boxes
         if boxes is None:
-            return out
+            return dets
         for box in boxes:
-            tid = box.id
-            if tid is None:
-                continue
-            track_id = int(tid.item())
             xyxy = box.xyxy[0].tolist()
             conf = float(box.conf[0].item()) if box.conf is not None else 0.0
-            out.append(
+            dets.append(
                 {
-                    "track_id": track_id,
                     "bbox": [int(v) for v in xyxy],
                     "confidence": conf,
+                    "class_name": "person",
+                    "class_id": 0,
+                    "label": "person",
+                }
+            )
+        tracked = self._byte_trackers.assign_track_ids(self.camera_key, dets, frame)
+        out: list[dict[str, Any]] = []
+        for det in tracked:
+            tid = det.get("track_id")
+            if tid is None:
+                continue
+            out.append(
+                {
+                    "track_id": int(tid),
+                    "bbox": det["bbox"],
+                    "confidence": float(det.get("confidence") or 0.0),
                     "class_name": "person",
                 }
             )
@@ -151,14 +166,15 @@ class JourneyCameraPipeline:
         if model is None:
             return []
         conf = self._weapon_conf if self._weapon is not None else self._conf
-        results = model.predict(
-            frame,
-            conf=conf,
-            iou=self._iou,
-            imgsz=self._imgsz,
-            device=self._device,
-            verbose=False,
-        )
+        with gpu_predict_lock():
+            results = model.predict(
+                frame,
+                conf=conf,
+                iou=self._iou,
+                imgsz=self._imgsz,
+                device=self._device,
+                verbose=False,
+            )
         alerts: list[dict[str, Any]] = []
         if not results:
             return alerts
@@ -309,3 +325,11 @@ class JourneyCameraPipeline:
 
     def stop(self):
         self._running = False
+        try:
+            self._byte_trackers.reset(self.camera_key)
+        except Exception:
+            pass
+        try:
+            self._face_db.track_cache.prune_inactive(self.camera_key, set())
+        except Exception:
+            pass
