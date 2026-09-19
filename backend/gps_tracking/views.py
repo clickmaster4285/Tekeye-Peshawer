@@ -13,6 +13,7 @@ from users.permissions import can_view_all_staff, get_effective_location, get_lo
 
 from .models import OfficerGpsHistory, OfficerGpsLatest
 from .serializers import GpsDutySerializer, GpsPingSerializer, latest_to_dict, me_payload
+from .geocode import reverse_geocode_batch
 
 MAX_ACCURACY_M = 500
 HISTORY_KEEP_DAYS = 45
@@ -496,3 +497,16 @@ class GpsHistoryAPIView(APIView):
                 "sampled": sampled,
             }
         )
+
+
+class GpsReverseGeocodeAPIView(APIView):
+    """Batch reverse-geocode for GPS history location names (OSM via Photon)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        raw = request.data.get("points")
+        if not isinstance(raw, list):
+            return Response({"detail": "points must be a list of {latitude, longitude}."}, status=status.HTTP_400_BAD_REQUEST)
+        results = reverse_geocode_batch(raw)
+        return Response({"results": results, "count": len(results)})

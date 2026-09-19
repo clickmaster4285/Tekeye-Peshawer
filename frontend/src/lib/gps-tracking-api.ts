@@ -120,9 +120,15 @@ export async function postGpsPing(payload: {
   return res.json()
 }
 
-export async function fetchGpsLive(location?: string): Promise<GpsOfficer[]> {
-  const q = location && location !== "all" ? `?location=${encodeURIComponent(location)}` : ""
-  const res = await fetch(`${API}/live/${q}`, { headers: getAuthHeaders() })
+export async function fetchGpsLive(
+  location?: string,
+  options?: { includeOffDuty?: boolean }
+): Promise<GpsOfficer[]> {
+  const params = new URLSearchParams()
+  if (location && location !== "all") params.set("location", location)
+  if (options?.includeOffDuty) params.set("include_off_duty", "1")
+  const qs = params.toString()
+  const res = await fetch(`${API}/live/${qs ? `?${qs}` : ""}`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(await readError(res, "Failed to load live GPS"))
   const data = await res.json()
   return Array.isArray(data?.officers) ? data.officers : []
@@ -158,4 +164,42 @@ export async function fetchGpsHistory(
     sampled: Boolean(data?.sampled),
     period: data?.period,
   }
+}
+
+/** Round key matching backend gps_tracking.geocode.coord_key */
+export function gpsCoordKey(lat: number, lng: number): string {
+  const r = (n: number) => (Math.round(n * 1e4) / 1e4).toFixed(4)
+  return `${r(lat)},${r(lng)}`
+}
+
+export type GpsReverseGeocodeResult = {
+  key: string
+  latitude: number
+  longitude: number
+  locationName: string
+}
+
+/** Batch reverse-geocode (street / area names via OSM). */
+export async function fetchGpsLocationNames(
+  points: Array<{ latitude: number; longitude: number }>
+): Promise<Record<string, string>> {
+  if (!points.length) return {}
+  const res = await fetch(`${API}/reverse-geocode/`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      points: points.map((p) => ({
+        latitude: p.latitude,
+        longitude: p.longitude,
+      })),
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res, "Failed to resolve location names"))
+  const data = await res.json()
+  const out: Record<string, string> = {}
+  const results = Array.isArray(data?.results) ? data.results : []
+  for (const row of results as GpsReverseGeocodeResult[]) {
+    if (row?.key && row.locationName) out[row.key] = row.locationName
+  }
+  return out
 }

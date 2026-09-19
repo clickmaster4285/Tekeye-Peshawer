@@ -148,6 +148,7 @@ export function OfficerGpsMap({
   showGeofences,
   focus,
   fitTrailToken,
+  fitAllToken = 0,
   defaultCenter = GPS_DEFAULT_CENTER,
   onSelect,
   className,
@@ -159,6 +160,8 @@ export function OfficerGpsMap({
   showGeofences: boolean
   focus: { lat: number; lng: number; zoom?: number } | null
   fitTrailToken: number
+  /** Bump to re-fit the map to every officer with a GPS fix. */
+  fitAllToken?: number
   defaultCenter?: [number, number]
   onSelect: (userId: number) => void
   className?: string
@@ -328,6 +331,25 @@ export function OfficerGpsMap({
       /* ignore */
     }
   }, [fitTrailToken, mapReady])
+
+  useEffect(() => {
+    const L = window.L
+    const map = mapRef.current
+    if (!L || !map || !mapReady || !fitAllToken) return
+    const markers = [...markersRef.current.values()]
+    if (markers.length === 0) {
+      map.setView(defaultCenter, DEFAULT_ZOOM)
+      return
+    }
+    try {
+      map.fitBounds(L.featureGroup(markers).getBounds().pad(0.35), {
+        maxZoom: markers.length === 1 ? 15 : 13,
+      })
+      map.invalidateSize()
+    } catch {
+      map.setView(defaultCenter, DEFAULT_ZOOM)
+    }
+  }, [fitAllToken, mapReady, officers, defaultCenter])
 
   return <div ref={containerRef} className={cn("h-full min-h-[420px] w-full bg-muted", className)} />
 }

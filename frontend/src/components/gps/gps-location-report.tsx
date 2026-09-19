@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { GpsClosestPoint, GpsHistoryPoint, GpsOfficer, GpsReportPeriod } from "@/lib/gps-tracking-api"
+import { resolveLocationName } from "@/lib/gps-geofences"
 import {
   formatClock,
   formatClockWithSeconds,
@@ -34,6 +35,9 @@ type GpsLocationReportProps = {
   onLookupTimeChange: (value: string) => void
   points: GpsHistoryPoint[]
   closest: GpsClosestPoint | null
+  /** Exact reverse-geocoded names keyed by rounded lat,lng */
+  locationNames?: Record<string, string>
+  locationNamesLoading?: boolean
   totalCount?: number
   sampled?: boolean
   loading?: boolean
@@ -63,6 +67,8 @@ export function GpsLocationReport({
   onLookupTimeChange,
   points,
   closest,
+  locationNames,
+  locationNamesLoading,
   totalCount,
   sampled,
   loading,
@@ -192,7 +198,15 @@ export function GpsLocationReport({
               ) : null}
             </p>
           </div>
-          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-5">
+            <div className="col-span-2 sm:col-span-3 lg:col-span-1">
+              <dt className="text-xs text-muted-foreground">Location</dt>
+              <dd className="font-medium">
+                {locationNamesLoading && locationNames == null
+                  ? "Resolving…"
+                  : resolveLocationName(closest.latitude, closest.longitude, locationNames)}
+              </dd>
+            </div>
             <div>
               <dt className="text-xs text-muted-foreground">Latitude</dt>
               <dd className="font-medium">{closest.latitude.toFixed(5)}</dd>
@@ -231,11 +245,12 @@ export function GpsLocationReport({
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(240px,0.8fr)]">
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full min-w-[520px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
                 {showDateCol ? <th className="px-2 py-2 font-semibold">Date</th> : null}
                 <th className="px-2 py-2 font-semibold">Time</th>
+                <th className="px-2 py-2 font-semibold">Location</th>
                 <th className="px-2 py-2 font-semibold">Latitude</th>
                 <th className="px-2 py-2 font-semibold">Longitude</th>
                 <th className="px-2 py-2 font-semibold">Accuracy</th>
@@ -246,7 +261,7 @@ export function GpsLocationReport({
               {loading ? (
                 <tr>
                   <td
-                    colSpan={showDateCol ? 6 : 5}
+                    colSpan={showDateCol ? 7 : 6}
                     className="px-2 py-8 text-center text-muted-foreground"
                   >
                     Loading GPS points…
@@ -254,14 +269,14 @@ export function GpsLocationReport({
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={showDateCol ? 6 : 5} className="px-2 py-8 text-center text-destructive">
+                  <td colSpan={showDateCol ? 7 : 6} className="px-2 py-8 text-center text-destructive">
                     {error}
                   </td>
                 </tr>
               ) : points.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={showDateCol ? 6 : 5}
+                    colSpan={showDateCol ? 7 : 6}
                     className="px-2 py-8 text-center text-muted-foreground"
                   >
                     No GPS records for this employee in {periodRangeText(reportPeriod, reportDate)}.
@@ -274,6 +289,13 @@ export function GpsLocationReport({
                     point.recordedAt &&
                     closest.recordedAt &&
                     point.recordedAt === closest.recordedAt
+                  const locationName = resolveLocationName(
+                    point.latitude,
+                    point.longitude,
+                    locationNames
+                  )
+                  const stillResolving =
+                    Boolean(locationNamesLoading) && locationNames == null
                   return (
                     <tr
                       key={`${point.recordedAt}-${point.latitude}-${point.longitude}`}
@@ -296,6 +318,16 @@ export function GpsLocationReport({
                       ) : null}
                       <td className="whitespace-nowrap px-2 py-2 font-medium">
                         {formatClockWithSeconds(point.recordedAt)}
+                      </td>
+                      <td
+                        className="max-w-[14rem] truncate px-2 py-2"
+                        title={stillResolving ? "Resolving place name…" : locationName}
+                      >
+                        {stillResolving ? (
+                          <span className="text-muted-foreground">Resolving…</span>
+                        ) : (
+                          locationName
+                        )}
                       </td>
                       <td className="px-2 py-2 tabular-nums">{point.latitude.toFixed(5)}</td>
                       <td className="px-2 py-2 tabular-nums">{point.longitude.toFixed(5)}</td>

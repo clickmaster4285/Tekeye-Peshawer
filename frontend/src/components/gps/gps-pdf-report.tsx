@@ -1,5 +1,6 @@
 import type { CSSProperties, RefObject } from "react"
 import { CUSTOMS_LOGO_SRC } from "@/lib/brand"
+import { resolveLocationName } from "@/lib/gps-geofences"
 import type { GpsHistoryPoint, GpsOfficer, GpsReportPeriod } from "@/lib/gps-tracking-api"
 import { resolveStaffProfileImageUrl } from "@/lib/staff-api"
 import {
@@ -56,6 +57,7 @@ type GpsPdfReportProps = {
   anchorDate: string
   totalCount?: number
   sampled?: boolean
+  locationNames?: Record<string, string>
   reportRef: RefObject<HTMLDivElement | null>
 }
 
@@ -66,6 +68,7 @@ export function GpsPdfReport({
   anchorDate,
   totalCount,
   sampled,
+  locationNames,
   reportRef,
 }: GpsPdfReportProps) {
   const name = officer?.name ?? "—"
@@ -347,6 +350,7 @@ export function GpsPdfReport({
                 <tr>
                   {showDateCol ? <th style={thStyle}>Date</th> : null}
                   <th style={thStyle}>Time</th>
+                  <th style={thStyle}>Location</th>
                   <th style={thStyle}>Latitude</th>
                   <th style={thStyle}>Longitude</th>
                   <th style={thStyle}>Accuracy</th>
@@ -357,7 +361,7 @@ export function GpsPdfReport({
                 {pageRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={showDateCol ? 6 : 5}
+                      colSpan={showDateCol ? 7 : 6}
                       style={{ ...tdStyle, textAlign: "center", color: MUTED, padding: "12mm 4px" }}
                     >
                       No GPS records for this period.
@@ -371,6 +375,9 @@ export function GpsPdfReport({
                       ) : null}
                       <td style={{ ...tdStyle, fontWeight: 600 }}>
                         {formatClockWithSeconds(point.recordedAt)}
+                      </td>
+                      <td style={tdStyle}>
+                        {resolveLocationName(point.latitude, point.longitude, locationNames)}
                       </td>
                       <td style={tdStyle}>{point.latitude.toFixed(5)}</td>
                       <td style={tdStyle}>{point.longitude.toFixed(5)}</td>

@@ -99,3 +99,49 @@ export function haversineM(a: { lat: number; lng: number }, b: { lat: number; ln
     Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
+
+/** Distance within which an out-of-fence point is labeled "Near {station}". */
+const NEAR_STATION_M = 2_000
+
+/**
+ * Human-readable place label for a GPS fix using customs station geofences.
+ * Inside radius → fence name; within ~2 km → "Near {name}"; else → "Outside station".
+ */
+export function locationNameForCoords(lat: number, lng: number): string {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "—"
+
+  let nearest: GpsGeofence | null = null
+  let nearestDist = Number.POSITIVE_INFINITY
+
+  for (const fence of STATION_GEOFENCES) {
+    const dist = haversineM(
+      { lat, lng },
+      { lat: fence.latitude, lng: fence.longitude }
+    )
+    if (dist <= fence.radiusM) return fence.name
+    if (dist < nearestDist) {
+      nearestDist = dist
+      nearest = fence
+    }
+  }
+
+  if (nearest && nearestDist <= NEAR_STATION_M) return `Near ${nearest.name}`
+  return "Outside station"
+}
+
+/**
+ * Prefer exact reverse-geocoded place name; fall back to station geofence label.
+ */
+export function resolveLocationName(
+  lat: number,
+  lng: number,
+  exactNames?: Record<string, string> | null
+): string {
+  if (exactNames) {
+    const key = `${(Math.round(lat * 1e4) / 1e4).toFixed(4)},${(Math.round(lng * 1e4) / 1e4).toFixed(4)}`
+    const exact = (exactNames[key] || "").trim()
+    if (exact) return exact
+  }
+  return locationNameForCoords(lat, lng)
+}
+

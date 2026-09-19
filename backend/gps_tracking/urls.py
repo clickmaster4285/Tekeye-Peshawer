@@ -7,6 +7,7 @@ from .views import (
     GpsLiveAPIView,
     GpsMeAPIView,
     GpsPingAPIView,
+    GpsReverseGeocodeAPIView,
 )
 
 urlpatterns = [
@@ -17,4 +18,5 @@ urlpatterns = [
     path("mobile/gps/", GpsPingAPIView.as_view(), name="mobile-gps"),
     path("gps/live/", GpsLiveAPIView.as_view(), name="gps-live"),
     path("gps/history/<int:user_id>/", GpsHistoryAPIView.as_view(), name="gps-history"),
+    path("gps/reverse-geocode/", GpsReverseGeocodeAPIView.as_view(), name="gps-reverse-geocode"),
 ]
