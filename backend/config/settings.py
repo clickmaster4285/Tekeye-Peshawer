@@ -352,8 +352,8 @@ ATTENDANCE_SNAPSHOT_ENABLED = os.getenv("ATTENDANCE_SNAPSHOT_ENABLED", "True").l
 )
 ATTENDANCE_VIDEO_SECONDS = float(os.getenv("ATTENDANCE_VIDEO_SECONDS", "5"))
 ATTENDANCE_VIDEO_FPS = int(os.getenv("ATTENDANCE_VIDEO_FPS", "10"))
-ATTENDANCE_VIDEO_WIDTH = int(os.getenv("ATTENDANCE_VIDEO_WIDTH", "3840"))
-ATTENDANCE_VIDEO_JPEG_QUALITY = int(os.getenv("ATTENDANCE_VIDEO_JPEG_QUALITY", "95"))
+ATTENDANCE_VIDEO_WIDTH = int(os.getenv("ATTENDANCE_VIDEO_WIDTH", "1280"))
+ATTENDANCE_VIDEO_JPEG_QUALITY = int(os.getenv("ATTENDANCE_VIDEO_JPEG_QUALITY", "90"))
 ATTENDANCE_VIDEO_CRF = int(os.getenv("ATTENDANCE_VIDEO_CRF", "18"))
 
 # Person Journey — cross-camera tracking (parallel to detection worker; does not replace it)
@@ -388,8 +388,8 @@ JOURNEY_MAX_TRAVEL_SECONDS = int(os.getenv("JOURNEY_MAX_TRAVEL_SECONDS", "120"))
 JOURNEY_RECENT_WINDOW_SECONDS = int(os.getenv("JOURNEY_RECENT_WINDOW_SECONDS", "600"))
 # 3840 = 4K width cap; 0 = native camera resolution (no ffmpeg scale).
 # Shared-session default: prefer ML Camera Session frames (JOURNEY_SNAPSHOT_NATIVE=False).
-JOURNEY_SNAPSHOT_WIDTH = int(os.getenv("JOURNEY_SNAPSHOT_WIDTH", "3840"))
-JOURNEY_SNAPSHOT_JPEG_QUALITY = int(os.getenv("JOURNEY_SNAPSHOT_JPEG_QUALITY", "98"))
+JOURNEY_SNAPSHOT_WIDTH = int(os.getenv("JOURNEY_SNAPSHOT_WIDTH", "1280"))
+JOURNEY_SNAPSHOT_JPEG_QUALITY = int(os.getenv("JOURNEY_SNAPSHOT_JPEG_QUALITY", "92"))
 # Person Journey UI always shows the cropped person. When True, also store the
 # annotated full camera frame on the event (metadata.full_snapshot_path).
 JOURNEY_SNAPSHOT_FULL_FRAME = os.getenv("JOURNEY_SNAPSHOT_FULL_FRAME", "True").lower() in (

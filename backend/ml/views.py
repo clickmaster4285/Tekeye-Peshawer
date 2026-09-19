@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import permissions, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -14,6 +16,8 @@ from .client import (
 )
 from .face_sync import collect_db_face_embeddings
 
+logger = logging.getLogger(__name__)
+
 
 class MLHealthAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -23,15 +27,20 @@ class MLHealthAPIView(APIView):
             return Response(
                 {
                     "status": "disabled",
-                    "message": "Set ML_SERVICE_URL in backend/.env and start ml_services/api_server.py.",
+                    "message": "Detection engine not configured",
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         try:
             data = ml_health()
         except MLServiceError as exc:
+            # Keep technical detail in logs; UI gets a short professional message.
+            logger.warning("ML health check failed: %s", exc)
             return Response(
-                {"status": "error", "message": str(exc)},
+                {
+                    "status": "error",
+                    "message": "Detection engine temporarily unavailable",
+                },
                 status=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response({"status": "ok", **data})

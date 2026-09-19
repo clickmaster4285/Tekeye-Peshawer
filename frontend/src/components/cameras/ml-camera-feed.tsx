@@ -155,14 +155,15 @@ export function MlCameraFeed({
     <div
       className={cn(
         "flex flex-col",
-        isFullscreen && "fixed inset-0 z-[200] bg-black",
+        isFullscreen &&
+          "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-black",
         className
       )}
     >
       <div
         className={cn(
           "relative aspect-video w-full overflow-hidden bg-black",
-          isFullscreen && "flex-1 aspect-auto min-h-0"
+          isFullscreen && "min-h-0 flex-1 aspect-auto"
         )}
       >
         {streamSrc ? (
