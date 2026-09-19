@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Expand,
-  GripVertical,
   LayoutGrid,
   Loader2,
   MapPin,
@@ -23,7 +22,7 @@ import {
   WifiOff,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
-import { WallAlertsPanel } from "@/components/operations/wall-alerts-panel"
+import { WallAlertsPanel, WallAlertPopupHost } from "@/components/operations/wall-alerts-panel"
 import { WallAnalyticsPanel } from "@/components/operations/wall-analytics-panel"
 import { WallGpsPanel } from "@/components/operations/wall-gps-panel"
 import { WallWidgetPicker } from "@/components/operations/wall-widget-picker"
@@ -347,14 +346,11 @@ function DockStack({
             e.dataTransfer.setData("text/plain", payload)
             e.dataTransfer.effectAllowed = "move"
           }}
-          className="flex shrink-0 cursor-grab items-center gap-2 border-b border-white/10 bg-zinc-900/90 px-2 py-1 active:cursor-grabbing"
-          title="Drag to another side or reorder"
+          className="flex h-5 shrink-0 cursor-grab items-center justify-center gap-1.5 border-b border-white/[0.06] bg-zinc-950/80 active:cursor-grabbing"
+          title={`Drag ${label} (${dock})`}
+          aria-label={`Move ${label} panel`}
         >
-          <GripVertical className="h-3.5 w-3.5 text-white/40" />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-white/55">
-            {label}
-          </span>
-          <span className="ml-auto text-[9px] capitalize text-white/30">{dock}</span>
+          <span className="h-0.5 w-8 rounded-full bg-white/20" />
         </div>
         <div className="min-h-0 flex-1">
           {renderWallWidget(id, { cameraCount, onlineCount })}
@@ -1853,6 +1849,7 @@ export default function AllCitiesCamerasPage() {
               }
             />
           </div>
+          <WallAlertPopupHost />
         </div>
       )}
     </ModulePageLayout>

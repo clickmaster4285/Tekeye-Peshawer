@@ -29,7 +29,7 @@ export const WALL_WIDGET_CATALOG: {
   hint: string
 }[] = [
   { id: "gps", label: "GPS tracking", hint: "Live officer map" },
-  { id: "alerts", label: "Live alerts", hint: "Incident feed" },
+  { id: "alerts", label: "Live detections", hint: "All detections + search" },
   { id: "analytics", label: "Analytics", hint: "Detection stats" },
 ]
 

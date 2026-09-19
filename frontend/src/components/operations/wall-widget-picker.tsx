@@ -5,12 +5,12 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
-  Bell,
   Check,
   GripVertical,
   LayoutDashboard,
   MapPin,
   Plus,
+  ScanEye,
   Video,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,13 +32,13 @@ import { cn } from "@/lib/utils"
 
 const WIDGET_ICON: Record<WallWidgetId, typeof MapPin> = {
   gps: MapPin,
-  alerts: Bell,
+  alerts: ScanEye,
   analytics: BarChart3,
 }
 
 const WIDGET_COLOR: Record<WallWidgetId, string> = {
   gps: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
-  alerts: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+  alerts: "border-sky-500/40 bg-sky-500/15 text-sky-300",
   analytics: "border-violet-500/40 bg-violet-500/15 text-violet-300",
 }
 
@@ -116,7 +116,7 @@ export function WallWidgetPicker({
         <div className="mb-3">
           <p className="text-sm font-semibold text-white">Wall widgets</p>
           <p className="text-[11px] text-white/50">
-            Cameras stay in the center. Place GPS, alerts, or analytics on any side.
+            Cameras stay in the center. Place GPS, detections, or analytics on any side.
           </p>
         </div>
 
