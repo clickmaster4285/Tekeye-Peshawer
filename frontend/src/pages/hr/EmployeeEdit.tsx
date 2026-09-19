@@ -59,7 +59,7 @@ function staffToForm(staff: StaffRecord): CreateStaffPayload {
     gender: staff.gender ?? "",
     cnic: staff.cnic ?? staff.national_id ?? "",
     address: staff.address ?? staff.street_address ?? "",
-    date_of_birth: staff.date_of_birth ?? "",
+    date_of_birth: staff.date_of_birth ? String(staff.date_of_birth).slice(0, 10) : "",
     joining_date: staff.joining_date ?? "",
     department: staff.department ?? "",
     designation: staff.designation ?? "",
@@ -249,11 +249,16 @@ export default function EmployeeEditPage() {
         : form.qualification
 
       const orderedPhotos = photosOrderedForProfile(staffPhotos, profilePhotoIndex)
+      const dob = form.date_of_birth?.trim()
+        ? String(form.date_of_birth).trim().slice(0, 10)
+        : undefined
+
       const payload: Partial<CreateStaffPayload> = {
         ...form,
         qualification,
         phone_primary: form.phone,
         street_address: form.address || undefined,
+        date_of_birth: dob,
         date_of_joining: form.joining_date,
         emergency_contact_phone: form.emergency_contact_phone || form.emergency_contact,
         profile_image: primaryStaffPhotoFile(orderedPhotos),
