@@ -32,7 +32,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { ROUTES, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
+import { ROUTES, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoScanUrl, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { CUSTOMS_STATIONS } from "@/lib/case-fir-spec"
 import { toast } from "@/hooks/use-toast"
 import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
@@ -598,7 +598,9 @@ export default function DetentionMemoCreatePage() {
       updatedBy:
         (currentUser?.full_name || "").trim() || currentUser?.username?.trim() || "ASO Portal",
       memoQrCodeNumber,
-      memoQrCodePayload: existingMemo?.memoQrCodePayload || "",
+      memoQrCodePayload: isEdit && existingMemo?.id
+        ? getDetentionMemoScanUrl(existingMemo.id)
+        : existingMemo?.memoQrCodePayload || "",
       clientOrigin: window.location.origin,
     }
 

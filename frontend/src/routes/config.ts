@@ -323,6 +323,16 @@ export function getDetentionMemoDetailPath(id: string, pathname?: string): strin
   return `${getDetentionMemoListPath(pathname)}/${encodeURIComponent(id)}`
 }
 
+/**
+ * Absolute URL encoded in detention-memo QR codes (opens the detail page, not print mode).
+ * Canonical path: /seizure-management/detention-memo/:id
+ */
+export function getDetentionMemoScanUrl(id: string, origin?: string): string {
+  const base =
+    (origin || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/+$/, "")
+  return `${base}${ROUTES.DETENTION_MEMO}/${encodeURIComponent(id)}`
+}
+
 export function getDetentionMemoSectionCrumb(pathname: string): { label: string; href: string } {
   if (isWarehouseDetentionMemoPath(pathname)) {
     return { label: "Warehouse Management", href: ROUTES.OPERATIONS_DASHBOARD }

@@ -31,6 +31,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   ROUTES,
   getDetentionMemoDetailPath,
+  getDetentionMemoScanUrl,
   getSeizureMgmtAssessmentDetailPath,
   getSeizureMgmtAssessmentEditPath,
 } from "@/routes/config"
@@ -178,9 +179,7 @@ export default function AssessmentDetailPage() {
 
   const canAssess = canUserEditAssessment(row, currentUser?.role)
   const canApprove = canUserApproveAssessment(row, currentUser)
-  const qrPayload =
-    memo.memoQrCodePayload ||
-    `${window.location.origin}${getDetentionMemoDetailPath(memo.id)}?print=full`
+  const qrPayload = getDetentionMemoScanUrl(memo.id)
   const qrNumber = memo.memoQrCodeNumber || `DM-${memo.caseNo}`
 
   const runApproval = async (action: "submit" | "approve" | "reject") => {

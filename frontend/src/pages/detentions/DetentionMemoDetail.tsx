@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getDetentionMemoEditPath, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
+import { getDetentionMemoEditPath, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoScanUrl, getDetentionMemoSectionCrumb } from "@/routes/config"
 import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
 import DetentionMemoQRPrint from "@/components/detention/DetentionMemoQRPrint"
 import { DestructionRecordsPanel } from "@/components/warehouse/destruction-records-panel"
@@ -517,7 +517,8 @@ export default function DetentionMemoDetailPage() {
     )
   }
 
-  const qrPayload = row.memoQrCodePayload || `${window.location.origin}${getDetentionMemoDetailPath(row.id)}?print=full`
+  // Always encode the live detail route — never stale DB payloads with /detention-memo or ?print=full
+  const qrPayload = getDetentionMemoScanUrl(row.id)
   const qrNumber = row.memoQrCodeNumber || `DM-${row.caseNo}`
 
   if (printMode === "qr") {

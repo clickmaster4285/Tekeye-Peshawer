@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { getDetentionMemoDetailPath, ROUTES } from "@/routes/config"
+import { getDetentionMemoDetailPath, getDetentionMemoScanUrl, ROUTES } from "@/routes/config"
 import type { DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { GoodsLineText, goodsDetailCellClass, goodsHeadClass } from "@/components/goods/goods-line-text-field"
 import { GoodsQrDisplay } from "@/components/goods/goods-qr-display"
@@ -38,9 +38,7 @@ function getGoodsQrPayload(memoId: string, item: { id: string; qrCodeNumber?: st
 
 /** Full detention memo read-only sections — same layout/width as detention memo detail. */
 export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiRecord }) {
-  const qrPayload =
-    memo.memoQrCodePayload ||
-    `${typeof window !== "undefined" ? window.location.origin : ""}${getDetentionMemoDetailPath(memo.id)}?print=full`
+  const qrPayload = getDetentionMemoScanUrl(memo.id)
   const qrNumber = memo.memoQrCodeNumber || `DM-${memo.caseNo}`
 
   return (

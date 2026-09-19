@@ -502,7 +502,7 @@ class Command(BaseCommand):
                     created_by=officer,
                     updated_by=officer,
                 )
-                memo.memo_qr_code_payload = f"/detention-memo/{memo.pk}?print=full"
+                memo.memo_qr_code_payload = f"/seizure-management/detention-memo/{memo.pk}"
                 memo.save(update_fields=["memo_qr_code_payload", "updated_at"])
 
                 for idx, g in enumerate(goods, start=1):
