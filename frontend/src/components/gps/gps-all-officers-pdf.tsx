@@ -147,7 +147,7 @@ export function GpsAllOfficersPdfReport({
                   color: NAVY,
                 }}
               >
-                All Officers GPS Report
+                All Staff GPS Report
               </h1>
               <p
                 style={{
@@ -157,7 +157,7 @@ export function GpsAllOfficersPdfReport({
                   color: MUTED,
                 }}
               >
-                {periodText} · {sorted.length} officers · {withFix} with GPS fix · Generated {generatedAt}
+                {periodText} · {sorted.length} staff · {withFix} with GPS fix · Generated {generatedAt}
               </p>
             </div>
             <div style={{ textAlign: "right", fontFamily: "Arial, Helvetica, sans-serif", fontSize: "9px", color: MUTED }}>
@@ -169,7 +169,7 @@ export function GpsAllOfficersPdfReport({
             <thead>
               <tr>
                 <th style={thStyle}>#</th>
-                <th style={thStyle}>Officer</th>
+                <th style={thStyle}>Staff</th>
                 <th style={thStyle}>Station</th>
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}>Location</th>
@@ -182,7 +182,7 @@ export function GpsAllOfficersPdfReport({
               {pageRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: MUTED, padding: "12mm 4px" }}>
-                    No officers with GPS data.
+                    No staff with GPS data.
                   </td>
                 </tr>
               ) : (
@@ -237,7 +237,7 @@ export function GpsAllOfficersPdfReport({
                 color: MUTED,
               }}
             >
-              Report date {formatReportDate(anchorDate)}. Live GPS snapshot for all listed officers.
+              Report date {formatReportDate(anchorDate)}. Live GPS snapshot for all listed staff.
             </div>
           ) : null}
         </div>

@@ -138,13 +138,17 @@ function coordKey(lat: number, lng: number): string {
 
 /**
  * Prefer exact reverse-geocoded place name; then customs compound; never "Outside station".
+ * Pass `pointLocationName` when the history API already resolved the name.
  */
 export function resolveLocationName(
   lat: number,
   lng: number,
   exactNames?: Record<string, string> | null,
-  opts?: { loading?: boolean }
+  opts?: { loading?: boolean; pointLocationName?: string | null }
 ): string {
+  const fromPoint = (opts?.pointLocationName || "").trim()
+  if (fromPoint) return fromPoint
+
   if (opts?.loading) return "Looking up…"
 
   const key = coordKey(lat, lng)

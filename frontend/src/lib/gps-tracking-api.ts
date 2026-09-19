@@ -34,6 +34,10 @@ export type GpsHistoryPoint = {
   speedKmh?: number | null
   recordedAt: string | null
   status?: GpsMotionStatus
+  /** Exact reverse-geocoded place name from the API */
+  locationName?: string
+  /** Google Maps link for this fix */
+  mapsUrl?: string
 }
 
 export type GpsClosestPoint = GpsHistoryPoint & {
@@ -212,7 +216,12 @@ export async function fetchGpsLocationNames(
     const data = await res.json()
     const results = Array.isArray(data?.results) ? data.results : []
     for (const row of results as GpsReverseGeocodeResult[]) {
-      if (row?.key && row.locationName) out[row.key] = row.locationName
+      if (!row?.locationName) continue
+      if (row.key) out[row.key] = row.locationName
+      // Index with frontend rounding too (avoids Python/JS round mismatch).
+      if (typeof row.latitude === "number" && typeof row.longitude === "number") {
+        out[gpsCoordKey(row.latitude, row.longitude)] = row.locationName
+      }
     }
   }
   return out

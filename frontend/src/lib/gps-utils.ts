@@ -228,7 +228,7 @@ export function deriveGpsAlerts(officers: GpsOfficer[], fences: GpsGeofence[]): 
         id: `geo-${officer.userId}`,
         severity: "critical",
         title: `${officer.name} left assigned geofence`,
-        detail: officer.employeeId ? `Officer ${officer.employeeId} is outside the station compound.` : "Outside the station compound.",
+        detail: officer.employeeId ? `Staff ${officer.employeeId} is outside the station compound.` : "Outside the station compound.",
         at: officer.recordedAt,
       })
     }

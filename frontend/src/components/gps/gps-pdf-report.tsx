@@ -369,8 +369,11 @@ export function GpsPdfReport({
                   </tr>
                 ) : (
                   pageRows.map((point, idx) => {
-                    const place = resolveLocationName(point.latitude, point.longitude, locationNames)
-                    const mapUrl = mapsLinkForCoords(point.latitude, point.longitude)
+                    const place = resolveLocationName(point.latitude, point.longitude, locationNames, {
+                      pointLocationName: point.locationName,
+                    })
+                    const mapUrl =
+                      point.mapsUrl || mapsLinkForCoords(point.latitude, point.longitude)
                     return (
                     <tr key={`${point.recordedAt}-${idx}`}>
                       {showDateCol ? (

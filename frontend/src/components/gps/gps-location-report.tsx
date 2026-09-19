@@ -205,6 +205,7 @@ export function GpsLocationReport({
               <dd className="font-medium">
                 {resolveLocationName(closest.latitude, closest.longitude, locationNames, {
                   loading: Boolean(locationNamesLoading) && locationNames == null,
+                  pointLocationName: closest.locationName,
                 })}
               </dd>
             </div>
@@ -212,7 +213,7 @@ export function GpsLocationReport({
               <dt className="text-xs text-muted-foreground">Map link</dt>
               <dd className="font-medium">
                 <a
-                  href={mapsLinkForCoords(closest.latitude, closest.longitude)}
+                  href={closest.mapsUrl || mapsLinkForCoords(closest.latitude, closest.longitude)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[#155DFC] hover:underline"
@@ -297,10 +298,13 @@ export function GpsLocationReport({
                     point.latitude,
                     point.longitude,
                     locationNames,
-                    { loading: Boolean(locationNamesLoading) && locationNames == null }
+                    {
+                      loading: Boolean(locationNamesLoading) && locationNames == null && !point.locationName,
+                      pointLocationName: point.locationName,
+                    }
                   )
                   const stillResolving = locationName === "Looking up…"
-                  const mapUrl = mapsLinkForCoords(point.latitude, point.longitude)
+                  const mapUrl = point.mapsUrl || mapsLinkForCoords(point.latitude, point.longitude)
                   return (
                     <tr
                       key={`${point.recordedAt}-${point.latitude}-${point.longitude}`}

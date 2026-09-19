@@ -13,7 +13,7 @@ from users.permissions import can_view_all_staff, get_effective_location, get_lo
 
 from .models import OfficerGpsHistory, OfficerGpsLatest
 from .serializers import GpsDutySerializer, GpsPingSerializer, latest_to_dict, me_payload
-from .geocode import reverse_geocode_batch
+from .geocode import coord_key, reverse_geocode_batch
 
 MAX_ACCURACY_M = 500
 HISTORY_KEEP_DAYS = 45
@@ -43,15 +43,39 @@ def _motion_label(speed_kmh, prev, cur) -> str:
 
 
 def _point_dict(p: dict, *, motion: str | None = None) -> dict:
-    out = {
-        "latitude": p["latitude"],
-        "longitude": p["longitude"],
+    lat = p["latitude"]
+    lng = p["longitude"]
+    return {
+        "latitude": lat,
+        "longitude": lng,
         "accuracy": p.get("accuracy_m"),
         "speedKmh": p.get("speed_kmh"),
         "recordedAt": p["recorded_at"].isoformat() if p.get("recorded_at") else None,
         "status": motion or "Stationary",
+        "locationName": "",
+        "mapsUrl": f"https://www.google.com/maps?q={lat},{lng}",
     }
-    return out
+
+
+def _attach_location_names(points: list[dict]) -> None:
+    """Fill locationName on each history point via cached reverse-geocode."""
+    if not points:
+        return
+    try:
+        results = reverse_geocode_batch(points)
+    except Exception:
+        return
+    by_key = {
+        r["key"]: (r.get("locationName") or "").strip()
+        for r in results
+        if r.get("key")
+    }
+    for point in points:
+        try:
+            key = coord_key(float(point["latitude"]), float(point["longitude"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        point["locationName"] = by_key.get(key) or ""
 
 
 def _parse_report_date(raw: str):
@@ -485,6 +509,12 @@ class GpsHistoryAPIView(APIView):
                         "requestedAt": target.isoformat(),
                         "deltaSeconds": int(best_delta or 0),
                     }
+
+        # Resolve street/area names once for the report (cached after first hit).
+        to_name = list(payload)
+        if closest is not None:
+            to_name.append(closest)
+        _attach_location_names(to_name)
 
         return Response(
             {

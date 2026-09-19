@@ -203,6 +203,27 @@ export default function GpsTrackingPage() {
     return list.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
   }, [reportPoints, closestPoint, selected])
 
+  const locationNamesFromPoints = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const p of [...reportPoints, ...(closestPoint ? [closestPoint] : [])]) {
+      const name = (p.locationName || "").trim()
+      if (!name) continue
+      const key = `${(Math.round(p.latitude * 1e4) / 1e4).toFixed(4)},${(Math.round(p.longitude * 1e4) / 1e4).toFixed(4)}`
+      out[key] = name
+    }
+    return out
+  }, [reportPoints, closestPoint])
+
+  const uniqueGeocodeCount = useMemo(() => {
+    const keys = new Set(
+      geocodePoints.map(
+        (p) =>
+          `${(Math.round(p.latitude * 1e4) / 1e4).toFixed(4)},${(Math.round(p.longitude * 1e4) / 1e4).toFixed(4)}`
+      )
+    )
+    return keys.size
+  }, [geocodePoints])
+
   const locationNamesQuery = useQuery({
     queryKey: [
       "gps-location-names",
@@ -212,14 +233,28 @@ export default function GpsTrackingPage() {
       geocodePoints.map((p) => `${p.latitude.toFixed(4)},${p.longitude.toFixed(4)}`).join("|"),
     ],
     queryFn: () => fetchGpsLocationNames(geocodePoints),
-    enabled: geocodePoints.length > 0,
+    // Skip extra call when history API already attached names for all unique coords.
+    enabled:
+      uniqueGeocodeCount > 0 &&
+      Object.keys(locationNamesFromPoints).length < uniqueGeocodeCount,
     staleTime: 60 * 60 * 1000,
     retry: 2,
   })
 
-  const locationNames =
-    locationNamesQuery.data ?? (locationNamesQuery.isError ? {} : undefined)
-  const locationNamesLoading = locationNamesQuery.isLoading || locationNamesQuery.isFetching
+  const locationNames = useMemo(
+    () => ({
+      ...locationNamesFromPoints,
+      ...(locationNamesQuery.data ?? (locationNamesQuery.isError ? {} : {})),
+    }),
+    [locationNamesFromPoints, locationNamesQuery.data, locationNamesQuery.isError]
+  )
+  const locationNamesLoading =
+    (locationNamesQuery.isLoading || locationNamesQuery.isFetching) &&
+    Object.keys(locationNamesFromPoints).length === 0
+  // Treat as loaded when history already provided names
+  const locationNamesReady =
+    Object.keys(locationNamesFromPoints).length > 0 || locationNamesQuery.isFetched || locationNamesQuery.isError
+  const locationNamesForResolve = locationNamesReady ? locationNames : null
 
   const alerts = useMemo(() => deriveGpsAlerts(officers, fences), [officers, fences])
   const todayKm = trailDistanceKm(trail)
@@ -244,8 +279,8 @@ export default function GpsTrackingPage() {
     }
     window.setTimeout(() => setFitAllToken((n) => n + 1), 400)
     toast({
-      title: "Tracking all officers",
-      description: "Map shows every officer with a GPS fix. Click one for their trail and report.",
+      title: "Tracking all staff",
+      description: "Map shows every staff member with a GPS fix. Click one for their trail and report.",
     })
   }
 
@@ -253,7 +288,7 @@ export default function GpsTrackingPage() {
     if (!selected) {
       toast({
         title: "Select an employee",
-        description: "Choose an officer before exporting the GPS PDF.",
+        description: "Choose a staff member before exporting the GPS PDF.",
         variant: "destructive",
       })
       return
@@ -280,7 +315,7 @@ export default function GpsTrackingPage() {
         if (!locationNamesQuery.isFetching && !locationNamesQuery.isLoading) break
       }
     }
-    const safeName = selected.name.replace(/[^a-zA-Z0-9-_]+/g, "_") || "officer"
+    const safeName = selected.name.replace(/[^a-zA-Z0-9-_]+/g, "_") || "staff"
     setPdfExporting(true)
     try {
       await new Promise((r) => setTimeout(r, 350))
@@ -302,7 +337,7 @@ export default function GpsTrackingPage() {
     }
   }
 
-  /** One-click report: all officers when Track all / no selection; else selected officer. */
+  /** One-click report: all staff when Track all / no selection; else selected staff. */
   const handleOneClickReport = async () => {
     const wantAll = trackAll || selectedUserId == null || !selected
     if (wantAll) {
@@ -316,8 +351,8 @@ export default function GpsTrackingPage() {
             : await fetchGpsLive(allStations ? "all" : station, { includeOffDuty: true })
         if (list.length === 0) {
           toast({
-            title: "No officers to report",
-            description: "No GPS officers found for this station.",
+            title: "No staff to report",
+            description: "No GPS staff found for this station.",
             variant: "destructive",
           })
           return
@@ -343,11 +378,11 @@ export default function GpsTrackingPage() {
         // Ensure React paints the hidden PDF with names before capture.
         await new Promise((r) => setTimeout(r, 450))
         const el = allOfficersPdfRef.current
-        if (!el) throw new Error("All-officers PDF not ready")
-        await downloadGpsPdf(el, `gps-all-officers-${reportPeriod}-${reportDate}.pdf`)
+        if (!el) throw new Error("All-staff PDF not ready")
+        await downloadGpsPdf(el, `gps-all-staff-${reportPeriod}-${reportDate}.pdf`)
         toast({
-          title: "All officers report downloaded",
-          description: `${list.length} officers · ${gpsPeriodLabel(reportPeriod, reportDate)}`,
+          title: "All staff report downloaded",
+          description: `${list.length} staff · ${gpsPeriodLabel(reportPeriod, reportDate)}`,
         })
       } catch (err) {
         toast({
@@ -395,7 +430,7 @@ export default function GpsTrackingPage() {
           variant="secondary"
           className="h-8 w-8 border bg-white shadow-sm"
           onClick={() => setFitAllToken((n) => n + 1)}
-          title="Fit all officers on map"
+          title="Fit all staff on map"
         >
           <Compass className="h-4 w-4" />
         </Button>
@@ -532,7 +567,7 @@ export default function GpsTrackingPage() {
           className="h-8 px-2 text-xs"
           onClick={() => officersRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
         >
-          Officers
+          Staff
         </Button>
         <Button
           type="button"
@@ -552,7 +587,7 @@ export default function GpsTrackingPage() {
         >
           <div className="border-b px-3 py-3">
             <h2 className="text-sm font-semibold tracking-wide text-foreground">
-              Officers ({filtered.length})
+              Staff ({filtered.length})
               {trackAll ? (
                 <span className="ml-2 text-xs font-medium text-[#155DFC]">· tracking all</span>
               ) : null}
@@ -562,7 +597,7 @@ export default function GpsTrackingPage() {
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search officers"
+                placeholder="Search staff"
                 className="h-8 pl-8 text-sm"
               />
             </div>
@@ -572,7 +607,7 @@ export default function GpsTrackingPage() {
               <li className="px-3 py-8 text-center text-sm text-muted-foreground">Loading…</li>
             ) : filtered.length === 0 ? (
               <li className="px-3 py-8 text-center text-sm text-muted-foreground">
-                No GPS pings yet. Officers appear here automatically after they sign in.
+                No GPS pings yet. Staff appear here automatically after they sign in.
               </li>
             ) : (
               filtered.map((officer) => {
@@ -634,7 +669,7 @@ export default function GpsTrackingPage() {
           className="order-3 flex min-w-0 flex-col overflow-hidden scroll-mt-28 rounded-xl border bg-white md:max-h-[min(440px,52vh)] xl:max-h-none xl:min-h-[520px]"
         >
           <div className="border-b px-4 py-3">
-            <h2 className="text-sm font-semibold tracking-wide">Officer details</h2>
+            <h2 className="text-sm font-semibold tracking-wide">Staff details</h2>
           </div>
           {selected ? (
             <div className="flex flex-1 flex-col overflow-y-auto p-4">
@@ -677,8 +712,12 @@ export default function GpsTrackingPage() {
                       {typeof selected.latitude === "number" &&
                       typeof selected.longitude === "number" &&
                       !(selected.latitude === 0 && selected.longitude === 0)
-                        ? resolveLocationName(selected.latitude, selected.longitude, locationNames, {
-                            loading: Boolean(locationNamesLoading) && locationNames == null,
+                        ? resolveLocationName(selected.latitude, selected.longitude, locationNamesForResolve, {
+                            loading:
+                              (Boolean(locationNamesLoading) ||
+                                reportQuery.isLoading ||
+                                reportQuery.isFetching) &&
+                              locationNamesForResolve == null,
                           })
                         : "—"}
                     </dd>
@@ -795,8 +834,8 @@ export default function GpsTrackingPage() {
           ) : (
             <p className="p-6 text-sm text-muted-foreground">
               {trackAll
-                ? "Tracking all officers on the map. Click an officer for their trail and report."
-                : "Select an officer to see details."}
+                ? "Tracking all staff on the map. Click a staff member for their trail and report."
+                : "Select a staff member to see details."}
             </p>
           )}
         </section>
@@ -813,8 +852,12 @@ export default function GpsTrackingPage() {
           onLookupTimeChange={setLookupTime}
           points={reportPoints}
           closest={closestPoint}
-          locationNames={locationNames}
-          locationNamesLoading={locationNamesLoading}
+          locationNames={locationNamesForResolve ?? undefined}
+          locationNamesLoading={
+            Boolean(locationNamesLoading) ||
+            reportQuery.isLoading ||
+            reportQuery.isFetching
+          }
           totalCount={reportQuery.data?.totalCount}
           sampled={reportQuery.data?.sampled}
           loading={reportQuery.isLoading || reportQuery.isFetching}
@@ -835,7 +878,7 @@ export default function GpsTrackingPage() {
         anchorDate={reportDate}
         totalCount={reportQuery.data?.totalCount}
         sampled={reportQuery.data?.sampled}
-        locationNames={locationNames}
+        locationNames={locationNamesForResolve ?? locationNames}
         reportRef={pdfReportRef}
       />
 
