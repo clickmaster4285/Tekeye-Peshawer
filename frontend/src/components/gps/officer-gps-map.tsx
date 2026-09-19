@@ -3,6 +3,7 @@ import type { GpsGeofence } from "@/lib/gps-geofences"
 import { haversineM } from "@/lib/gps-geofences"
 import type { GpsHistoryPoint, GpsOfficer } from "@/lib/gps-tracking-api"
 import { STATUS_COLOR, timeAgo } from "@/lib/gps-utils"
+import { cn } from "@/lib/utils"
 
 const PIN_DEEP: Record<string, string> = {
   live: "#15803d",
@@ -149,6 +150,7 @@ export function OfficerGpsMap({
   fitTrailToken,
   defaultCenter = GPS_DEFAULT_CENTER,
   onSelect,
+  className,
 }: {
   officers: GpsOfficer[]
   selectedUserId: number | null
@@ -159,6 +161,7 @@ export function OfficerGpsMap({
   fitTrailToken: number
   defaultCenter?: [number, number]
   onSelect: (userId: number) => void
+  className?: string
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -326,5 +329,5 @@ export function OfficerGpsMap({
     }
   }, [fitTrailToken, mapReady])
 
-  return <div ref={containerRef} className="h-full min-h-[420px] w-full bg-muted" />
+  return <div ref={containerRef} className={cn("h-full min-h-[420px] w-full bg-muted", className)} />
 }

@@ -1,12 +1,13 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 import {
   Camera,
   ChevronLeft,
   ChevronRight,
   Expand,
+  GripVertical,
   LayoutGrid,
   Loader2,
   MapPin,
@@ -22,6 +23,10 @@ import {
   WifiOff,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
+import { WallAlertsPanel } from "@/components/operations/wall-alerts-panel"
+import { WallAnalyticsPanel } from "@/components/operations/wall-analytics-panel"
+import { WallGpsPanel } from "@/components/operations/wall-gps-panel"
+import { WallWidgetPicker } from "@/components/operations/wall-widget-picker"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -34,6 +39,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -44,6 +50,17 @@ import {
 } from "@/components/ui/select"
 import { getStoredUser } from "@/lib/auth"
 import { canViewAllCitiesCameras, getCamerasWallLabel } from "@/lib/all-cities-cameras"
+import {
+  WALL_WIDGET_CATALOG,
+  hasAnySidePanel,
+  loadCustomWallDesign,
+  placeWallWidget,
+  reorderInDock,
+  saveCustomWallDesign,
+  type CustomWallDesign,
+  type WallDock,
+  type WallWidgetId,
+} from "@/lib/custom-wall-layout"
 import { normalizeRole } from "@/lib/role-access"
 import { ROUTES } from "@/routes/config"
 import {
@@ -223,8 +240,8 @@ function GridLayoutSelect({
         align="end"
         className={cn(
           "min-w-[12rem]",
-          // Wall overlay is z-[190] — dropdown must render above it
-          dark && "!z-[220]",
+          // Wall overlay is z-[250] — portal dropdown must sit above it
+          dark && "!z-[270]",
         )}
       >
         {GRID_LAYOUT_OPTIONS.map((option) => (
@@ -237,6 +254,311 @@ function GridLayoutSelect({
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+function renderWallWidget(
+  id: WallWidgetId,
+  opts: { cameraCount: number; onlineCount: number },
+) {
+  switch (id) {
+    case "gps":
+      return <WallGpsPanel className="h-full min-h-0" />
+    case "alerts":
+      return <WallAlertsPanel className="h-full min-h-0" />
+    case "analytics":
+      return (
+        <WallAnalyticsPanel
+          className="h-full min-h-0"
+          cameraCount={opts.cameraCount}
+          onlineCount={opts.onlineCount}
+        />
+      )
+    default:
+      return null
+  }
+}
+
+const WALL_DND = "application/x-tekeye-wall-widget"
+
+function DockStack({
+  dock,
+  ids,
+  design,
+  onDesignChange,
+  cameraCount,
+  onlineCount,
+  edgeClass,
+}: {
+  dock: WallDock
+  ids: WallWidgetId[]
+  design: CustomWallDesign
+  onDesignChange: (next: CustomWallDesign) => void
+  cameraCount: number
+  onlineCount: number
+  edgeClass?: string
+}) {
+  if (ids.length === 0) return null
+  const horizontal = dock === "top" || dock === "bottom"
+  const equal = Math.floor(100 / ids.length)
+
+  const panelBody = (id: WallWidgetId, index: number) => {
+    const label = WALL_WIDGET_CATALOG.find((w) => w.id === id)?.label || id
+    return (
+      <div
+        className={cn("flex h-full min-h-0 flex-col", edgeClass)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          try {
+            const raw = e.dataTransfer.getData(WALL_DND) || e.dataTransfer.getData("text/plain")
+            const payload = JSON.parse(raw) as {
+              kind?: string
+              id?: WallWidgetId
+              dock?: WallDock
+              fromIndex?: number
+            }
+            if (payload?.kind === "catalog" && payload.id) {
+              onDesignChange(placeWallWidget(design, payload.id, dock, index))
+              return
+            }
+            if (payload?.kind === "reorder" && payload.id) {
+              if (payload.dock === dock && typeof payload.fromIndex === "number") {
+                onDesignChange(reorderInDock(design, dock, payload.fromIndex, index))
+              } else {
+                onDesignChange(placeWallWidget(design, payload.id, dock, index))
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }}
+      >
+        <div
+          draggable
+          onDragStart={(e) => {
+            const payload = JSON.stringify({
+              kind: "reorder",
+              id,
+              dock,
+              fromIndex: index,
+            })
+            e.dataTransfer.setData(WALL_DND, payload)
+            e.dataTransfer.setData("text/plain", payload)
+            e.dataTransfer.effectAllowed = "move"
+          }}
+          className="flex shrink-0 cursor-grab items-center gap-2 border-b border-white/10 bg-zinc-900/90 px-2 py-1 active:cursor-grabbing"
+          title="Drag to another side or reorder"
+        >
+          <GripVertical className="h-3.5 w-3.5 text-white/40" />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-white/55">
+            {label}
+          </span>
+          <span className="ml-auto text-[9px] capitalize text-white/30">{dock}</span>
+        </div>
+        <div className="min-h-0 flex-1">
+          {renderWallWidget(id, { cameraCount, onlineCount })}
+        </div>
+      </div>
+    )
+  }
+
+  if (ids.length === 1) {
+    return <div className="h-full min-h-0 w-full">{panelBody(ids[0], 0)}</div>
+  }
+
+  return (
+    <ResizablePanelGroup
+      direction={horizontal ? "horizontal" : "vertical"}
+      className="h-full min-h-0 w-full"
+    >
+      {ids.flatMap((id, index) => {
+        const panel = (
+          <ResizablePanel
+            key={id}
+            defaultSize={index === ids.length - 1 ? 100 - equal * (ids.length - 1) : equal}
+            minSize={16}
+            className="min-h-0"
+          >
+            {panelBody(id, index)}
+          </ResizablePanel>
+        )
+        if (index === 0) return [panel]
+        return [
+          <ResizableHandle
+            key={`h-${dock}-${id}`}
+            withHandle
+            className={cn(
+              "bg-white/10 data-[resize-handle-active]:bg-emerald-500/50",
+              horizontal ? "w-1.5" : "h-1.5",
+            )}
+          />,
+          panel,
+        ]
+      })}
+    </ResizablePanelGroup>
+  )
+}
+
+function CustomWallWorkspace({
+  design,
+  camerasPane,
+  cameraCount,
+  onlineCount,
+  onDesignChange,
+}: {
+  design: CustomWallDesign
+  camerasPane: ReactNode
+  cameraCount: number
+  onlineCount: number
+  onDesignChange: (next: CustomWallDesign) => void
+}) {
+  if (!hasAnySidePanel(design)) {
+    return <div className="relative h-full min-h-0 overflow-hidden">{camerasPane}</div>
+  }
+
+  const { left, right, top, bottom } = design.docks
+  const hasLeft = left.length > 0
+  const hasRight = right.length > 0
+  const hasTop = top.length > 0
+  const hasBottom = bottom.length > 0
+
+  // Keep cameras dominant — side docks never steal the center.
+  const leftPct = hasLeft ? Math.min(design.leftSize, 28) : 0
+  const rightPct = hasRight ? Math.min(design.rightSize, 28) : 0
+  const topPct = hasTop ? Math.min(design.topSize, 26) : 0
+  const bottomPct = hasBottom ? Math.min(design.bottomSize, 26) : 0
+  const camerasW = Math.max(44, 100 - leftPct - rightPct)
+  const camerasH = Math.max(48, 100 - topPct - bottomPct)
+
+  const camerasCenter = (
+    <div className="relative z-[1] h-full min-h-0 min-w-0 overflow-hidden bg-black">
+      {camerasPane}
+    </div>
+  )
+
+  const midRow = (
+    <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
+      {hasLeft ? (
+        <>
+          <ResizablePanel
+            id="wall-left"
+            order={1}
+            defaultSize={leftPct}
+            minSize={14}
+            maxSize={28}
+            className="min-h-0 overflow-hidden"
+          >
+            <DockStack
+              dock="left"
+              ids={left}
+              design={design}
+              onDesignChange={onDesignChange}
+              cameraCount={cameraCount}
+              onlineCount={onlineCount}
+              edgeClass="border-r border-white/10"
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle className="w-1.5 bg-white/10 data-[resize-handle-active]:bg-emerald-500/50" />
+        </>
+      ) : null}
+      <ResizablePanel
+        id="wall-cameras"
+        order={2}
+        defaultSize={camerasW}
+        minSize={44}
+        className="min-h-0 min-w-0 overflow-hidden"
+      >
+        {camerasCenter}
+      </ResizablePanel>
+      {hasRight ? (
+        <>
+          <ResizableHandle withHandle className="w-1.5 bg-white/10 data-[resize-handle-active]:bg-emerald-500/50" />
+          <ResizablePanel
+            id="wall-right"
+            order={3}
+            defaultSize={rightPct}
+            minSize={14}
+            maxSize={28}
+            className="min-h-0 overflow-hidden"
+          >
+            <DockStack
+              dock="right"
+              ids={right}
+              design={design}
+              onDesignChange={onDesignChange}
+              cameraCount={cameraCount}
+              onlineCount={onlineCount}
+              edgeClass="border-l border-white/10"
+            />
+          </ResizablePanel>
+        </>
+      ) : null}
+    </ResizablePanelGroup>
+  )
+
+  if (!hasTop && !hasBottom) {
+    return midRow
+  }
+
+  return (
+    <ResizablePanelGroup direction="vertical" className="h-full min-h-0 w-full">
+      {hasTop ? (
+        <>
+          <ResizablePanel
+            id="wall-top"
+            order={1}
+            defaultSize={topPct}
+            minSize={12}
+            maxSize={26}
+            className="min-h-0 overflow-hidden"
+          >
+            <DockStack
+              dock="top"
+              ids={top}
+              design={design}
+              onDesignChange={onDesignChange}
+              cameraCount={cameraCount}
+              onlineCount={onlineCount}
+              edgeClass="border-b border-white/10"
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle className="h-1.5 bg-white/10 data-[resize-handle-active]:bg-emerald-500/50" />
+        </>
+      ) : null}
+      <ResizablePanel
+        id="wall-mid"
+        order={2}
+        defaultSize={camerasH}
+        minSize={48}
+        className="min-h-0 overflow-hidden"
+      >
+        {midRow}
+      </ResizablePanel>
+      {hasBottom ? (
+        <>
+          <ResizableHandle withHandle className="h-1.5 bg-white/10 data-[resize-handle-active]:bg-emerald-500/50" />
+          <ResizablePanel
+            id="wall-bottom"
+            order={3}
+            defaultSize={bottomPct}
+            minSize={12}
+            maxSize={26}
+            className="min-h-0 overflow-hidden"
+          >
+            <DockStack
+              dock="bottom"
+              ids={bottom}
+              design={design}
+              onDesignChange={onDesignChange}
+              cameraCount={cameraCount}
+              onlineCount={onlineCount}
+              edgeClass="border-t border-white/10"
+            />
+          </ResizablePanel>
+        </>
+      ) : null}
+    </ResizablePanelGroup>
   )
 }
 
@@ -596,6 +918,7 @@ export default function AllCitiesCamerasPage() {
   const [gridPage, setGridPage] = useState(0)
   const [showTimestamp, setShowTimestamp] = useState(true)
   const [wallFullscreen, setWallFullscreen] = useState(false)
+  const [wallDesign, setWallDesign] = useState<CustomWallDesign>(() => loadCustomWallDesign())
   const [cameraPickerOpen, setCameraPickerOpen] = useState(false)
   const [pickerLocation, setPickerLocation] = useState<string | null>(null)
   const [pickerCameraQuery, setPickerCameraQuery] = useState("")
@@ -750,12 +1073,19 @@ export default function AllCitiesCamerasPage() {
     }
   }
 
+  const applyWallDesign = useCallback((next: CustomWallDesign) => {
+    setWallDesign(next)
+    saveCustomWallDesign(next)
+  }, [])
+
   useEffect(() => {
     if (!wallFullscreen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
       // Don't exit wall while a layout/menu popup is open
-      const menuOpen = document.querySelector('[data-slot="select-content"][data-state="open"]')
+      const menuOpen =
+        document.querySelector('[data-slot="select-content"][data-state="open"]') ||
+        document.querySelector('[data-slot="popover-content"][data-state="open"]')
       if (menuOpen) return
       setWallFullscreen(false)
     }
@@ -1436,12 +1766,20 @@ export default function AllCitiesCamerasPage() {
 
       {wallFullscreen && visibleCameras.length > 0 && (
         <div className="fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-black">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black px-4 py-2">
-            <p className="truncate text-sm font-medium text-white">
-              All Cities Wall · {visibleCameras.length} camera
-              {visibleCameras.length === 1 ? "" : "s"}
-            </p>
-            <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black px-3 py-2 sm:px-4">
+            <div className="min-w-0">
+              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">
+                CIIS · Custom wall
+              </p>
+              <p className="truncate text-sm font-medium text-white">
+                {getCamerasWallLabel(user?.role, user?.location)}
+                <span className="ml-2 font-normal text-white/55">
+                  {visibleCameras.length} camera{visibleCameras.length === 1 ? "" : "s"}
+                </span>
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+              <WallWidgetPicker design={wallDesign} onChange={applyWallDesign} />
               <GridLayoutSelect
                 layout={layout}
                 tone="dark"
@@ -1459,8 +1797,8 @@ export default function AllCitiesCamerasPage() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="min-w-14 text-center text-xs text-white/80">
-                {currentGridPage + 1} / {pageCount}
+              <span className="min-w-12 text-center text-xs text-white/80">
+                {currentGridPage + 1}/{pageCount}
               </span>
               <Button
                 type="button"
@@ -1483,27 +1821,37 @@ export default function AllCitiesCamerasPage() {
                 onClick={(e) => void load(e.shiftKey)}
                 disabled={loading || refreshing}
               >
-                <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", refreshing && "animate-spin")} />
-                Refresh
+                <RefreshCw className={cn("h-3.5 w-3.5 sm:mr-1.5", refreshing && "animate-spin")} />
+                <span className="hidden sm:inline">Refresh</span>
               </Button>
               <Button
                 type="button"
                 size="sm"
-                className="h-8"
+                className="h-8 bg-white text-zinc-950 hover:bg-white/90"
                 onClick={() => setWallFullscreen(false)}
               >
                 <Minimize2 className="mr-1.5 h-3.5 w-3.5" />
-                Exit wall (Esc)
+                Exit
               </Button>
             </div>
           </div>
-          <div
-            className={cn(
-              "min-h-0 flex-1 p-0",
-              layout === "auto" || layout === "1x1" ? "overflow-hidden" : "overflow-y-auto",
-            )}
-          >
-            {wallCameraGrid}
+          <div className="min-h-0 flex-1 overflow-hidden p-0">
+            <CustomWallWorkspace
+              design={wallDesign}
+              onDesignChange={applyWallDesign}
+              cameraCount={visibleCameras.length}
+              onlineCount={visibleCameras.filter((c) => isCameraOnline(c)).length}
+              camerasPane={
+                <div
+                  className={cn(
+                    "h-full min-h-0",
+                    layout === "auto" || layout === "1x1" ? "overflow-hidden" : "overflow-y-auto",
+                  )}
+                >
+                  {wallCameraGrid}
+                </div>
+              }
+            />
           </div>
         </div>
       )}
