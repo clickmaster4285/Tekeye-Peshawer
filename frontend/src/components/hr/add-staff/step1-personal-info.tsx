@@ -213,6 +213,10 @@ const collectorateOptions = [
     value: "Collectorate of Customs (Enforcement), Peshawar",
     label: "Collectorate of Customs (Enforcement), Peshawar",
   },
+  {
+    value: "Collectorate of Customs (Appraisement), Peshawar",
+    label: "Collectorate of Customs (Appraisement), Peshawar",
+  },
 ]
 
 // Current Place of Posting options from the provided data
