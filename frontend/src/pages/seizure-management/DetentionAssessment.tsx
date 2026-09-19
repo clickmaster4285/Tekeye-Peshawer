@@ -45,8 +45,10 @@ import { fetchDetentionMemos, type DetentionMemoApiRecord } from "@/lib/detentio
 import {
   deleteAssessment,
   fetchAssessments,
+  canUserEditAssessment,
   type DetentionAssessmentRecord,
 } from "@/lib/seizure-management-api"
+import { getStoredUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
 import { ExportMenu } from "@/components/seizure/export-menu"
 import AssessmentReportPrint from "@/components/seizure/AssessmentReportPrint"
@@ -130,6 +132,7 @@ function shortPlace(place: string | undefined): string {
 
 export default function DetentionAssessmentPage() {
   const navigate = useNavigate()
+  const currentUser = getStoredUser()
   const [memos, setMemos] = useState<DetentionMemoApiRecord[]>([])
   const [assessments, setAssessments] = useState<DetentionAssessmentRecord[]>([])
   const [search, setSearch] = useState("")
@@ -561,14 +564,13 @@ export default function DetentionAssessmentPage() {
                                 <>
                                   <TableActionIcon
                                     label={
-                                      assessment.status === "Draft" || assessment.status === "Rejected"
+                                      canUserEditAssessment(assessment, currentUser?.role)
                                         ? "Edit assessment"
                                         : "View assessment"
                                     }
                                     onClick={() =>
                                       navigate(
-                                        assessment.status === "Draft" ||
-                                          assessment.status === "Rejected"
+                                        canUserEditAssessment(assessment, currentUser?.role)
                                           ? getSeizureMgmtAssessmentEditPath(assessment.id)
                                           : getSeizureMgmtAssessmentDetailPath(assessment.id)
                                       )

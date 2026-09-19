@@ -230,19 +230,24 @@ export function getMlLiveMjpegUrl(
 export function getMlLiveMultipartUrl(
   camera: Pick<
     CameraRecord,
-    "id" | "ml_stream_key" | "ml_live_stream_url" | "ml_live_stream_path" | "purpose" | "purposes"
-  >
+    "id" | "ml_stream_key" | "ml_live_stream_url" | "ml_live_stream_path" | "purpose" | "purposes" | "ml_server"
+  > & { ml_server_id?: number | null }
 ): string | null {
   const direct = (camera.ml_live_stream_url || "").trim()
   const streamKey = (camera.ml_stream_key || "").trim()
   const route = streamKey || (camera.id ? `cam-${camera.id}` : "")
   let url = ""
-  if (direct.startsWith("/ml/") || /^https?:\/\//i.test(direct)) {
+
+  // Prefer Ops Central proxy (assigned ML server). Never rewrite these to /ml/…
+  if (direct.startsWith("/api/ops/") || /\/api\/ops\/servers\//.test(direct)) {
+    url = direct
+  } else if (direct.startsWith("/ml/") || /^https?:\/\//i.test(direct)) {
     if (direct.endsWith("/jpeg")) url = `${direct.slice(0, -"/jpeg".length)}/mjpeg`
     else if (direct.includes("/jpeg")) url = direct.replace(/\/jpeg(\/|$)/, "/mjpeg$1")
     else if (direct.includes("/mjpeg")) url = direct
     else url = direct
   } else if (streamKey || direct) {
+    // Legacy same-origin /ml proxy (single local ML node)
     url = `/ml/live/cam/${encodeURIComponent(route)}/mjpeg`
   } else {
     return null
@@ -255,11 +260,19 @@ export function getMlLiveMultipartUrl(
       ? [camera.purpose]
       : []
   ).map((p) => String(p).trim()).filter(Boolean)
-  if (purposeList.length && !/[?&]purposes=/.test(url)) {
+  if (purposeList.length && !/[?&]purposes=/.test(url) && !url.includes("/api/ops/")) {
     const params = new URLSearchParams()
     params.set("purposes", purposeList.join(","))
     if (camera.purpose) params.set("purpose", camera.purpose)
     url += (url.includes("?") ? "&" : "?") + params.toString()
+  }
+
+  // <img> cannot send Authorization — ops MJPEG requires ?token=
+  if (url.includes("/api/ops/")) {
+    const token = getStoredToken()
+    if (token && !/[?&]token=/.test(url)) {
+      url += `${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+    }
   }
   return url
 }
@@ -268,8 +281,15 @@ export function getRawMjpegUrl(
   camera: Pick<CameraRecord, "id" | "ml_stream_key" | "raw_stream_url">
 ): string | null {
   const direct = (camera.raw_stream_url || "").trim();
-  if (direct) return direct;
-  return null;
+  if (!direct) return null;
+  let url = direct;
+  if (url.includes("/api/ops/")) {
+    const token = getStoredToken();
+    if (token && !/[?&]token=/.test(url)) {
+      url += `${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+    }
+  }
+  return url;
 }
 
 /** @deprecated Django MJPEG proxy removed — use getMlLiveMjpegUrl or getRawMjpegUrl */

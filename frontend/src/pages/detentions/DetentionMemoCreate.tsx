@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, ChevronDown, Plus, Trash2, Copy, Eye, Camera, X } from "lucide-react"
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { ArrowLeft, ChevronDown, Plus, Trash2, Copy, Camera, X } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -32,22 +32,35 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { ROUTES, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
+import { ROUTES, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { CUSTOMS_STATIONS } from "@/lib/case-fir-spec"
 import { toast } from "@/hooks/use-toast"
 import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
+import { cn } from "@/lib/utils"
+import { GoodsQrDisplay, getGoodsQrImageUrl } from "@/components/goods/goods-qr-display"
 import {
   GoodsLineTextField,
+  GoodsTableColGroup,
+  GOODS_TABLE_MIN_WIDTH,
+  goodsControlCellClass,
+  goodsControlWrapClass,
+  goodsHeadClass,
   goodsLineCellClass,
   goodsPlaceholderClass,
   goodsSelectTriggerClass,
   goodsTableClass,
 } from "@/components/goods/goods-line-text-field"
 import { getStoredUser } from "@/lib/auth"
-import { createDetentionMemo } from "@/lib/detention-memo-api"
+import {
+  createDetentionMemo,
+  fetchDetentionMemoById,
+  updateDetentionMemo,
+  type DetentionMemoApiRecord,
+} from "@/lib/detention-memo-api"
 import { useCameras } from "@/hooks/use-cameras"
 import type { CameraRecord } from "@/lib/cameras-api"
 import {
+  canUserFullyEditSeizureDocs,
   fetchNoteSheetById,
   fetchNoteSheets,
   linkNoteSheetToDetention,
@@ -87,10 +100,7 @@ function generateUniqueQrCodeNumber(): string {
   return `QR-DM-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 }
 
-// Helper to get QR code image URL (public API)
-const getQrCodeUrl = (data: string, size = 120) => {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`
-}
+const getQrCodeUrl = getGoodsQrImageUrl
 
 function generateMemoQrCodeNumber(): string {
   return `DM-MEMO-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
@@ -172,9 +182,7 @@ function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
 }
 
 function cameraOptionLabel(cam: CameraRecord): string {
-  const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
-  const zone = (cam.zone || "").trim()
-  return zone ? `${name} · ${zone}` : name
+  return (cam.name || "").trim() || cam.code || `Camera ${cam.id}`
 }
 
 function noteSheetDateTime(value: string | undefined | null): string {
@@ -210,6 +218,8 @@ function goodsFromNoteSheet(ns: NoteSheetRecord): GoodsLineItem[] {
 export default function DetentionMemoCreatePage() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const { id: editId } = useParams<{ id?: string }>()
+  const isEdit = Boolean(editId)
   const listPath = getDetentionMemoListPath(pathname)
   const listSection = getDetentionMemoSectionCrumb(pathname)
   const [searchParams] = useSearchParams()
@@ -217,6 +227,8 @@ export default function DetentionMemoCreatePage() {
   const [noteSheetId, setNoteSheetId] = useState(noteSheetIdParam)
   const [availableNoteSheets, setAvailableNoteSheets] = useState<NoteSheetRecord[]>([])
   const [linkedNoteSheet, setLinkedNoteSheet] = useState<NoteSheetRecord | null>(null)
+  const [existingMemo, setExistingMemo] = useState<DetentionMemoApiRecord | null>(null)
+  const [loadingEdit, setLoadingEdit] = useState(isEdit)
   const [caseNo, setCaseNo] = useState("")
   const [dateTimeOccurrence, setDateTimeOccurrence] = useState(() => {
     const d = new Date()
@@ -299,6 +311,89 @@ export default function DetentionMemoCreatePage() {
       if (driverPhotoPreviewUrl) URL.revokeObjectURL(driverPhotoPreviewUrl)
     }
   }, [ownerPhotoPreviewUrl, driverPhotoPreviewUrl])
+
+  useEffect(() => {
+    if (!editId) return
+    if (!canUserFullyEditSeizureDocs(getStoredUser()?.role)) {
+      toast({
+        title: "Not allowed",
+        description: "Only Super Admin or Location Admin can edit detention memos.",
+        variant: "destructive",
+      })
+      navigate(getDetentionMemoDetailPath(editId, pathname))
+      return
+    }
+    let cancelled = false
+    setLoadingEdit(true)
+    fetchDetentionMemoById(editId)
+      .then((memo) => {
+        if (cancelled) return
+        setExistingMemo(memo)
+        setCaseNo(memo.caseNo || "")
+        setReferenceNumber(memo.referenceNumber || "")
+        setDateTimeOccurrence(memo.dateTimeOccurrence || "")
+        setPlaceOfOccurrence(memo.placeOfOccurrence || "")
+        setDateTimeDetention(memo.dateTimeDetention || "")
+        setPlaceOfDetention(memo.placeOfDetention || "")
+        setDetentionType(memo.detentionType || "")
+        setDirectorate(memo.directorate || "MCC D.I Khan AFU Import")
+        setReasonForDetention(memo.reasonForDetention || "")
+        setLocationOfDetention(memo.locationOfDetention || "")
+        setGdNumber(memo.gdNumber || "")
+        setWhereDeposited(memo.whereDeposited || SELECT_WAREHOUSE_PLACEHOLDER)
+        setSearchChassisNumber(memo.searchChassisNumber || "")
+        setReceiptOfficer(memo.receiptOfficer || "")
+        setSettlementStatus(memo.settlementStatus || "")
+        setVerificationStatus(memo.verificationStatus || "")
+        setBriefFacts(memo.briefFacts || "")
+        setForwardingOfficerRemarks(memo.forwardingOfficerRemarks || "")
+        setPurposeOfDetention(memo.purposeOfDetention || "")
+        setOwnerName(memo.owner?.name || "")
+        setOwnerCnic(sanitizeCnicInput(memo.owner?.cnic || ""))
+        setOwnerContact(memo.owner?.contact || "")
+        setDriverName(memo.driver?.name || "")
+        setDriverCnic(sanitizeCnicInput(memo.driver?.cnic || ""))
+        setDriverContact(memo.driver?.contact || "")
+        setSeizingOfficerNotes(memo.seizingOfficerNotes || "")
+        setExaminingOfficerNotes(memo.examiningOfficerNotes || "")
+        setDetentionNotes(memo.detentionNotes || "")
+        setGoodsItems(
+          (memo.goodsItems || []).map((g) => ({
+            ...emptyGoodsItem(),
+            id: g.id || crypto.randomUUID(),
+            qrCodeNumber: g.qrCodeNumber || "",
+            description: g.description || "",
+            quantity: g.quantity || "",
+            unit: g.unit || "PCS",
+            condition: g.condition || "Detained",
+            identificationRef: g.identificationRef || "",
+            itemNotes: g.itemNotes || "",
+            perishable: Boolean(g.perishable),
+            images: g.images || [],
+            imageFiles: [],
+            locatedCameraId: g.locatedCameraId ?? g.locatedCamera?.id ?? null,
+            locatedZone: g.locatedCamera?.zone || "",
+            detectedAt: g.detectedAt || "",
+            detectionEventId: g.detectionEventId ?? null,
+          }))
+        )
+      })
+      .catch((e) => {
+        if (cancelled) return
+        toast({
+          title: "Failed to load detention memo",
+          description: e instanceof Error ? e.message : "Not found",
+          variant: "destructive",
+        })
+        navigate(listPath)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEdit(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [editId, navigate, pathname, listPath])
 
   const applyNoteSheetPrefill = (ns: NoteSheetRecord) => {
     setLinkedNoteSheet(ns)
@@ -400,7 +495,7 @@ export default function DetentionMemoCreatePage() {
       {
         id: "dm-note-sheet",
         label: "Approved Note Sheet",
-        missing: !noteSheetId,
+        missing: !isEdit && !noteSheetId,
         message: "Select an approved note sheet before creating the detention memo.",
       },
       {
@@ -448,7 +543,9 @@ export default function DetentionMemoCreatePage() {
     setInvalidField("")
 
     const currentUser = getStoredUser()
-    const memoQrCodeNumber = generateMemoQrCodeNumber()
+    const memoQrCodeNumber = isEdit
+      ? existingMemo?.memoQrCodeNumber || generateMemoQrCodeNumber()
+      : generateMemoQrCodeNumber()
     const payload: Record<string, unknown> = {
       caseNo: caseNo || `DM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
       referenceNumber,
@@ -485,7 +582,7 @@ export default function DetentionMemoCreatePage() {
         identificationRef: item.identificationRef,
         itemNotes: item.itemNotes,
         perishable: item.perishable,
-        images: [],
+        images: item.images || [],
         locatedCameraId: item.locatedCameraId,
         detectedAt: item.detectedAt || "",
         detectionEventId: item.detectionEventId,
@@ -494,11 +591,14 @@ export default function DetentionMemoCreatePage() {
       examiningOfficerNotes,
       detentionNotes,
       createdBy:
-        (currentUser?.full_name || "").trim() || currentUser?.username?.trim() || "ASO Portal",
+        existingMemo?.createdBy ||
+        (currentUser?.full_name || "").trim() ||
+        currentUser?.username?.trim() ||
+        "ASO Portal",
       updatedBy:
         (currentUser?.full_name || "").trim() || currentUser?.username?.trim() || "ASO Portal",
       memoQrCodeNumber,
-      memoQrCodePayload: "",
+      memoQrCodePayload: existingMemo?.memoQrCodePayload || "",
       clientOrigin: window.location.origin,
     }
 
@@ -512,6 +612,13 @@ export default function DetentionMemoCreatePage() {
 
     setSaving(true)
     try {
+      if (isEdit && existingMemo) {
+        await updateDetentionMemo(existingMemo, payload)
+        toast({ title: "Updated", description: "Detention memo saved." })
+        navigate(getDetentionMemoDetailPath(existingMemo.id, pathname))
+        return
+      }
+
       const created = await createDetentionMemo(payload, {
         ownerPhoto: ownerPhotoFile,
         driverPhoto: driverPhotoFile,
@@ -552,29 +659,52 @@ export default function DetentionMemoCreatePage() {
     void handleSave()
   }
 
+  if (loadingEdit) {
+    return (
+      <ModulePageLayout
+        title="Edit Detention Memo"
+        description="Loading detention memo…"
+        breadcrumbs={[
+          listSection,
+          { label: "Detention Memo", href: listPath },
+          { label: "Edit" },
+        ]}
+      >
+        <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+      </ModulePageLayout>
+    )
+  }
+
   return (
     <ModulePageLayout
-      title="Detention Memo / Create"
-      description="Add a new detention memo (prepared after the detention). All fields as per Pakistan Customs detention memo. Data is saved to the server database."
+      title={isEdit ? "Edit Detention Memo" : "Detention Memo / Create"}
+      description={
+        isEdit
+          ? "Update detention memo fields. Super Admin and Location Admin can edit any memo."
+          : "Add a new detention memo (prepared after the detention). All fields as per Pakistan Customs detention memo. Data is saved to the server database."
+      }
       breadcrumbs={[
         listSection,
         { label: "Detention Memo", href: listPath },
-        { label: "Create" },
+        { label: isEdit ? "Edit" : "Create" },
       ]}
     >
       <div className="w-full min-h-[calc(100vh-12rem)] overflow-y-auto">
         <div className="mb-4 flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link to={listPath}>
+            <Link to={isEdit && editId ? getDetentionMemoDetailPath(editId, pathname) : listPath}>
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to list
+              {isEdit ? "Back to memo" : "Back to list"}
             </Link>
           </Button>
         </div>
-        <p className="mb-4 text-sm text-muted-foreground rounded-md bg-muted/60 px-3 py-2 border border-border/50">
-          Detention memo is created only after an approved note sheet. Upload supporting documents below.
-        </p>
+        {!isEdit ? (
+          <p className="mb-4 text-sm text-muted-foreground rounded-md bg-muted/60 px-3 py-2 border border-border/50">
+            Detention memo is created only after an approved note sheet. Upload supporting documents below.
+          </p>
+        ) : null}
 
+        {!isEdit ? (
         <Card className="mb-6 border-blue-100 bg-blue-50/40">
           <CardContent className="pt-6 space-y-3">
             <Label htmlFor="dm-note-sheet">Approved Note Sheet <span className="text-red-600">*</span></Label>
@@ -627,6 +757,7 @@ export default function DetentionMemoCreatePage() {
             )}
           </CardContent>
         </Card>
+        ) : null}
 
         <div className="space-y-4 w-full">
           {/* Basic Information */}
@@ -976,22 +1107,29 @@ export default function DetentionMemoCreatePage() {
                         : undefined
                     }
                   >
-                  <div className="overflow-auto max-w-full">
-                    <Table className={goodsTableClass}>
+                  <div className="max-w-full overflow-x-auto rounded-md border border-border/70">
+                    <Table
+                      className={goodsTableClass}
+                      containerClassName="overflow-visible"
+                      style={{ minWidth: GOODS_TABLE_MIN_WIDTH, width: GOODS_TABLE_MIN_WIDTH }}
+                    >
+                      <GoodsTableColGroup />
                       <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[180px]">QR Code</TableHead>
-                          <TableHead className="w-[200px]">Description of Goods <span className="text-red-600">*</span></TableHead>
-                          <TableHead className="w-[88px]">Qty</TableHead>
-                          <TableHead className="w-[110px]">Unit</TableHead>
-                          <TableHead className="w-[190px]">Condition</TableHead>
-                          <TableHead className="w-[92px]">Perishable</TableHead>
-                          <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
-                          <TableHead className="w-[180px]">Item Notes</TableHead>
-                          <TableHead className="w-[96px]">Images</TableHead>
-                          <TableHead className="w-[140px]">Camera Zone</TableHead>
-                          <TableHead className="w-[220px]">Located Camera</TableHead>
-                          <TableHead className="w-[44px]"></TableHead>
+                        <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                          <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                          <TableHead className={goodsHeadClass}>
+                            Description <span className="normal-case text-red-600">*</span>
+                          </TableHead>
+                          <TableHead className={goodsHeadClass}>Qty</TableHead>
+                          <TableHead className={goodsHeadClass}>Unit</TableHead>
+                          <TableHead className={goodsHeadClass}>Condition</TableHead>
+                          <TableHead className={cn(goodsHeadClass, "text-center")}>Perish.</TableHead>
+                          <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                          <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                          <TableHead className={goodsHeadClass}>Images</TableHead>
+                          <TableHead className={goodsHeadClass}>Camera Zone</TableHead>
+                          <TableHead className={goodsHeadClass}>Located Camera</TableHead>
+                          <TableHead className={goodsHeadClass} />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1004,121 +1142,108 @@ export default function DetentionMemoCreatePage() {
                         ) : (
                           goodsItems.map((item, idx) => {
                             const zoneCameras = camerasForZone(locationCameras, item.locatedZone)
-                            const selectedCam = locationCameras.find((c) => c.id === item.locatedCameraId)
                             return (
                             <TableRow key={item.id} className={idx % 2 === 1 ? "bg-muted/10" : ""}>
-                              <TableCell className="align-middle">
-                                <div className="flex flex-col gap-1 items-start">
-                                  <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded truncate max-w-[130px]">
-                                    {item.qrCodeNumber}
-                                  </span>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1 text-xs"
-                                      onClick={() => copyToClipboard(item.qrCodeNumber)}
-                                    >
-                                      <Copy className="h-3 w-3 mr-1" />
-                                      Copy
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1 text-xs"
-                                      onClick={() => setPreviewQrData(item.qrCodeNumber)}
-                                    >
-                                      <Eye className="h-3 w-3 mr-1" />
-                                      Preview
-                                    </Button>
-                                  </div>
-                                  <img
-                                    src={getQrCodeUrl(item.qrCodeNumber, 100)}
-                                    alt="QR Code"
-                                    width={100}
-                                    height={100}
-                                    className="mt-1 border border-gray-200 rounded-sm bg-white p-1"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f0f0f0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%23999' font-size='10'%3EQR Error%3C/text%3E%3C/svg%3E"
+                              <TableCell className={goodsControlCellClass}>
+                                <GoodsQrDisplay
+                                  code={item.qrCodeNumber}
+                                  size={72}
+                                  onCopy={() => copyToClipboard(item.qrCodeNumber)}
+                                  onView={() => setPreviewQrData(item.qrCodeNumber)}
+                                />
+                              </TableCell>
+                              <TableCell className={goodsLineCellClass}>
+                                <div className="min-w-0 max-w-full overflow-hidden">
+                                  <GoodsLineTextField
+                                    value={item.description}
+                                    onChange={(e) => {
+                                      updateGoodsLine(item.id, "description", e.target.value)
+                                      if (invalidField === "dm-goods") setInvalidField("")
                                     }}
+                                    placeholder="Description of goods"
+                                    title="Description of goods"
+                                    aria-invalid={invalidField === "dm-goods" && idx === 0}
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={item.quantity}
+                                    onChange={(e) => updateGoodsLine(item.id, "quantity", e.target.value)}
+                                    placeholder="Qty"
+                                    title="Qty"
+                                    className={goodsPlaceholderClass}
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Select value={item.unit} onValueChange={(v) => updateGoodsLine(item.id, "unit", v)}>
+                                    <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
+                                      <SelectValue placeholder="Unit" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {GOODS_UNITS.map((u) => (
+                                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </TableCell>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Select value={item.condition} onValueChange={(v) => updateGoodsLine(item.id, "condition", v)}>
+                                    <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
+                                      <SelectValue placeholder="Condition" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {GOODS_CONDITIONS.map((c) => (
+                                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </TableCell>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={cn(goodsControlWrapClass, "justify-center pt-2")}>
+                                  <Checkbox
+                                    checked={item.perishable}
+                                    onCheckedChange={(checked) => updateGoodsLine(item.id, "perishable", !!checked)}
+                                    aria-label="Perishable"
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Input
+                                    value={item.identificationRef}
+                                    onChange={(e) => updateGoodsLine(item.id, "identificationRef", e.target.value)}
+                                    placeholder="Chassis / Serial"
+                                    title="Chassis / Serial"
+                                    className={goodsPlaceholderClass}
                                   />
                                 </div>
                               </TableCell>
                               <TableCell className={goodsLineCellClass}>
-                                <GoodsLineTextField
-                                  value={item.description}
-                                  onChange={(e) => {
-                                    updateGoodsLine(item.id, "description", e.target.value)
-                                    if (invalidField === "dm-goods") setInvalidField("")
-                                  }}
-                                  placeholder="Description of goods"
-                                  title="Description of goods"
-                                  aria-invalid={invalidField === "dm-goods" && idx === 0}
-                                />
+                                <div className="min-w-0 max-w-full overflow-hidden">
+                                  <GoodsLineTextField
+                                    value={item.itemNotes}
+                                    onChange={(e) => updateGoodsLine(item.id, "itemNotes", e.target.value)}
+                                    placeholder="Officer notes"
+                                    title="Officer notes for this item"
+                                  />
+                                </div>
                               </TableCell>
-                              <TableCell className="align-middle">
-                                <Input
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={item.quantity}
-                                  onChange={(e) => updateGoodsLine(item.id, "quantity", e.target.value)}
-                                  placeholder="Qty"
-                                  title="Qty"
-                                  className={goodsPlaceholderClass}
-                                />
-                              </TableCell>
-                              <TableCell className="align-middle">
-                                <Select value={item.unit} onValueChange={(v) => updateGoodsLine(item.id, "unit", v)}>
-                                  <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
-                                    <SelectValue placeholder="Unit" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {GOODS_UNITS.map((u) => (
-                                      <SelectItem key={u} value={u}>{u}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="align-middle">
-                                <Select value={item.condition} onValueChange={(v) => updateGoodsLine(item.id, "condition", v)}>
-                                  <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
-                                    <SelectValue placeholder="Condition" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {GOODS_CONDITIONS.map((c) => (
-                                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="text-center align-middle">
-                                <Checkbox
-                                  checked={item.perishable}
-                                  onCheckedChange={(checked) => updateGoodsLine(item.id, "perishable", !!checked)}
-                                />
-                              </TableCell>
-                              <TableCell className="align-middle">
-                                <Input
-                                  value={item.identificationRef}
-                                  onChange={(e) => updateGoodsLine(item.id, "identificationRef", e.target.value)}
-                                  placeholder="Chassis / Serial"
-                                  title="Chassis / Serial"
-                                  className={goodsPlaceholderClass}
-                                />
-                              </TableCell>
-                              <TableCell className={goodsLineCellClass}>
-                                <GoodsLineTextField
-                                  value={item.itemNotes}
-                                  onChange={(e) => updateGoodsLine(item.id, "itemNotes", e.target.value)}
-                                  placeholder="Officer notes for this item"
-                                  title="Officer notes for this item"
-                                />
-                              </TableCell>
-                              <TableCell className="align-middle">
-                                <div className="flex flex-col gap-1">
-                                  <label className="cursor-pointer inline-flex items-center gap-1 text-xs bg-secondary text-secondary-foreground hover:bg-secondary/80 px-2 py-1 rounded">
-                                    <Camera className="h-3 w-3" />
-                                    Add ({item.imageFiles.length + (item.images?.length || 0)}/10)
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={cn(goodsControlWrapClass, "flex-col gap-1")}>
+                                  <label className="cursor-pointer inline-flex h-9 w-full items-center justify-center gap-1 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-muted/60">
+                                    <Camera className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="truncate">
+                                      {item.imageFiles.length + (item.images?.length || 0)}/10
+                                    </span>
                                     <input
                                       type="file"
                                       accept="image/*"
@@ -1130,24 +1255,23 @@ export default function DetentionMemoCreatePage() {
                                         const availableSlots = 10 - currentCount
                                         const newFiles = files.slice(0, availableSlots)
                                         updateGoodsLine(item.id, "imageFiles", [...item.imageFiles, ...newFiles])
+                                        e.target.value = ""
                                       }}
                                     />
                                   </label>
                                   {(item.imageFiles.length > 0 || (item.images?.length ?? 0) > 0) && (
                                     <div className="flex flex-wrap gap-1">
-                                      {item.images?.map((imgUrl, idx) => (
-                                        <div key={`existing-${idx}`} className="relative">
-                                          <img src={imgUrl} alt={`Goods ${idx + 1}`} className="h-8 w-8 object-cover rounded border" />
-                                        </div>
+                                      {item.images?.map((imgUrl, imgIdx) => (
+                                        <img key={`existing-${imgIdx}`} src={imgUrl} alt={`Goods ${imgIdx + 1}`} className="h-7 w-7 object-cover rounded border" />
                                       ))}
-                                      {item.imageFiles.map((file, idx) => (
-                                        <div key={`new-${idx}`} className="relative">
-                                          <img src={URL.createObjectURL(file)} alt={`New ${idx + 1}`} className="h-8 w-8 object-cover rounded border" />
+                                      {item.imageFiles.map((file, fileIdx) => (
+                                        <div key={`new-${fileIdx}`} className="relative">
+                                          <img src={URL.createObjectURL(file)} alt={`New ${fileIdx + 1}`} className="h-7 w-7 object-cover rounded border" />
                                           <button
                                             type="button"
                                             onClick={() => {
                                               const newFiles = [...item.imageFiles]
-                                              newFiles.splice(idx, 1)
+                                              newFiles.splice(fileIdx, 1)
                                               updateGoodsLine(item.id, "imageFiles", newFiles)
                                             }}
                                             className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5"
@@ -1160,92 +1284,87 @@ export default function DetentionMemoCreatePage() {
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="align-middle">
-                                <Select
-                                  value={item.locatedZone || "__none__"}
-                                  onValueChange={(v) => {
-                                    const zone = v === "__none__" ? "" : v
-                                    setGoodsItems((prev) =>
-                                      prev.map((row) =>
-                                        row.id === item.id
-                                          ? { ...row, locatedZone: zone, locatedCameraId: null }
-                                          : row
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Select
+                                    value={item.locatedZone || "__none__"}
+                                    onValueChange={(v) => {
+                                      const zone = v === "__none__" ? "" : v
+                                      setGoodsItems((prev) =>
+                                        prev.map((row) =>
+                                          row.id === item.id
+                                            ? { ...row, locatedZone: zone, locatedCameraId: null }
+                                            : row
+                                        )
                                       )
-                                    )
-                                  }}
-                                >
-                                  <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
-                                    <SelectValue placeholder="Select zone" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">Select zone</SelectItem>
-                                    {availableZones.map((zone) => (
-                                      <SelectItem key={zone} value={zone}>
-                                        {zone}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {!availableZones.length && (
-                                  <p className="mt-1 text-[10px] text-muted-foreground">
-                                    No zones from assigned cameras for this location
-                                  </p>
-                                )}
+                                    }}
+                                  >
+                                    <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
+                                      <SelectValue placeholder="Select zone" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">Select zone</SelectItem>
+                                      {availableZones.map((zone) => (
+                                        <SelectItem key={zone} value={zone}>
+                                          {zone}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                               </TableCell>
-                              <TableCell className="align-middle">
-                                <Select
-                                  value={item.locatedCameraId != null ? String(item.locatedCameraId) : "__none__"}
-                                  onValueChange={(v) => {
-                                    const camId = v === "__none__" ? null : Number(v)
-                                    const cam =
-                                      camId != null
-                                        ? zoneCameras.find((c) => c.id === camId) ||
-                                          locationCameras.find((c) => c.id === camId)
-                                        : undefined
-                                    setGoodsItems((prev) =>
-                                      prev.map((row) =>
-                                        row.id === item.id
-                                          ? {
-                                              ...row,
-                                              locatedCameraId:
-                                                Number.isFinite(camId as number) ? (camId as number) : null,
-                                              locatedZone: cam?.zone?.trim() || row.locatedZone,
-                                            }
-                                          : row
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={goodsControlWrapClass}>
+                                  <Select
+                                    value={item.locatedCameraId != null ? String(item.locatedCameraId) : "__none__"}
+                                    onValueChange={(v) => {
+                                      const camId = v === "__none__" ? null : Number(v)
+                                      const cam =
+                                        camId != null
+                                          ? zoneCameras.find((c) => c.id === camId) ||
+                                            locationCameras.find((c) => c.id === camId)
+                                          : undefined
+                                      setGoodsItems((prev) =>
+                                        prev.map((row) =>
+                                          row.id === item.id
+                                            ? {
+                                                ...row,
+                                                locatedCameraId:
+                                                  Number.isFinite(camId as number) ? (camId as number) : null,
+                                                locatedZone: cam?.zone?.trim() || row.locatedZone,
+                                              }
+                                            : row
+                                        )
                                       )
-                                    )
-                                  }}
-                                  disabled={!item.locatedZone}
-                                >
-                                  <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
-                                    <SelectValue placeholder={item.locatedZone ? "Select camera" : "Pick zone first"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">Not set</SelectItem>
-                                    {zoneCameras.map((cam) => (
-                                      <SelectItem key={cam.id} value={String(cam.id)}>
-                                        {cameraOptionLabel(cam)}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {selectedCam && (
-                                  <p className="mt-1 text-[10px] text-muted-foreground truncate max-w-[210px]">
-                                    {selectedCam.name}
-                                    {selectedCam.zone ? ` · Zone ${selectedCam.zone}` : ""}
-                                  </p>
-                                )}
-                                {item.locatedZone && !zoneCameras.length && (
-                                  <p className="mt-1 text-[10px] text-amber-700">
-                                    No cameras in this zone
-                                  </p>
-                                )}
+                                    }}
+                                    disabled={!item.locatedZone}
+                                  >
+                                    <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
+                                      <SelectValue placeholder={item.locatedZone ? "Select camera" : "Pick zone first"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">Not set</SelectItem>
+                                      {zoneCameras.map((cam) => (
+                                        <SelectItem key={cam.id} value={String(cam.id)}>
+                                          {cameraOptionLabel(cam)}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                               </TableCell>
-                              <TableCell className="align-middle text-center">
-                                <div className="flex items-center justify-center">
-                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeGoodsLine(item.id)} aria-label="Remove line">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                              <TableCell className={goodsControlCellClass}>
+                                <div className={cn(goodsControlWrapClass, "justify-center")}>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-9 w-9 text-destructive hover:text-destructive"
+                                    onClick={() => removeGoodsLine(item.id)}
+                                    aria-label="Remove line"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1414,7 +1533,7 @@ export default function DetentionMemoCreatePage() {
             )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void handleSave()} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
+                {saving ? "Saving…" : isEdit ? "Save Changes" : "Save"}
               </Button>
               <Button onClick={() => void handleSubmit()} disabled={saving}>
                 {saving ? "Saving…" : "Submit"}

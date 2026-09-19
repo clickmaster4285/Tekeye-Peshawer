@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useParams, Link, useSearchParams, useLocation } from "react-router-dom"
-import { ArrowLeft, FileText, Package, QrCode, Users, Paperclip, Camera } from "lucide-react"
+import { ArrowLeft, FileText, Package, Pencil, QrCode, Users, Paperclip, Camera } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
+import { getDetentionMemoEditPath, getDetentionMemoDetailPath, getDetentionMemoListPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReportPrint"
 import DetentionMemoQRPrint from "@/components/detention/DetentionMemoQRPrint"
 import { DestructionRecordsPanel } from "@/components/warehouse/destruction-records-panel"
@@ -34,7 +34,11 @@ import {
   type LocatedCameraApi,
 } from "@/lib/detention-memo-api"
 import { fetchCamera, cameraSourceLabel, type CameraRecord } from "@/lib/cameras-api"
-import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import { GoodsLineText, goodsDetailCellClass, goodsHeadClass } from "@/components/goods/goods-line-text-field"
+import { GoodsQrDisplay } from "@/components/goods/goods-qr-display"
+import { cn } from "@/lib/utils"
+import { canUserFullyEditSeizureDocs } from "@/lib/seizure-management-api"
+import { getStoredUser } from "@/lib/auth"
 
 type GoodsLineItem = DetentionMemoGoodsLineApi
 
@@ -226,16 +230,12 @@ function GoodsInformationBlock({
                 key={item.id}
                 className={`rounded-md border bg-background p-3 ${isHighlight ? "ring-2 ring-primary" : ""}`}
               >
-                <div className="mb-3 flex items-start gap-3">
-                  <img
-                    src={getQrCodeUrl(getGoodsQrPayload(memoId, item), 56)}
-                    alt={`Goods QR ${item.qrCodeNumber || item.id}`}
-                    className="h-14 w-14 rounded border bg-white p-1"
+                <div className="mb-3">
+                  <GoodsQrDisplay
+                    code={item.qrCodeNumber}
+                    imageData={getGoodsQrPayload(memoId, item)}
+                    size={56}
                   />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">QR Number</p>
-                    <p className="break-all text-xs font-medium">{item.qrCodeNumber || "—"}</p>
-                  </div>
                 </div>
                 <div className="space-y-2 text-sm">
                   <div><span className="text-muted-foreground">Description: </span><GoodsLineText className="inline-block align-top max-h-20 font-medium">{item.description || "—"}</GoodsLineText></div>
@@ -278,23 +278,23 @@ function GoodsInformationBlock({
           })}
         </div>
 
-        <div className="hidden overflow-x-auto sm:block">
-          <Table className="w-max min-w-full">
+        <div className="hidden max-w-full overflow-x-auto rounded-md border border-border/70 sm:block">
+          <Table className="w-max min-w-full text-sm">
               <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[88px]">QR Code</TableHead>
-                  <TableHead className="min-w-[140px]">Description</TableHead>
-                  <TableHead className="min-w-[150px]">Located Camera</TableHead>
-                  <TableHead className="min-w-[96px]">PCT Code</TableHead>
-                  <TableHead className="min-w-[56px]">Qty</TableHead>
-                  <TableHead className="min-w-[56px]">Unit</TableHead>
-                  <TableHead className="min-w-[88px]">Condition</TableHead>
-                  <TableHead className="min-w-[140px]">Assessable Value (PKR)</TableHead>
-                  <TableHead className="min-w-[88px]">Perishable</TableHead>
-                  <TableHead className="min-w-[110px]">ID / Chassis</TableHead>
-                  <TableHead className="min-w-[120px]">Item Notes</TableHead>
-                  <TableHead className="min-w-[80px]">Images</TableHead>
-                  <TableHead className="min-w-[120px]" />
+                <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                  <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                  <TableHead className={goodsHeadClass}>Description</TableHead>
+                  <TableHead className={goodsHeadClass}>Located Camera</TableHead>
+                  <TableHead className={goodsHeadClass}>PCT Code</TableHead>
+                  <TableHead className={goodsHeadClass}>Qty</TableHead>
+                  <TableHead className={goodsHeadClass}>Unit</TableHead>
+                  <TableHead className={goodsHeadClass}>Condition</TableHead>
+                  <TableHead className={goodsHeadClass}>Assessable Value</TableHead>
+                  <TableHead className={goodsHeadClass}>Perishable</TableHead>
+                  <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                  <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                  <TableHead className={goodsHeadClass}>Images</TableHead>
+                  <TableHead className={goodsHeadClass} />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -309,24 +309,19 @@ function GoodsInformationBlock({
                       key={item.id}
                       className={isHighlight ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : undefined}
                     >
-                      <TableCell className="font-mono text-xs">
-                        <div className="space-y-1">
-                          <img
-                            src={getQrCodeUrl(getGoodsQrPayload(memoId, item), typeof window !== 'undefined' && window.innerWidth < 640 ? 40 : 56)}
-                            alt={`Goods QR ${item.qrCodeNumber || item.id}`}
-                            className="h-10 w-10 sm:h-14 sm:w-14 border rounded p-1 bg-white"
-                          />
-                          <span className="block text-[10px] text-muted-foreground max-w-[60px] sm:max-w-[80px] break-all">
-                            {item.qrCodeNumber || "—"}
-                          </span>
-                        </div>
+                      <TableCell className={cn(goodsDetailCellClass, "w-[7rem]")}>
+                        <GoodsQrDisplay
+                          code={item.qrCodeNumber}
+                          imageData={getGoodsQrPayload(memoId, item)}
+                          size={56}
+                        />
                       </TableCell>
-                      <TableCell className={`${goodsLineCellClass} font-medium`}>
+                      <TableCell className={cn(goodsDetailCellClass, "min-w-[10rem] max-w-[16rem] font-medium")}>
                         <GoodsLineText>{item.description || "—"}</GoodsLineText>
                       </TableCell>
-                      <TableCell className="text-xs whitespace-normal">
+                      <TableCell className={cn(goodsDetailCellClass, "min-w-[9rem] text-xs")}>
                         <div className="space-y-0.5">
-                          <p className="font-medium">
+                          <p className="font-medium text-sm">
                             {item.locatedCamera?.name?.trim() ||
                               item.locatedCamera?.code ||
                               (item.locatedCameraId != null ? `Camera #${item.locatedCameraId}` : "—")}
@@ -339,17 +334,17 @@ function GoodsInformationBlock({
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell className="font-mono break-words whitespace-normal">{item.pctCode?.trim() || "—"}</TableCell>
-                      <TableCell>{item.quantity || "—"}</TableCell>
-                      <TableCell>{item.unit || "—"}</TableCell>
-                      <TableCell>{item.condition || "—"}</TableCell>
-                      <TableCell className="break-words whitespace-normal">{item.assessableValuePkr?.trim() || "—"}</TableCell>
-                      <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                      <TableCell className="break-words whitespace-normal">{item.identificationRef || "—"}</TableCell>
-                      <TableCell className={`${goodsLineCellClass} text-muted-foreground whitespace-normal`}>
+                      <TableCell className={cn(goodsDetailCellClass, "font-mono")}>{item.pctCode?.trim() || "—"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.quantity || "—"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.unit || "—"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.condition || "—"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.assessableValuePkr?.trim() || "—"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.perishable ? "Yes" : "No"}</TableCell>
+                      <TableCell className={goodsDetailCellClass}>{item.identificationRef || "—"}</TableCell>
+                      <TableCell className={cn(goodsDetailCellClass, "min-w-[8rem] max-w-[14rem] text-muted-foreground")}>
                         <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={goodsDetailCellClass}>
                         {item.images && item.images.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {item.images.map((imgUrl, idx) => (
@@ -371,7 +366,7 @@ function GoodsInformationBlock({
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={goodsDetailCellClass}>
                         {camId != null && onViewCamera ? (
                           <Button
                             size="sm"
@@ -647,6 +642,14 @@ export default function DetentionMemoDetailPage() {
               <Badge variant={row.verificationStatus === "Verified" ? "default" : "secondary"} className="w-fit">
                 {row.verificationStatus}
               </Badge>
+              {canUserFullyEditSeizureDocs(getStoredUser()?.role) ? (
+                <Button variant="default" size="sm" className="w-full sm:w-auto" asChild>
+                  <Link to={getDetentionMemoEditPath(row.id, pathname)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edit
+                  </Link>
+                </Button>
+              ) : null}
               <PrintMenu
                 printHref={`${listPath}/${encodeURIComponent(row.id)}?print=full`}
                 pdfHref={`${listPath}/${encodeURIComponent(row.id)}?print=full&savepdf=1`}

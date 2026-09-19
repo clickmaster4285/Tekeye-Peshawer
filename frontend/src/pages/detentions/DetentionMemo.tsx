@@ -32,7 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ROUTES, getDetentionMemoCreatePath, getDetentionMemoDetailPath, getDetentionMemoSectionCrumb } from "@/routes/config"
+import { ROUTES, getDetentionMemoCreatePath, getDetentionMemoDetailPath, getDetentionMemoEditPath, getDetentionMemoSectionCrumb } from "@/routes/config"
 import { fetchDetentionMemos, deleteDetentionMemo, type DetentionMemoApiRecord } from "@/lib/detention-memo-api"
 import { createDepositAccountEntry, fetchDepositAccounts } from "@/lib/deposit-account-api"
 import { promoteDetentionToSeizedAndInventory } from "@/lib/wms-stock-storage"
@@ -42,6 +42,8 @@ import DetentionMemoReportPrint from "@/components/detention/DetentionMemoReport
 import { downloadDetentionMemoCsv } from "@/lib/detention-memo-csv"
 import { useBatchPdfExport } from "@/hooks/use-batch-pdf-export"
 import { PdfExportHost } from "@/components/seizure/pdf-export-host"
+import { canUserFullyEditSeizureDocs } from "@/lib/seizure-management-api"
+import { getStoredUser } from "@/lib/auth"
 const PAGE_SIZE_OPTIONS = [10, 20, 25, 50, 100]
 const DEFAULT_PAGE_SIZE = 20
 const DETENTION_ALERT_DAYS = 60
@@ -224,6 +226,10 @@ export default function DetentionMemoPage() {
   }
 
   const handleEdit = (row: DetentionMemoRow) => {
+    if (canUserFullyEditSeizureDocs(getStoredUser()?.role)) {
+      navigate(getDetentionMemoEditPath(row.id, pathname))
+      return
+    }
     navigate(getDetentionMemoDetailPath(row.id, pathname))
   }
 

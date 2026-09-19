@@ -315,6 +315,10 @@ export function getDetentionMemoCreatePath(pathname?: string): string {
   return `${getDetentionMemoListPath(pathname)}/create`
 }
 
+export function getDetentionMemoEditPath(id: string, pathname?: string): string {
+  return `${getDetentionMemoListPath(pathname)}/${encodeURIComponent(id)}/edit`
+}
+
 export function getDetentionMemoDetailPath(id: string, pathname?: string): string {
   return `${getDetentionMemoListPath(pathname)}/${encodeURIComponent(id)}`
 }

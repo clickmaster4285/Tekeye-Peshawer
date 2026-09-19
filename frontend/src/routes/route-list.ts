@@ -58,10 +58,12 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: "deposit-account-register/:id", page: "DepositAccountRegisterDetail" },
   { path: toChildPath(ROUTES.DETENTION_MEMO), page: "DetentionMemo" },
   { path: "seizure-management/detention-memo/create", page: "DetentionMemoCreate" },
+  { path: "seizure-management/detention-memo/:id/edit", page: "DetentionMemoCreate" },
   { path: "seizure-management/detention-memo/:id", page: "DetentionMemoDetail" },
   // Legacy detention-memo paths (QR codes / old bookmarks)
   { path: "detention-memo", page: "DetentionMemo" },
   { path: "detention-memo/create", page: "DetentionMemoCreate" },
+  { path: "detention-memo/:id/edit", page: "DetentionMemoCreate" },
   { path: "detention-memo/:id", page: "DetentionMemoDetail" },
   { path: toChildPath(ROUTES.SEIZED_INVENTORY), page: "SeizedInventory" },
   { path: "seized-inventory/:id", page: "SeizedInventoryDetail" },

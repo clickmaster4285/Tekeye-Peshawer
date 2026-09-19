@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Camera, ChevronDown, Copy, Eye, Plus, Send, Trash2, X } from "lucide-react"
+import { ArrowLeft, Camera, ChevronDown, Copy, Plus, Send, Trash2, X } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -41,23 +41,32 @@ import type { CameraRecord } from "@/lib/cameras-api"
 import {
   EVIDENCE_OPTIONS,
   RECOMMENDATION_OPTIONS,
+  canUserFullyEditSeizureDocs,
   createNoteSheet,
   fetchNoteSheetById,
   noteSheetApproval,
   updateNoteSheet,
   type NoteSheetCreateMedia,
   type NoteSheetItem,
+  type NoteSheetStatus,
   type NoteSheetWritePayload,
 } from "@/lib/seizure-management-api"
 import { toast } from "@/hooks/use-toast"
 import { firstMissingField, reportMissingField } from "@/lib/form-missing-field"
+import { GoodsQrDisplay, getGoodsQrImageUrl } from "@/components/goods/goods-qr-display"
 import {
   GoodsLineTextField,
+  GoodsTableColGroup,
+  GOODS_TABLE_MIN_WIDTH,
+  goodsControlCellClass,
+  goodsControlWrapClass,
+  goodsHeadClass,
   goodsLineCellClass,
   goodsPlaceholderClass,
   goodsSelectTriggerClass,
   goodsTableClass,
 } from "@/components/goods/goods-line-text-field"
+import { cn } from "@/lib/utils"
 
 const NOTE_SHEET_APPROVER_LABEL =
   "Assistant Collector, Deputy Collector, Location Admin, Super Admin"
@@ -84,8 +93,7 @@ function newClientLineId(): string {
   return `gi-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-const getQrCodeUrl = (data: string, size = 120) =>
-  `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`
+const getQrCodeUrl = getGoodsQrImageUrl
 
 function emptyItem(): NoteSheetItem {
   const clientLineId = newClientLineId()
@@ -141,9 +149,7 @@ function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
 }
 
 function cameraOptionLabel(cam: CameraRecord): string {
-  const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
-  const zone = (cam.zone || "").trim()
-  return zone ? `${name} · ${zone}` : name
+  return (cam.name || "").trim() || cam.code || `Camera ${cam.id}`
 }
 
 type MediaKey = keyof NoteSheetCreateMedia
@@ -182,7 +188,7 @@ export default function NoteSheetCreatePage() {
   const [saving, setSaving] = useState(false)
   const [invalidField, setInvalidField] = useState("")
   const [noteSheetNo, setNoteSheetNo] = useState("")
-  const [status, setStatus] = useState<"Draft" | "Rejected">("Draft")
+  const [status, setStatus] = useState<NoteSheetStatus>("Draft")
   const [existingAttachments, setExistingAttachments] = useState<
     { id: string; fileType: string; originalFilename: string; url: string }[]
   >([])
@@ -292,7 +298,11 @@ export default function NoteSheetCreatePage() {
     setLoading(true)
     fetchNoteSheetById(editId)
       .then((row) => {
-        if (row.status !== "Draft" && row.status !== "Rejected") {
+        if (
+          row.status !== "Draft" &&
+          row.status !== "Rejected" &&
+          !canUserFullyEditSeizureDocs(getStoredUser()?.role)
+        ) {
           toast({
             title: "Only Draft or Rejected note sheets can be edited",
             variant: "destructive",
@@ -784,22 +794,29 @@ export default function NoteSheetCreatePage() {
                       : undefined
                   }
                 >
-                <div className="overflow-auto max-w-full">
-                  <Table className={goodsTableClass}>
+                <div className="max-w-full overflow-x-auto rounded-md border border-border/70">
+                  <Table
+                    className={goodsTableClass}
+                    containerClassName="overflow-visible"
+                    style={{ minWidth: GOODS_TABLE_MIN_WIDTH, width: GOODS_TABLE_MIN_WIDTH }}
+                  >
+                    <GoodsTableColGroup />
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[180px]">QR Code</TableHead>
-                        <TableHead className="w-[240px]">Description of Goods <span className="text-red-600">*</span></TableHead>
-                        <TableHead className="w-[88px]">Qty</TableHead>
-                        <TableHead className="w-[110px]">Unit</TableHead>
-                        <TableHead className="w-[190px]">Condition</TableHead>
-                        <TableHead className="w-[92px]">Perishable</TableHead>
-                        <TableHead className="w-[160px]">ID / Chassis No.</TableHead>
-                        <TableHead className="w-[220px]">Item Notes</TableHead>
-                        <TableHead className="w-[96px]">Images</TableHead>
-                        <TableHead className="w-[140px]">Camera Zone</TableHead>
-                        <TableHead className="w-[220px]">Located Camera</TableHead>
-                        <TableHead className="w-[44px]"></TableHead>
+                      <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                        <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                        <TableHead className={goodsHeadClass}>
+                          Description <span className="normal-case text-red-600">*</span>
+                        </TableHead>
+                        <TableHead className={goodsHeadClass}>Qty</TableHead>
+                        <TableHead className={goodsHeadClass}>Unit</TableHead>
+                        <TableHead className={goodsHeadClass}>Condition</TableHead>
+                        <TableHead className={cn(goodsHeadClass, "text-center")}>Perish.</TableHead>
+                        <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                        <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                        <TableHead className={goodsHeadClass}>Images</TableHead>
+                        <TableHead className={goodsHeadClass}>Camera Zone</TableHead>
+                        <TableHead className={goodsHeadClass}>Located Camera</TableHead>
+                        <TableHead className={goodsHeadClass} />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -814,127 +831,113 @@ export default function NoteSheetCreatePage() {
                           const zoneCameras = camerasForZone(locationCameras, row.locatedZone || "")
                           return (
                           <TableRow key={row.clientLineId || index} className={index % 2 === 1 ? "bg-muted/10" : ""}>
-                            <TableCell className="align-middle">
-                              <div className="flex flex-col gap-1 items-start">
-                                <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded truncate max-w-[130px]">
-                                  {row.qrCodeNumber}
-                                </span>
-                                <div className="flex gap-1">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-1 text-xs"
-                                    onClick={() => copyToClipboard(row.qrCodeNumber)}
-                                  >
-                                    <Copy className="h-3 w-3 mr-1" />
-                                    Copy
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-1 text-xs"
-                                    onClick={() => setPreviewQrData(row.qrCodeNumber)}
-                                  >
-                                    <Eye className="h-3 w-3 mr-1" />
-                                    Preview
-                                  </Button>
-                                </div>
-                                <img
-                                  src={getQrCodeUrl(row.qrCodeNumber, 100)}
-                                  alt="QR Code"
-                                  width={100}
-                                  height={100}
-                                  className="mt-1 border border-gray-200 rounded-sm bg-white p-1"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f0f0f0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='%23999' font-size='10'%3EQR Error%3C/text%3E%3C/svg%3E"
+                            <TableCell className={goodsControlCellClass}>
+                              <GoodsQrDisplay
+                                code={row.qrCodeNumber}
+                                size={72}
+                                onCopy={() => copyToClipboard(row.qrCodeNumber)}
+                                onView={() => setPreviewQrData(row.qrCodeNumber)}
+                              />
+                            </TableCell>
+                            <TableCell className={goodsLineCellClass}>
+                              <div className="min-w-0 max-w-full overflow-hidden">
+                                <GoodsLineTextField
+                                  value={row.product}
+                                  onChange={(e) => {
+                                    updateItem(index, "product", e.target.value)
+                                    if (invalidField === "ns-goods") setInvalidField("")
                                   }}
+                                  placeholder="Description of goods"
+                                  title="Description of goods"
+                                  aria-invalid={invalidField === "ns-goods" && index === 0}
+                                />
+                              </div>
+                            </TableCell>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={row.quantity}
+                                  onChange={(e) => updateItem(index, "quantity", e.target.value)}
+                                  placeholder="Qty"
+                                  title="Qty"
+                                  className={goodsPlaceholderClass}
+                                />
+                              </div>
+                            </TableCell>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Select value={row.unit} onValueChange={(v) => updateItem(index, "unit", v)}>
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
+                                    <SelectValue placeholder="Unit" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {GOODS_UNITS.map((u) => (
+                                      <SelectItem key={u} value={u}>
+                                        {u}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </TableCell>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Select
+                                  value={row.condition}
+                                  onValueChange={(v) => updateItem(index, "condition", v)}
+                                >
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
+                                    <SelectValue placeholder="Condition" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {GOODS_CONDITIONS.map((c) => (
+                                      <SelectItem key={c} value={c}>
+                                        {c}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </TableCell>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={cn(goodsControlWrapClass, "justify-center pt-2")}>
+                                <Checkbox
+                                  checked={row.perishable}
+                                  onCheckedChange={(checked) => updateItem(index, "perishable", !!checked)}
+                                  aria-label="Perishable"
+                                />
+                              </div>
+                            </TableCell>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Input
+                                  value={row.identificationRef}
+                                  onChange={(e) => updateItem(index, "identificationRef", e.target.value)}
+                                  placeholder="Chassis / Serial"
+                                  title="Chassis / Serial"
+                                  className={goodsPlaceholderClass}
                                 />
                               </div>
                             </TableCell>
                             <TableCell className={goodsLineCellClass}>
-                              <GoodsLineTextField
-                                value={row.product}
-                                onChange={(e) => {
-                                  updateItem(index, "product", e.target.value)
-                                  if (invalidField === "ns-goods") setInvalidField("")
-                                }}
-                                placeholder="Description of goods"
-                                title="Description of goods"
-                                aria-invalid={invalidField === "ns-goods" && index === 0}
-                              />
+                              <div className="min-w-0 max-w-full overflow-hidden">
+                                <GoodsLineTextField
+                                  value={row.remarks}
+                                  onChange={(e) => updateItem(index, "remarks", e.target.value)}
+                                  placeholder="Officer notes"
+                                  title="Officer notes for this item"
+                                />
+                              </div>
                             </TableCell>
-                            <TableCell className="align-middle">
-                              <Input
-                                type="text"
-                                inputMode="numeric"
-                                value={row.quantity}
-                                onChange={(e) => updateItem(index, "quantity", e.target.value)}
-                                placeholder="Qty"
-                                title="Qty"
-                                className={goodsPlaceholderClass}
-                              />
-                            </TableCell>
-                            <TableCell className="align-middle">
-                              <Select value={row.unit} onValueChange={(v) => updateItem(index, "unit", v)}>
-                                <SelectTrigger className={goodsSelectTriggerClass} title="Unit">
-                                  <SelectValue placeholder="Unit" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {GOODS_UNITS.map((u) => (
-                                    <SelectItem key={u} value={u}>
-                                      {u}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="align-middle">
-                              <Select
-                                value={row.condition}
-                                onValueChange={(v) => updateItem(index, "condition", v)}
-                              >
-                                <SelectTrigger className={goodsSelectTriggerClass} title="Condition">
-                                  <SelectValue placeholder="Condition" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {GOODS_CONDITIONS.map((c) => (
-                                    <SelectItem key={c} value={c}>
-                                      {c}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="text-center align-middle">
-                              <Checkbox
-                                checked={row.perishable}
-                                onCheckedChange={(checked) => updateItem(index, "perishable", !!checked)}
-                              />
-                            </TableCell>
-                            <TableCell className="align-middle">
-                              <Input
-                                value={row.identificationRef}
-                                onChange={(e) => updateItem(index, "identificationRef", e.target.value)}
-                                placeholder="Chassis / Serial"
-                                title="Chassis / Serial"
-                                className={goodsPlaceholderClass}
-                              />
-                            </TableCell>
-                            <TableCell className={goodsLineCellClass}>
-                              <GoodsLineTextField
-                                value={row.remarks}
-                                onChange={(e) => updateItem(index, "remarks", e.target.value)}
-                                placeholder="Officer notes for this item"
-                                title="Officer notes for this item"
-                              />
-                            </TableCell>
-                            <TableCell className="align-middle">
-                              <div className="flex flex-col gap-1">
-                                <label className="cursor-pointer inline-flex items-center gap-1 text-xs bg-secondary text-secondary-foreground hover:bg-secondary/80 px-2 py-1 rounded">
-                                  <Camera className="h-3 w-3" />
-                                  Add ({(row.imageFiles?.length ?? 0) + (row.images?.length ?? 0)}/10)
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={cn(goodsControlWrapClass, "flex-col gap-1")}>
+                                <label className="cursor-pointer inline-flex h-9 w-full items-center justify-center gap-1 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-muted/60">
+                                  <Camera className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="truncate">
+                                    {(row.imageFiles?.length ?? 0) + (row.images?.length ?? 0)}/10
+                                  </span>
                                   <input
                                     type="file"
                                     accept="image/*"
@@ -958,7 +961,7 @@ export default function NoteSheetCreatePage() {
                                         key={`existing-${idx}`}
                                         src={imgUrl}
                                         alt={`Goods ${idx + 1}`}
-                                        className="h-8 w-8 object-cover rounded border"
+                                        className="h-7 w-7 object-cover rounded border"
                                       />
                                     ))}
                                     {row.imageFiles?.map((file, idx) => (
@@ -966,7 +969,7 @@ export default function NoteSheetCreatePage() {
                                         <img
                                           src={URL.createObjectURL(file)}
                                           alt={`New ${idx + 1}`}
-                                          className="h-8 w-8 object-cover rounded border"
+                                          className="h-7 w-7 object-cover rounded border"
                                         />
                                         <button
                                           type="button"
@@ -985,96 +988,90 @@ export default function NoteSheetCreatePage() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="align-middle">
-                              <Select
-                                value={row.locatedZone || "__none__"}
-                                onValueChange={(v) => {
-                                  const zone = v === "__none__" ? "" : v
-                                  setItems((prev) =>
-                                    prev.map((item, i) =>
-                                      i === index
-                                        ? { ...item, locatedZone: zone, locatedCameraId: null }
-                                        : item
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Select
+                                  value={row.locatedZone || "__none__"}
+                                  onValueChange={(v) => {
+                                    const zone = v === "__none__" ? "" : v
+                                    setItems((prev) =>
+                                      prev.map((item, i) =>
+                                        i === index
+                                          ? { ...item, locatedZone: zone, locatedCameraId: null }
+                                          : item
+                                      )
                                     )
-                                  )
-                                }}
-                              >
-                                <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
-                                  <SelectValue placeholder="Select zone" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">Select zone</SelectItem>
-                                  {availableZones.map((zone) => (
-                                    <SelectItem key={zone} value={zone}>
-                                      {zone}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {!availableZones.length && (
-                                <p className="mt-1 text-[10px] text-muted-foreground">
-                                  No zones for this office.
-                                </p>
-                              )}
+                                  }}
+                                >
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Camera zone">
+                                    <SelectValue placeholder="Select zone" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Select zone</SelectItem>
+                                    {availableZones.map((zone) => (
+                                      <SelectItem key={zone} value={zone}>
+                                        {zone}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </TableCell>
-                            <TableCell className="align-middle">
-                              <Select
-                                value={row.locatedCameraId != null ? String(row.locatedCameraId) : "__none__"}
-                                onValueChange={(v) => {
-                                  if (v === "__none__") {
-                                    updateItem(index, "locatedCameraId", null)
-                                    return
-                                  }
-                                  const camId = Number(v)
-                                  const cam =
-                                    zoneCameras.find((c) => c.id === camId) ||
-                                    locationCameras.find((c) => c.id === camId)
-                                  setItems((prev) =>
-                                    prev.map((item, i) =>
-                                      i === index
-                                        ? {
-                                            ...item,
-                                            locatedCameraId: Number.isFinite(camId) ? camId : null,
-                                            locatedZone: cam?.zone?.trim() || item.locatedZone || "",
-                                          }
-                                        : item
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={goodsControlWrapClass}>
+                                <Select
+                                  value={row.locatedCameraId != null ? String(row.locatedCameraId) : "__none__"}
+                                  onValueChange={(v) => {
+                                    if (v === "__none__") {
+                                      updateItem(index, "locatedCameraId", null)
+                                      return
+                                    }
+                                    const camId = Number(v)
+                                    const cam =
+                                      zoneCameras.find((c) => c.id === camId) ||
+                                      locationCameras.find((c) => c.id === camId)
+                                    setItems((prev) =>
+                                      prev.map((item, i) =>
+                                        i === index
+                                          ? {
+                                              ...item,
+                                              locatedCameraId: Number.isFinite(camId) ? camId : null,
+                                              locatedZone: cam?.zone?.trim() || item.locatedZone || "",
+                                            }
+                                          : item
+                                      )
                                     )
-                                  )
-                                }}
-                                disabled={!row.locatedZone}
-                              >
-                                <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
-                                  <SelectValue
-                                    placeholder={row.locatedZone ? "Select camera" : "Pick zone first"}
-                                  />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">No camera</SelectItem>
-                                  {zoneCameras.map((cam) => (
-                                    <SelectItem key={cam.id} value={String(cam.id)}>
-                                      {cameraOptionLabel(cam)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {row.locatedZone && !zoneCameras.length && (
-                                <p className="mt-1 text-[10px] text-muted-foreground">
-                                  No assigned cameras in this zone.
-                                </p>
-                              )}
+                                  }}
+                                  disabled={!row.locatedZone}
+                                >
+                                  <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
+                                    <SelectValue
+                                      placeholder={row.locatedZone ? "Select camera" : "Pick zone first"}
+                                    />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">No camera</SelectItem>
+                                    {zoneCameras.map((cam) => (
+                                      <SelectItem key={cam.id} value={String(cam.id)}>
+                                        {cameraOptionLabel(cam)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </TableCell>
-                            <TableCell className="align-middle text-center">
-                              <div className="flex items-center justify-center">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                disabled={false}
-                                onClick={() => setItems((prev) => prev.filter((_, i) => i !== index))}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                            <TableCell className={goodsControlCellClass}>
+                              <div className={cn(goodsControlWrapClass, "justify-center")}>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-9 w-9 text-destructive hover:text-destructive"
+                                  onClick={() => setItems((prev) => prev.filter((_, i) => i !== index))}
+                                  aria-label="Remove line"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>

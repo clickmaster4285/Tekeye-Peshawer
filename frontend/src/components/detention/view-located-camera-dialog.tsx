@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { MlCameraFeed } from "@/components/cameras/ml-camera-feed"
-import { fetchCamera, cameraSourceLabel, type CameraRecord } from "@/lib/cameras-api"
+import { fetchCamera, cameraSourceLabel, isCameraAllocated, type CameraRecord } from "@/lib/cameras-api"
 import type { LocatedCameraApi } from "@/lib/detention-memo-api"
 
 export type ViewCameraTarget = {
@@ -140,6 +140,11 @@ export function ViewLocatedCameraDialog({
                   {camera.zone ? ` · ${camera.zone}` : ""}
                   {camera.location ? ` · ${camera.location}` : ""}
                 </p>
+                {!isCameraAllocated(camera) ? (
+                  <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    This camera is not assigned in Camera Distribution. Live stream may not start until it is allocated to an ML server.
+                  </p>
+                ) : null}
                 <MlCameraFeed
                   camera={camera}
                   className="rounded-md"

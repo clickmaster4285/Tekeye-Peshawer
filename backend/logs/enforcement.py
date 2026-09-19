@@ -6,11 +6,13 @@ Login identity lives on MobileDevice + MobileAccessSession.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.db import connection, transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -22,6 +24,9 @@ from logs.models import (
     MobileEventReceipt,
 )
 from users.permissions import can_view_all_staff, get_location_scope
+
+logger = logging.getLogger(__name__)
+_missing_mobile_table_warned = False
 
 DESK_ROLES = frozenset(
     {
@@ -547,14 +552,45 @@ def device_payload(device: MobileDevice) -> dict:
 
 
 def monitor_mobile_devices():
+    global _missing_mobile_table_warned
+
+    # Skip quietly until CIIS mobile migrations have been applied.
+    table = MobileDevice._meta.db_table
+    try:
+        existing = set(connection.introspection.table_names())
+        if table not in existing:
+            if not _missing_mobile_table_warned:
+                logger.warning(
+                    "CIIS mobile monitor skipped: table %s is missing. "
+                    "Run: python manage.py migrate logs",
+                    table,
+                )
+                _missing_mobile_table_warned = True
+            return
+    except Exception:
+        pass
+
     now = timezone.now()
     stale_after = timedelta(seconds=int(_setting("CIIS_DEVICE_STALE_AFTER", 180)))
     offline_after = timedelta(seconds=int(_setting("CIIS_DEVICE_OFFLINE_ALERT_AFTER", 300)))
     extended_after = timedelta(seconds=int(_setting("CIIS_DEVICE_OFFLINE_EXTENDED_AFTER", 600)))
     gps_problem_after = timedelta(seconds=int(_setting("CIIS_GPS_OFFLINE_AFTER", 300)))
 
-    devices = MobileDevice.objects.filter(is_revoked=False, is_active=True).select_related("user")
-    for device in devices:
+    try:
+        device_list = list(
+            MobileDevice.objects.filter(is_revoked=False, is_active=True).select_related("user")
+        )
+    except (ProgrammingError, OperationalError):
+        if not _missing_mobile_table_warned:
+            logger.warning(
+                "CIIS mobile monitor skipped: database error querying %s. "
+                "Run: python manage.py migrate logs",
+                table,
+            )
+            _missing_mobile_table_warned = True
+        return
+
+    for device in device_list:
         last = device.last_heartbeat_at or device.last_seen_at or device.registered_at
         if not last:
             continue

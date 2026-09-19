@@ -30,6 +30,7 @@ import {
 } from "@/routes/config"
 import {
   canUserDeleteNoteSheet,
+  canUserEditNoteSheet,
   deleteNoteSheet,
   fetchNoteSheetById,
   noteSheetApproval,
@@ -41,7 +42,9 @@ import { getStoredToken } from "@/lib/api"
 import { fetchCurrentUser } from "@/lib/users-api"
 import { toast } from "@/hooks/use-toast"
 import { reportMissingField } from "@/lib/form-missing-field"
-import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import { GoodsLineText, goodsDetailCellClass, goodsHeadClass } from "@/components/goods/goods-line-text-field"
+import { GoodsQrDisplay } from "@/components/goods/goods-qr-display"
+import { cn } from "@/lib/utils"
 import {
   ViewLocatedCameraDialog,
   ViewCameraButton,
@@ -240,7 +243,7 @@ export default function NoteSheetDetailPage() {
   }
 
   const title = row.noteSheetNo || row.referenceNumber || row.subject || "Note Sheet"
-  const canEdit = row.status === "Draft" || row.status === "Rejected"
+  const canEdit = canUserEditNoteSheet(row, currentUser?.role)
   const canApprove = canUserApproveNoteSheet(row, currentUser)
   const canDelete = canUserDeleteNoteSheet(row, currentUser?.role)
 
@@ -467,48 +470,35 @@ export default function NoteSheetDetailPage() {
           </CardHeader>
           <CardContent>
             {row.items?.length ? (
-              <div className="overflow-auto">
-                <Table className="w-max min-w-full">
+              <div className="max-w-full overflow-x-auto rounded-md border border-border/70">
+                <Table className="w-max min-w-full text-sm">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[88px]">QR Code</TableHead>
-                      <TableHead className="min-w-[140px]">Description</TableHead>
-                      <TableHead className="min-w-[150px]">Located Camera</TableHead>
-                      <TableHead className="min-w-[56px]">Qty</TableHead>
-                      <TableHead className="min-w-[56px]">Unit</TableHead>
-                      <TableHead className="min-w-[88px]">Condition</TableHead>
-                      <TableHead className="min-w-[80px]">Perishable</TableHead>
-                      <TableHead className="min-w-[110px]">ID / Chassis No.</TableHead>
-                      <TableHead className="min-w-[120px]">Item Notes</TableHead>
-                      <TableHead className="min-w-[80px]">Images</TableHead>
-                      <TableHead className="min-w-[120px]" />
+                    <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                      <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                      <TableHead className={goodsHeadClass}>Description</TableHead>
+                      <TableHead className={goodsHeadClass}>Located Camera</TableHead>
+                      <TableHead className={goodsHeadClass}>Qty</TableHead>
+                      <TableHead className={goodsHeadClass}>Unit</TableHead>
+                      <TableHead className={goodsHeadClass}>Condition</TableHead>
+                      <TableHead className={goodsHeadClass}>Perishable</TableHead>
+                      <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                      <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                      <TableHead className={goodsHeadClass}>Images</TableHead>
+                      <TableHead className={goodsHeadClass} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {row.items.map((item, i) => (
                       <TableRow key={item.id ?? i}>
-                        <TableCell>
-                          {item.qrCodeNumber ? (
-                            <div className="flex flex-col items-start gap-1">
-                              <img
-                                src={getQrCodeUrl(item.qrCodeNumber, 64)}
-                                alt={item.qrCodeNumber}
-                                className="rounded border bg-white p-0.5"
-                              />
-                              <span className="font-mono text-[10px] text-muted-foreground break-all max-w-[88px]">
-                                {item.qrCodeNumber}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                        <TableCell className={cn(goodsDetailCellClass, "w-[7.5rem]")}>
+                          <GoodsQrDisplay code={item.qrCodeNumber} size={64} />
                         </TableCell>
-                        <TableCell className={goodsLineCellClass}>
+                        <TableCell className={cn(goodsDetailCellClass, "min-w-[10rem] max-w-[16rem] font-medium")}>
                           <GoodsLineText>{item.product || item.description || "—"}</GoodsLineText>
                         </TableCell>
-                        <TableCell className="text-xs whitespace-normal">
+                        <TableCell className={cn(goodsDetailCellClass, "min-w-[9rem] text-xs")}>
                           <div className="space-y-0.5">
-                            <p className="font-medium">
+                            <p className="font-medium text-sm">
                               {locatedCameraLabel(item.locatedCamera, item.locatedCameraId)}
                             </p>
                             <p className="text-muted-foreground">
@@ -519,15 +509,15 @@ export default function NoteSheetDetailPage() {
                             ) : null}
                           </div>
                         </TableCell>
-                        <TableCell>{item.quantity || "—"}</TableCell>
-                        <TableCell>{item.unit || "—"}</TableCell>
-                        <TableCell>{item.condition || "—"}</TableCell>
-                        <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                        <TableCell className="whitespace-normal">{item.identificationRef || "—"}</TableCell>
-                        <TableCell className={goodsLineCellClass}>
+                        <TableCell className={goodsDetailCellClass}>{item.quantity || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.unit || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.condition || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.perishable ? "Yes" : "No"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.identificationRef || "—"}</TableCell>
+                        <TableCell className={cn(goodsDetailCellClass, "min-w-[8rem] max-w-[14rem]")}>
                           <GoodsLineText>{item.remarks || item.itemNotes || "—"}</GoodsLineText>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={goodsDetailCellClass}>
                           {item.images?.length ? (
                             <div className="flex flex-wrap gap-1">
                               {item.images.map((url, idx) => (
@@ -546,7 +536,7 @@ export default function NoteSheetDetailPage() {
                             "—"
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={goodsDetailCellClass}>
                           <ViewCameraButton item={item} onView={setViewCamera} />
                         </TableCell>
                       </TableRow>

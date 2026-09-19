@@ -50,6 +50,7 @@ import {
 } from "@/routes/config"
 import {
   canUserDeleteNoteSheet,
+  canUserEditNoteSheet,
   deleteNoteSheet,
   fetchNoteSheets,
   type NoteSheetAttachment,
@@ -832,7 +833,7 @@ export default function NoteSheetPage() {
                             <TableActionIcon label="Print" onClick={() => printNoteSheet(row.id)}>
                               <Printer className="h-4 w-4" />
                             </TableActionIcon>
-                            {(row.status === "Draft" || row.status === "Rejected") && (
+                            {(canUserEditNoteSheet(row, currentUser?.role)) && (
                               <TableActionIcon label="Edit" to={getSeizureMgmtNoteSheetEditPath(row.id)}>
                                 <Pencil className="h-4 w-4" />
                               </TableActionIcon>

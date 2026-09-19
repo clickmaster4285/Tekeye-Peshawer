@@ -36,6 +36,7 @@ import {
 } from "@/routes/config"
 import {
   assessmentApproval,
+  canUserEditAssessment,
   fetchAssessmentById,
   type DetentionAssessmentRecord,
 } from "@/lib/seizure-management-api"
@@ -43,7 +44,9 @@ import { fetchDetentionMemoById, type DetentionMemoApiRecord } from "@/lib/deten
 import { getStoredUser, type AuthUser } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
 import { reportMissingField } from "@/lib/form-missing-field"
-import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import { GoodsLineText, goodsDetailCellClass, goodsHeadClass } from "@/components/goods/goods-line-text-field"
+import { GoodsQrDisplay } from "@/components/goods/goods-qr-display"
+import { cn } from "@/lib/utils"
 import AssessmentReportPrint from "@/components/seizure/AssessmentReportPrint"
 
 const APPROVER_ROLES = new Set([
@@ -173,7 +176,7 @@ export default function AssessmentDetailPage() {
     return <AssessmentReportPrint row={row} memo={memo} autoSavePdf={autoSavePdf} />
   }
 
-  const canAssess = row.status === "Draft" || row.status === "Rejected"
+  const canAssess = canUserEditAssessment(row, currentUser?.role)
   const canApprove = canUserApproveAssessment(row, currentUser)
   const qrPayload =
     memo.memoQrCodePayload ||
@@ -258,7 +261,7 @@ export default function AssessmentDetailPage() {
                 <Button variant="default" asChild size="sm" className="w-full sm:w-auto">
                   <Link to={getSeizureMgmtAssessmentEditPath(row.id)}>
                     <ClipboardCheck className="h-4 w-4 mr-2" />
-                    Assess
+                    Edit
                   </Link>
                 </Button>
               )}
@@ -457,53 +460,48 @@ export default function AssessmentDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="rounded-lg border p-0">
-                  <div className="overflow-x-auto">
+                  <div className="max-w-full overflow-x-auto">
                     <ScrollArea className="w-full">
-                      <Table className="min-w-[1100px]">
+                      <Table className="min-w-[1100px] text-sm">
                         <TableHeader>
-                          <TableRow>
-                            <TableHead className="min-w-[7rem]">QR Code</TableHead>
-                            <TableHead className="min-w-[12rem]">Description</TableHead>
-                            <TableHead className="min-w-[5rem]">PCT</TableHead>
-                            <TableHead className="min-w-[4rem]">Qty</TableHead>
-                            <TableHead className="min-w-[4rem]">Unit</TableHead>
-                            <TableHead className="min-w-[6rem]">Condition</TableHead>
-                            <TableHead className="min-w-[6rem]">Assessable</TableHead>
-                            <TableHead className="min-w-[6rem]">Perishable</TableHead>
-                            <TableHead className="min-w-[7rem]">ID / Chassis</TableHead>
-                            <TableHead className="min-w-[10rem]">Item Notes</TableHead>
-                            <TableHead className="min-w-[5rem]">Images</TableHead>
+                          <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                            <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                            <TableHead className={goodsHeadClass}>Description</TableHead>
+                            <TableHead className={goodsHeadClass}>PCT</TableHead>
+                            <TableHead className={goodsHeadClass}>Qty</TableHead>
+                            <TableHead className={goodsHeadClass}>Unit</TableHead>
+                            <TableHead className={goodsHeadClass}>Condition</TableHead>
+                            <TableHead className={goodsHeadClass}>Assessable</TableHead>
+                            <TableHead className={goodsHeadClass}>Perishable</TableHead>
+                            <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                            <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                            <TableHead className={goodsHeadClass}>Images</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {memo.goodsItems.map((item) => (
                             <TableRow key={item.id}>
-                              <TableCell className="font-mono text-xs">
-                                <div className="space-y-1">
-                                  <img
-                                    src={getQrCodeUrl(getGoodsQrPayload(memo.id, item), 56)}
-                                    alt={`Goods QR ${item.qrCodeNumber || item.id}`}
-                                    className="h-14 w-14 border rounded p-1 bg-white"
-                                  />
-                                  <span className="block text-[10px] text-muted-foreground max-w-[80px] break-all">
-                                    {item.qrCodeNumber || "—"}
-                                  </span>
-                                </div>
+                              <TableCell className={cn(goodsDetailCellClass, "w-[7rem]")}>
+                                <GoodsQrDisplay
+                                  code={item.qrCodeNumber}
+                                  imageData={getGoodsQrPayload(memo.id, item)}
+                                  size={56}
+                                />
                               </TableCell>
-                              <TableCell className={`${goodsLineCellClass} font-medium`}>
+                              <TableCell className={cn(goodsDetailCellClass, "min-w-[10rem] max-w-[16rem] font-medium")}>
                                 <GoodsLineText>{item.description || "—"}</GoodsLineText>
                               </TableCell>
-                              <TableCell className="font-mono">{item.pctCode || "—"}</TableCell>
-                              <TableCell>{item.quantity || "—"}</TableCell>
-                              <TableCell>{item.unit || "—"}</TableCell>
-                              <TableCell>{item.condition || "—"}</TableCell>
-                              <TableCell>{item.assessableValuePkr || "—"}</TableCell>
-                              <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                              <TableCell>{item.identificationRef || "—"}</TableCell>
-                              <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                              <TableCell className={cn(goodsDetailCellClass, "font-mono")}>{item.pctCode || "—"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.quantity || "—"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.unit || "—"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.condition || "—"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.assessableValuePkr || "—"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.perishable ? "Yes" : "No"}</TableCell>
+                              <TableCell className={goodsDetailCellClass}>{item.identificationRef || "—"}</TableCell>
+                              <TableCell className={cn(goodsDetailCellClass, "min-w-[8rem] max-w-[14rem] text-muted-foreground")}>
                                 <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className={goodsDetailCellClass}>
                                 {item.images && item.images.length > 0 ? (
                                   <div className="flex flex-wrap gap-1">
                                     {item.images.map((imgUrl, idx) => (
@@ -633,7 +631,7 @@ export default function AssessmentDetailPage() {
                 <Button asChild>
                   <Link to={getSeizureMgmtAssessmentEditPath(row.id)}>
                     <ClipboardCheck className="h-4 w-4 mr-2" />
-                    Assess
+                    Edit
                   </Link>
                 </Button>
                 <Button onClick={() => void runApproval("submit")} disabled={acting}>

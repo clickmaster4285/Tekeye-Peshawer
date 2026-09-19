@@ -13,7 +13,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getDetentionMemoDetailPath, ROUTES } from "@/routes/config"
 import type { DetentionMemoApiRecord } from "@/lib/detention-memo-api"
-import { GoodsLineText, goodsLineCellClass } from "@/components/goods/goods-line-text-field"
+import { GoodsLineText, goodsDetailCellClass, goodsHeadClass } from "@/components/goods/goods-line-text-field"
+import { GoodsQrDisplay } from "@/components/goods/goods-qr-display"
+import { cn } from "@/lib/utils"
 
 function DetailRow({ label, value }: { label: string; value: string | undefined }) {
   return (
@@ -220,53 +222,48 @@ export function DetentionMemoReadOnlyView({ memo }: { memo: DetentionMemoApiReco
             </CardTitle>
           </CardHeader>
           <CardContent className="rounded-lg border p-0">
-            <div className="overflow-x-auto">
+            <div className="max-w-full overflow-x-auto">
               <ScrollArea className="w-full">
-                <Table className="min-w-[1100px]">
+                <Table className="min-w-[1100px] text-sm">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[7rem]">QR Code</TableHead>
-                      <TableHead className="min-w-[12rem]">Description</TableHead>
-                      <TableHead className="min-w-[6rem]">PCT Code</TableHead>
-                      <TableHead className="min-w-[4rem]">Qty</TableHead>
-                      <TableHead className="min-w-[4rem]">Unit</TableHead>
-                      <TableHead className="min-w-[6rem]">Condition</TableHead>
-                      <TableHead className="min-w-[9rem]">Assessable Value (PKR)</TableHead>
-                      <TableHead className="min-w-[6rem]">Perishable</TableHead>
-                      <TableHead className="min-w-[7rem]">ID / Chassis</TableHead>
-                      <TableHead className="min-w-[10rem]">Item Notes</TableHead>
-                      <TableHead className="min-w-[5rem]">Images</TableHead>
+                    <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
+                      <TableHead className={goodsHeadClass}>QR Code</TableHead>
+                      <TableHead className={goodsHeadClass}>Description</TableHead>
+                      <TableHead className={goodsHeadClass}>PCT Code</TableHead>
+                      <TableHead className={goodsHeadClass}>Qty</TableHead>
+                      <TableHead className={goodsHeadClass}>Unit</TableHead>
+                      <TableHead className={goodsHeadClass}>Condition</TableHead>
+                      <TableHead className={goodsHeadClass}>Assessable Value</TableHead>
+                      <TableHead className={goodsHeadClass}>Perishable</TableHead>
+                      <TableHead className={goodsHeadClass}>ID / Chassis</TableHead>
+                      <TableHead className={goodsHeadClass}>Item Notes</TableHead>
+                      <TableHead className={goodsHeadClass}>Images</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {memo.goodsItems.map((item) => (
                       <TableRow key={item.id}>
-                        <TableCell className="font-mono text-xs">
-                          <div className="space-y-1">
-                            <img
-                              src={getQrCodeUrl(getGoodsQrPayload(memo.id, item), 56)}
-                              alt={`Goods QR ${item.qrCodeNumber || item.id}`}
-                              className="h-14 w-14 border rounded p-1 bg-white"
-                            />
-                            <span className="block text-[10px] text-muted-foreground max-w-[80px] break-all">
-                              {item.qrCodeNumber || "—"}
-                            </span>
-                          </div>
+                        <TableCell className={cn(goodsDetailCellClass, "w-[7rem]")}>
+                          <GoodsQrDisplay
+                            code={item.qrCodeNumber}
+                            imageData={getGoodsQrPayload(memo.id, item)}
+                            size={56}
+                          />
                         </TableCell>
-                        <TableCell className={`${goodsLineCellClass} font-medium`}>
+                        <TableCell className={cn(goodsDetailCellClass, "min-w-[10rem] max-w-[16rem] font-medium")}>
                           <GoodsLineText>{item.description || "—"}</GoodsLineText>
                         </TableCell>
-                        <TableCell className="font-mono">{item.pctCode?.trim() || "—"}</TableCell>
-                        <TableCell>{item.quantity || "—"}</TableCell>
-                        <TableCell>{item.unit || "—"}</TableCell>
-                        <TableCell>{item.condition || "—"}</TableCell>
-                        <TableCell>{item.assessableValuePkr?.trim() || "—"}</TableCell>
-                        <TableCell>{item.perishable ? "Yes" : "No"}</TableCell>
-                        <TableCell>{item.identificationRef || "—"}</TableCell>
-                        <TableCell className={`${goodsLineCellClass} text-muted-foreground`}>
+                        <TableCell className={cn(goodsDetailCellClass, "font-mono")}>{item.pctCode?.trim() || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.quantity || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.unit || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.condition || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.assessableValuePkr?.trim() || "—"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.perishable ? "Yes" : "No"}</TableCell>
+                        <TableCell className={goodsDetailCellClass}>{item.identificationRef || "—"}</TableCell>
+                        <TableCell className={cn(goodsDetailCellClass, "min-w-[8rem] max-w-[14rem] text-muted-foreground")}>
                           <GoodsLineText>{item.itemNotes || "—"}</GoodsLineText>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={goodsDetailCellClass}>
                           {item.images && item.images.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {item.images.map((imgUrl, idx) => (

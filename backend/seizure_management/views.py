@@ -661,10 +661,12 @@ class AssessmentUpdateAPIView(APIView):
             DetentionAssessment.STATUS_DRAFT,
             DetentionAssessment.STATUS_REJECTED,
         ):
-            return Response(
-                {"detail": "Only draft or rejected assessments can be edited."},
-                status=400,
-            )
+            role = (getattr(request.user, "role", None) or "").strip().upper()
+            if role not in {"ADMIN", "LOCATION_ADMIN"}:
+                return Response(
+                    {"detail": "Only draft or rejected assessments can be edited."},
+                    status=400,
+                )
         body = body_from_request(request)
         ser = AssessmentWriteSerializer(data=body, partial=True)
         ser.is_valid(raise_exception=True)

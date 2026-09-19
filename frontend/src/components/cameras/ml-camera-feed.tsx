@@ -156,7 +156,7 @@ export function MlCameraFeed({
       className={cn(
         "flex flex-col",
         isFullscreen &&
-          "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-black",
+        "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-black",
         className
       )}
     >
