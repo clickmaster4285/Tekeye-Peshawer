@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Download, Eye, FileDown, FilePlus, Pencil, Plus, Printer, Search, Trash2, ChevronDown } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Download,
+  Eye,
+  FileDown,
+  FilePlus,
+  Pencil,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+} from "lucide-react"
 import { TableActionGroup, TableActionIcon } from "@/components/seizure/table-action-icon"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,6 +28,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -43,6 +65,9 @@ import { saveElementAsPdf } from "@/lib/save-report-pdf"
 import NoteSheetReportPrint from "@/components/seizure/NoteSheetReportPrint"
 
 type PeriodPreset = "all" | "today" | "week" | "month" | "custom"
+
+const PAGE_SIZE_OPTIONS = [10, 20, 25, 50, 100]
+const DEFAULT_PAGE_SIZE = 20
 
 const STATUS_META: { id: NoteSheetStatus; label: string; active: string; dot: string }[] = [
   { id: "Draft", label: "Draft", active: "ring-slate-300 bg-slate-50", dot: "bg-slate-400" },
@@ -350,6 +375,8 @@ export default function NoteSheetPage() {
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [pdfRows, setPdfRows] = useState<NoteSheetRecord[] | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const pdfHostRef = useRef<HTMLDivElement>(null)
   const currentUser = getStoredUser()
 
@@ -425,6 +452,21 @@ export default function NoteSheetPage() {
       )
     })
   }, [periodRows, search, statusFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const pageRows = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize]
+  )
+  const pageSerial = (index: number) => (page - 1) * pageSize + index + 1
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, statusFilter, period, dateFrom, dateTo, pageSize])
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   const handleDelete = async (row: NoteSheetRecord) => {
     const label = row.noteSheetNo || row.referenceNumber || "this note sheet"
@@ -510,6 +552,7 @@ export default function NoteSheetPage() {
     setDateFrom("")
     setDateTo("")
     setSearch("")
+    setPage(1)
   }
 
   const filtersActive = period !== "all" || statusFilter !== "all" || Boolean(search.trim())
@@ -666,10 +709,10 @@ export default function NoteSheetPage() {
               <Table className="min-w-[820px] table-fixed">
                 <TableHeader>
                   <TableRow className="border-b bg-slate-50/90 hover:bg-slate-50/90">
-                    <TableHead className="sticky left-0 z-20 w-10 bg-slate-50/95 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      #
+                    <TableHead className="sticky left-0 z-20 w-12 bg-slate-50/95 px-1.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Sr. No
                     </TableHead>
-                    <TableHead className="sticky left-10 z-20 w-[10.5rem] bg-slate-50/95 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <TableHead className="sticky left-12 z-20 w-[10.5rem] bg-slate-50/95 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Note Sheet No.
                     </TableHead>
                     <TableHead className="w-[12rem] max-w-[14rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -709,15 +752,15 @@ export default function NoteSheetPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filtered.map((row, index) => (
+                    pageRows.map((row, index) => (
                       <TableRow
                         key={row.id}
                         className="group border-b border-slate-100 transition-colors hover:bg-sky-50/40"
                       >
-                        <TableCell className="sticky left-0 z-10 bg-card px-1.5 py-2 text-xs tabular-nums text-muted-foreground group-hover:bg-sky-50/40">
-                          {index + 1}
+                        <TableCell className="sticky left-0 z-10 bg-card px-1.5 py-2 text-center text-xs font-medium tabular-nums text-foreground group-hover:bg-sky-50/40">
+                          {pageSerial(index)}
                         </TableCell>
-                        <TableCell className="sticky left-10 z-10 bg-card px-1.5 py-2 group-hover:bg-sky-50/40">
+                        <TableCell className="sticky left-12 z-10 bg-card px-1.5 py-2 group-hover:bg-sky-50/40">
                           <button
                             type="button"
                             className="max-w-full truncate text-left font-mono text-[12px] font-semibold text-black hover:underline"
@@ -812,6 +855,77 @@ export default function NoteSheetPage() {
                 </TableBody>
               </Table>
             </div>
+
+            {filtered.length > 0 ? (
+              <div className="flex flex-col gap-3 border-t bg-slate-50/40 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Rows per page</span>
+                  <Select
+                    value={pageSize.toString()}
+                    onValueChange={(value) => {
+                      setPageSize(Number(value))
+                      setPage(1)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[72px] bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <SelectItem key={size} value={size.toString()}>
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of{" "}
+                    {filtered.length}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-1 lg:justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="h-8 w-8 bg-white p-0"
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={page === 1}
+                    className="h-8 w-8 bg-white p-0"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="px-2 text-xs tabular-nums text-muted-foreground">
+                    {page} / {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={page === totalPages}
+                    className="h-8 w-8 bg-white p-0"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages}
+                    className="h-8 w-8 bg-white p-0"
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
