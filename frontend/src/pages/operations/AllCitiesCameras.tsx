@@ -401,9 +401,9 @@ const StreamTile = memo(function StreamTile({
         "overflow-hidden rounded-lg border border-border bg-black",
         wallMode && "flex h-full min-h-0 min-w-0 flex-col rounded-md",
         wallMode && wallLayout === "1x1" && "rounded-none border-0",
-        // Shorter than the viewport so clock + exit bar are never clipped under browser chrome.
+        // True viewport cover — no white page gutters around the feed.
         isFullscreen &&
-          "fixed inset-x-0 top-4 bottom-4 z-[250] flex max-h-[calc(100dvh-2rem)] w-full flex-col border-0",
+          "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col rounded-none border-0 bg-black",
       )}
     >
       <div
@@ -1435,8 +1435,8 @@ export default function AllCitiesCamerasPage() {
       )}
 
       {wallFullscreen && visibleCameras.length > 0 && (
-        <div className="fixed inset-x-0 top-4 bottom-4 z-[250] flex max-h-[calc(100dvh-2rem)] w-full flex-col border-0 bg-black">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-2">
+        <div className="fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-black">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-black px-4 py-2">
             <p className="truncate text-sm font-medium text-white">
               All Cities Wall · {visibleCameras.length} camera
               {visibleCameras.length === 1 ? "" : "s"}
