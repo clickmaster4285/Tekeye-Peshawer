@@ -253,7 +253,7 @@ export default function EmployeeEditPage() {
         ...form,
         qualification,
         phone_primary: form.phone,
-        street_address: form.address,
+        street_address: form.address || undefined,
         date_of_joining: form.joining_date,
         emergency_contact_phone: form.emergency_contact_phone || form.emergency_contact,
         profile_image: primaryStaffPhotoFile(orderedPhotos),

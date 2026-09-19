@@ -373,17 +373,18 @@ export default function AddStaffPage() {
       const last_name = nameParts.slice(1).join(" ") || ""
 
       const orderedPhotos = photosOrderedForProfile(staffPhotos, profilePhotoIndex)
+      const address = (form.address || "").trim()
       const payload: any = {
         ...form,
         first_name,
         last_name,
-        national_id: form.cnic,
-        street_address: form.address,
-        date_of_joining: form.joining_date,
-        emergency_contact_phone: form.emergency_contact_phone || form.emergency_contact,
-        emergency_contact_name: form.emergency_contact_name || (form.full_name ? `${form.full_name} Contact` : ""),
-        emergency_contact_relationship: form.emergency_contact_relationship,
-        emergency_contact_address: form.emergency_contact_address,
+        national_id: form.cnic || undefined,
+        ...(address ? { address, street_address: address } : { address: undefined, street_address: undefined }),
+        date_of_joining: form.joining_date || undefined,
+        emergency_contact_phone: form.emergency_contact_phone || form.emergency_contact || undefined,
+        emergency_contact_name: form.emergency_contact_name || undefined,
+        emergency_contact_relationship: form.emergency_contact_relationship || undefined,
+        emergency_contact_address: form.emergency_contact_address || undefined,
         profile_image: primaryStaffPhotoFile(orderedPhotos),
         profile_from_keep: profileIsExistingPath(staffPhotos, profilePhotoIndex),
         staff_photos: newStaffPhotoFiles(orderedPhotos),

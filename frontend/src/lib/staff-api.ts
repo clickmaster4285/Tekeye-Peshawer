@@ -660,7 +660,7 @@ export async function downloadStaffDocument(
   throw new Error("Document download is not available in local-only mode.");
 }
 
-/** Full HR template payload accepted by backend. */
+/** Full HR template payload accepted by backend. Only full_name is required. */
 export type CreateStaffPayload = {
   // Common fields
   full_name: string;
@@ -671,15 +671,15 @@ export type CreateStaffPayload = {
   phone?: string;
   phone_primary?: string;
   phone_alternate?: string;
-  cnic: string;
+  cnic?: string;
   national_id?: string;
-  address: string;
+  address?: string;
   street_address?: string;
   city?: string;
   state?: string;
   country?: string;
   postal_code?: string;
-  date_of_birth: string;
+  date_of_birth?: string;
   gender?: string;
   marital_status?: string;
   blood_group?: string;
@@ -687,9 +687,9 @@ export type CreateStaffPayload = {
   // Employment
   employee_id?: string;
   personal_number?: string;
-  designation: string;
-  department: string;
-  joining_date: string;
+  designation?: string;
+  department?: string;
+  joining_date?: string;
   date_of_joining?: string;
   employment_type?: string;
   job_status?: string;
@@ -706,7 +706,7 @@ export type CreateStaffPayload = {
   username?: string;
   login_username?: string;
   password?: string;
-  role: string;
+  role?: string;
   location?: string;
   role_access_level?: string;
   system_permissions?: string;
@@ -721,7 +721,7 @@ export type CreateStaffPayload = {
   allowances?: string;
 
   // Emergency & Misc
-  emergency_contact: string;
+  emergency_contact?: string;
   emergency_contact_name?: string;
   emergency_contact_relationship?: string;
   emergency_contact_phone?: string;

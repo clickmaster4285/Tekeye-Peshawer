@@ -367,13 +367,15 @@ class StaffSerializer(serializers.ModelSerializer):
 # Accepts full HR template payload; maps first_name+last_name -> full_name, national_id -> cnic, etc.
 # -----------------------------
 class StaffCreateSerializer(serializers.ModelSerializer):
-    first_name = serializers.CharField(required=False, write_only=True)
-    last_name = serializers.CharField(required=False, write_only=True)
-    national_id = serializers.CharField(required=False, write_only=True)
-    street_address = serializers.CharField(required=False, write_only=True)
-    emergency_contact_phone = serializers.CharField(required=False, write_only=True)
-    emergency_contact_name = serializers.CharField(required=False, write_only=True)
-    date_of_joining = serializers.DateField(required=False, write_only=True)
+    """Create staff. Only full_name is required; address and all other fields are optional."""
+
+    first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    last_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    national_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    street_address = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    emergency_contact_phone = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    emergency_contact_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
+    date_of_joining = serializers.DateField(required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = Staff
@@ -409,13 +411,20 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
         extra_kwargs = {
             "user": {"read_only": True},
-            "full_name": {"required": False},
-            "cnic": {"required": False},
-            "address": {"required": False},
-            "emergency_contact": {"required": False},
-            "joining_date": {"required": False},
-            "department": {"required": False},
-            "designation": {"required": False},
+            "full_name": {"required": False, "allow_blank": True},
+            "cnic": {"required": False, "allow_null": True, "allow_blank": True},
+            "address": {"required": False, "allow_null": True, "allow_blank": True},
+            "city": {"required": False, "allow_null": True, "allow_blank": True},
+            "state": {"required": False, "allow_null": True, "allow_blank": True},
+            "country": {"required": False, "allow_null": True, "allow_blank": True},
+            "postal_code": {"required": False, "allow_null": True, "allow_blank": True},
+            "emergency_contact": {"required": False, "allow_null": True, "allow_blank": True},
+            "joining_date": {"required": False, "allow_null": True},
+            "date_of_birth": {"required": False, "allow_null": True},
+            "department": {"required": False, "allow_null": True, "allow_blank": True},
+            "designation": {"required": False, "allow_null": True, "allow_blank": True},
+            "email": {"required": False, "allow_null": True, "allow_blank": True},
+            "phone_primary": {"required": False, "allow_null": True, "allow_blank": True},
         }
 
     def to_representation(self, instance):
@@ -431,6 +440,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
     def validate(self, data):
         initial = self.initial_data
 
+        # Only employee name is compulsory.
         full_name = data.get("full_name")
         if not full_name:
             first = (initial.get("first_name") or data.get("first_name") or "").strip()
@@ -444,6 +454,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         data["first_name"] = (initial.get("first_name") or data.get("first_name") or "").strip()[:80] or None
         data["last_name"] = (initial.get("last_name") or data.get("last_name") or "").strip()[:80] or None
 
+        # Address is optional — never require street_address / city / state / country.
         address = data.get("address") or initial.get("street_address") or initial.get("address")
         if not address:
             parts = [initial.get("city"), initial.get("state"), initial.get("country"), initial.get("postal_code")]
