@@ -17,8 +17,13 @@ const GOLD = "#b8860b"
 const MUTED = "#5b6b7c"
 const LINE = "#d8dee6"
 const SOFT = "#f4f7fb"
-const ROWS_FIRST_PAGE = 18
-const ROWS_NEXT_PAGE = 28
+const ROW_ALT = "#f8fafc"
+const MOVING = "#166534"
+const MOVING_BG = "#dcfce7"
+const STILL = "#475569"
+const STILL_BG = "#f1f5f9"
+const ROWS_FIRST_PAGE = 16
+const ROWS_NEXT_PAGE = 26
 
 function absoluteAssetUrl(path: string): string {
   if (typeof window === "undefined") return path
@@ -49,6 +54,20 @@ function formatPointDate(iso: string | null | undefined): string {
   } catch {
     return "—"
   }
+}
+
+function formatCoords(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+}
+
+function statusBadge(status: string | null | undefined): { label: string; color: string; bg: string } {
+  const raw = (status || "").trim()
+  const low = raw.toLowerCase()
+  if (low.includes("mov")) return { label: raw || "Moving", color: MOVING, bg: MOVING_BG }
+  if (low.includes("station") || low.includes("still")) {
+    return { label: raw || "Stationary", color: STILL, bg: STILL_BG }
+  }
+  return { label: raw || "—", color: MUTED, bg: SOFT }
 }
 
 type GpsPdfReportProps = {
@@ -95,21 +114,23 @@ export function GpsPdfReport({
 
   const thStyle: CSSProperties = {
     textAlign: "left",
-    fontSize: "9px",
+    fontSize: "8px",
     fontFamily: "Arial, Helvetica, sans-serif",
     textTransform: "uppercase",
-    letterSpacing: "0.06em",
-    color: MUTED,
-    borderBottom: `1px solid ${LINE}`,
-    padding: "5px 4px",
+    letterSpacing: "0.05em",
+    color: "#fff",
+    background: NAVY,
+    borderBottom: `1px solid ${NAVY}`,
+    padding: "3.2mm 2mm",
     fontWeight: 700,
   }
   const tdStyle: CSSProperties = {
-    fontSize: "10px",
+    fontSize: "9px",
     fontFamily: "Arial, Helvetica, sans-serif",
     borderBottom: `1px solid ${LINE}`,
-    padding: "5px 4px",
-    verticalAlign: "top",
+    padding: "2.6mm 2mm",
+    verticalAlign: "middle",
+    color: "#1a2332",
   }
 
   return (
@@ -122,7 +143,7 @@ export function GpsPdfReport({
         width: "210mm",
         background: "#fff",
         color: "#142033",
-        fontFamily: "Georgia, 'Times New Roman', Times, serif",
+        fontFamily: "Arial, Helvetica, sans-serif",
       }}
       aria-hidden
     >
@@ -148,7 +169,7 @@ export function GpsPdfReport({
             style={{
               background: NAVY,
               color: "#fff",
-              padding: "8mm 12mm 7mm",
+              padding: "7mm 11mm 6mm",
               flexShrink: 0,
             }}
           >
@@ -160,14 +181,14 @@ export function GpsPdfReport({
                 gap: "14px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "11px", minWidth: 0 }}>
                 <div
                   style={{
-                    width: "16mm",
-                    height: "16mm",
+                    width: "14mm",
+                    height: "14mm",
                     background: "#fff",
-                    borderRadius: "3px",
-                    padding: "2mm",
+                    borderRadius: "2px",
+                    padding: "1.5mm",
                     boxSizing: "border-box",
                     flexShrink: 0,
                     display: "flex",
@@ -186,46 +207,37 @@ export function GpsPdfReport({
                   <p
                     style={{
                       margin: 0,
-                      fontSize: "11px",
-                      letterSpacing: "0.22em",
+                      fontSize: "10px",
+                      letterSpacing: "0.18em",
                       textTransform: "uppercase",
                       color: GOLD,
-                      fontFamily: "Arial, Helvetica, sans-serif",
                       fontWeight: 700,
                     }}
                   >
-                    CIIS
+                    Customs · TekEye
                   </p>
                   <h1
                     style={{
-                      margin: "3px 0 0",
-                      fontSize: "19px",
+                      margin: "2px 0 0",
+                      fontSize: "17px",
                       fontWeight: 700,
-                      letterSpacing: "0.02em",
-                      lineHeight: 1.2,
+                      letterSpacing: "0.01em",
+                      lineHeight: 1.25,
                     }}
                   >
-                    {name} — GPS Location Report
+                    Staff GPS Location Report
                   </h1>
-                  <p
-                    style={{
-                      margin: "4px 0 0",
-                      fontSize: "10px",
-                      color: "#d7e2f0",
-                      fontFamily: "Arial, Helvetica, sans-serif",
-                    }}
-                  >
-                    Operations · {periodText}
+                  <p style={{ margin: "3px 0 0", fontSize: "10px", color: "#d7e2f0" }}>
+                    {name} · {periodText}
                   </p>
                 </div>
               </div>
               <div
                 style={{
                   textAlign: "right",
-                  fontFamily: "Arial, Helvetica, sans-serif",
-                  fontSize: "10px",
+                  fontSize: "9px",
                   color: "#c5d4e8",
-                  lineHeight: 1.5,
+                  lineHeight: 1.55,
                   flexShrink: 0,
                 }}
               >
@@ -235,13 +247,13 @@ export function GpsPdfReport({
                 <div>Generated {generatedAt}</div>
               </div>
             </div>
-            <div style={{ marginTop: "7px", height: "3px", background: GOLD, width: "48px" }} />
+            <div style={{ marginTop: "6px", height: "2.5px", background: GOLD, width: "42px" }} />
           </div>
 
           <div
             style={{
               flex: 1,
-              padding: "8mm 12mm 10mm",
+              padding: "7mm 11mm 9mm",
               boxSizing: "border-box",
               display: "flex",
               flexDirection: "column",
@@ -252,19 +264,19 @@ export function GpsPdfReport({
               <div
                 style={{
                   display: "flex",
-                  gap: "8mm",
-                  marginBottom: "6mm",
-                  padding: "4mm",
+                  gap: "6mm",
+                  marginBottom: "5mm",
+                  padding: "3.5mm",
                   background: SOFT,
                   border: `1px solid ${LINE}`,
-                  borderRadius: "3px",
+                  borderRadius: "2px",
                 }}
               >
                 <div
                   style={{
-                    width: "28mm",
-                    height: "28mm",
-                    borderRadius: "3px",
+                    width: "24mm",
+                    height: "24mm",
+                    borderRadius: "2px",
                     overflow: "hidden",
                     background: "#fff",
                     border: `1px solid ${LINE}`,
@@ -282,79 +294,91 @@ export function GpsPdfReport({
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
                     />
                   ) : (
-                    <span
-                      style={{
-                        fontFamily: "Arial, Helvetica, sans-serif",
-                        fontSize: "14px",
-                        color: MUTED,
-                        fontWeight: 700,
-                      }}
-                    >
+                    <span style={{ fontSize: "13px", color: MUTED, fontWeight: 700 }}>
                       {(name || "?").slice(0, 2).toUpperCase()}
                     </span>
                   )}
                 </div>
-                <div style={{ flex: 1, minWidth: 0, fontFamily: "Arial, Helvetica, sans-serif", fontSize: "11px" }}>
-                  <p style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: NAVY }}>{name}</p>
-                  <p style={{ margin: "3px 0 0", color: MUTED }}>
+                <div style={{ flex: 1, minWidth: 0, fontSize: "10px" }}>
+                  <p style={{ margin: 0, fontSize: "13px", fontWeight: 700, color: NAVY }}>{name}</p>
+                  <p style={{ margin: "2px 0 0", color: MUTED }}>
                     Employee ID: {officer?.employeeId || "—"}
+                    {officer?.location ? ` · ${officer.location}` : ""}
                   </p>
-                  <p style={{ margin: "2px 0 0", color: MUTED }}>Period: {periodText}</p>
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "4px 12px",
-                      marginTop: "8px",
+                      gridTemplateColumns: "1fr 1fr 1fr",
+                      gap: "3px 10px",
+                      marginTop: "6px",
                     }}
                   >
                     <div>
-                      <span style={{ color: MUTED }}>GPS tracking</span>
-                      <div style={{ fontWeight: 600 }}>
-                        {first && last
-                          ? `${formatClock(first.recordedAt)} → ${formatClock(last.recordedAt)}`
-                          : "—"}
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Period
                       </div>
+                      <div style={{ fontWeight: 600 }}>{periodText}</div>
                     </div>
                     <div>
-                      <span style={{ color: MUTED }}>GPS points</span>
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        GPS points
+                      </div>
                       <div style={{ fontWeight: 600 }}>{shownLabel}</div>
                     </div>
                     <div>
-                      <span style={{ color: MUTED }}>Total distance</span>
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Distance
+                      </div>
                       <div style={{ fontWeight: 600 }}>{distanceKm.toFixed(2)} km</div>
                     </div>
                     <div>
-                      <span style={{ color: MUTED }}>First / Last</span>
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        First fix
+                      </div>
+                      <div style={{ fontWeight: 600 }}>{formatClock(first?.recordedAt)}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Last fix
+                      </div>
+                      <div style={{ fontWeight: 600 }}>{formatClock(last?.recordedAt)}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: MUTED, fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Tracking window
+                      </div>
                       <div style={{ fontWeight: 600 }}>
-                        {formatClock(first?.recordedAt)} / {formatClock(last?.recordedAt)}
+                        {first && last
+                          ? `${formatClock(first.recordedAt)} – ${formatClock(last.recordedAt)}`
+                          : "—"}
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <p
-                style={{
-                  margin: "0 0 4mm",
-                  fontFamily: "Arial, Helvetica, sans-serif",
-                  fontSize: "11px",
-                  color: MUTED,
-                }}
-              >
+              <p style={{ margin: "0 0 3.5mm", fontSize: "10px", color: MUTED }}>
                 Continued — {name} · {periodText}
               </p>
             )}
 
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                {showDateCol ? <col style={{ width: "14%" }} /> : null}
+                <col style={{ width: showDateCol ? "12%" : "14%" }} />
+                <col style={{ width: showDateCol ? "42%" : "48%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "11%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   {showDateCol ? <th style={thStyle}>Date</th> : null}
                   <th style={thStyle}>Time</th>
                   <th style={thStyle}>Location</th>
-                  <th style={thStyle}>Map link</th>
-                  <th style={thStyle}>Accuracy</th>
-                  <th style={thStyle}>Status</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Map</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Acc.</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,23 +398,71 @@ export function GpsPdfReport({
                     })
                     const mapUrl =
                       point.mapsUrl || mapsLinkForCoords(point.latitude, point.longitude)
+                    const badge = statusBadge(point.status)
+                    const rowBg = idx % 2 === 1 ? ROW_ALT : "#fff"
                     return (
-                    <tr key={`${point.recordedAt}-${idx}`}>
-                      {showDateCol ? (
-                        <td style={tdStyle}>{formatPointDate(point.recordedAt)}</td>
-                      ) : null}
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>
-                        {formatClockWithSeconds(point.recordedAt)}
-                      </td>
-                      <td style={tdStyle}>{place}</td>
-                      <td style={{ ...tdStyle, fontSize: "8px", color: "#155DFC", wordBreak: "break-all" }}>
-                        {mapUrl}
-                      </td>
-                      <td style={tdStyle}>
-                        {point.accuracy != null ? `${Math.round(point.accuracy)} m` : "—"}
-                      </td>
-                      <td style={tdStyle}>{point.status ?? "—"}</td>
-                    </tr>
+                      <tr key={`${point.recordedAt}-${idx}`} style={{ background: rowBg }}>
+                        {showDateCol ? (
+                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                            {formatPointDate(point.recordedAt)}
+                          </td>
+                        ) : null}
+                        <td style={{ ...tdStyle, fontWeight: 700, whiteSpace: "nowrap", fontSize: "8.5px" }}>
+                          {formatClockWithSeconds(point.recordedAt)}
+                        </td>
+                        <td style={tdStyle}>
+                          <div style={{ fontWeight: 600, lineHeight: 1.35 }}>{place}</div>
+                          <div style={{ marginTop: "1px", fontSize: "7.5px", color: MUTED, fontWeight: 400 }}>
+                            {formatCoords(point.latitude, point.longitude)}
+                          </div>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          {mapUrl ? (
+                            <a
+                              href={mapUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: "inline-block",
+                                padding: "1.2mm 2.2mm",
+                                borderRadius: "2px",
+                                background: "#eff6ff",
+                                border: "1px solid #bfdbfe",
+                                color: "#1d4ed8",
+                                fontSize: "8px",
+                                fontWeight: 700,
+                                textDecoration: "none",
+                                letterSpacing: "0.02em",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              View map
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center", whiteSpace: "nowrap" }}>
+                          {point.accuracy != null ? `${Math.round(point.accuracy)} m` : "—"}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "1mm 2mm",
+                              borderRadius: "2px",
+                              background: badge.bg,
+                              color: badge.color,
+                              fontSize: "7.5px",
+                              fontWeight: 700,
+                              letterSpacing: "0.02em",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {badge.label}
+                          </span>
+                        </td>
+                      </tr>
                     )
                   })
                 )}
@@ -401,16 +473,18 @@ export function GpsPdfReport({
               <div
                 style={{
                   marginTop: "auto",
-                  paddingTop: "5mm",
+                  paddingTop: "4mm",
                   borderTop: `1px solid ${LINE}`,
-                  fontFamily: "Arial, Helvetica, sans-serif",
-                  fontSize: "10px",
+                  fontSize: "9px",
                   color: MUTED,
+                  lineHeight: 1.45,
                 }}
               >
-                Summary — Employee {name}; GPS points {shownLabel}; Distance {distanceKm.toFixed(2)}{" "}
-                km; First {formatReportDate(first?.recordedAt?.slice(0, 10) || anchorDate)}{" "}
-                {formatClock(first?.recordedAt)}; Last {formatClock(last?.recordedAt)}.
+                <strong style={{ color: NAVY }}>Summary</strong> — {name}; {shownLabel}; distance{" "}
+                {distanceKm.toFixed(2)} km; first{" "}
+                {formatReportDate(first?.recordedAt?.slice(0, 10) || anchorDate)}{" "}
+                {formatClock(first?.recordedAt)}; last {formatClock(last?.recordedAt)}. Map buttons open
+                Google Maps at the recorded coordinates.
               </div>
             ) : null}
           </div>
@@ -438,6 +512,7 @@ export async function downloadGpsPdf(element: HTMLElement, filename: string): Pr
       `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         html,body{margin:0;padding:0;background:#fff;color:#111;}
         *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+        a{color:inherit;}
       </style></head><body></body></html>`
     )
     idoc.close()
@@ -470,6 +545,18 @@ export async function downloadGpsPdf(element: HTMLElement, filename: string): Pr
       )
       await new Promise((r) => setTimeout(r, 60))
 
+      const pageRect = clone.getBoundingClientRect()
+      const linkRects = Array.from(clone.querySelectorAll<HTMLAnchorElement>("a[href]")).map((a) => {
+        const r = a.getBoundingClientRect()
+        return {
+          url: a.href,
+          x: r.left - pageRect.left,
+          y: r.top - pageRect.top,
+          w: r.width,
+          h: r.height,
+        }
+      })
+
       const canvas = await html2canvas(clone, {
         scale: 2,
         useCORS: true,
@@ -484,6 +571,13 @@ export async function downloadGpsPdf(element: HTMLElement, filename: string): Pr
       const imgData = canvas.toDataURL("image/jpeg", 0.96)
       if (i > 0) pdf.addPage()
       pdf.addImage(imgData, "JPEG", 0, 0, pageW, pageH, undefined, "FAST")
+
+      const sx = pageW / Math.max(1, clone.offsetWidth)
+      const sy = pageH / Math.max(1, clone.offsetHeight)
+      for (const link of linkRects) {
+        if (!link.url || link.w < 1 || link.h < 1) continue
+        pdf.link(link.x * sx, link.y * sy, link.w * sx, link.h * sy, { url: link.url })
+      }
     }
 
     pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`)
