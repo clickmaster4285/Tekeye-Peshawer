@@ -564,7 +564,22 @@ export type StaffLoginPreview = {
   role_required: boolean;
   location_required: boolean;
   already_linked: boolean;
+  default_password?: string;
 };
+
+/** Muhammad Sheharyar Khan → muhammad.sheharyar.khan */
+export function usernameFromFullName(raw: string | null | undefined): string {
+  return (raw || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 60);
+}
+
+export const DEFAULT_STAFF_LOGIN_PASSWORD = "123456";
 
 export async function fetchUnlinkedEmployees(search = ""): Promise<StaffRecord[]> {
   const q = search.trim()

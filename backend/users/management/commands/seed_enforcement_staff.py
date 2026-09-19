@@ -74,13 +74,19 @@ class Command(BaseCommand):
         parser.add_argument(
             "--create-logins",
             action="store_true",
-            help="Also create inactive login users (username = employee_id)",
+            default=True,
+            help="Create login users (username from full name with dots; default on)",
+        )
+        parser.add_argument(
+            "--no-create-logins",
+            action="store_true",
+            help="Skip creating login users",
         )
         parser.add_argument(
             "--default-password",
             type=str,
-            default="ChangeMe@123",
-            help="Password for --create-logins (default: ChangeMe@123)",
+            default="123456",
+            help="Password for created logins (default: 123456)",
         )
 
     def handle(self, *args, **options):
@@ -94,8 +100,8 @@ class Command(BaseCommand):
 
         dry = bool(options["dry_run"])
         do_update = bool(options["update"])
-        create_logins = bool(options["create_logins"])
-        password = options["default_password"]
+        create_logins = bool(options["create_logins"]) and not bool(options["no_create_logins"])
+        password = options["default_password"] or "123456"
 
         created = updated = skipped = logins = 0
 
@@ -173,19 +179,27 @@ class Command(BaseCommand):
                     created += 1
 
                 if create_logins and not dry and staff.user_id is None:
-                    username = (employee_id or f"staff{(cnic or employee_id or 'x')[-6:]}").lower()
-                    if not User.objects.filter(username=username).exists():
+                    from users.staff_login import unique_employee_login_id
+
+                    username = unique_employee_login_id(staff)
+                    if not User.objects.filter(username__iexact=username).exists():
                         phone = payload.get("phone_primary") or "03000000000"
+                        desig = (payload.get("designation") or "").strip()
+                        role = "GUARD"
+                        if desig.upper() in {"HAVILDAR", "HAVALDAR"}:
+                            role = "GUARD"
+                        elif "LDC" in desig.upper():
+                            role = "RECEPTIONIST"
                         user = User.objects.create_user(
                             username=username,
                             password=password,
-                            email=f"{username}@tekeye.local",
-                            role="GUARD",
+                            email=f"{username}@ciis.local",
+                            role=role,
                             phone=phone,
                             full_name=full_name,
                             cnic=cnic or "",
                             cell_no=phone,
-                            designation=payload["designation"] or "",
+                            designation=desig,
                             employee_id=employee_id or "",
                             location="PESHAWAR",
                             collectorate="Peshawar (Head Office)",

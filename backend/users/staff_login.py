@@ -30,8 +30,19 @@ def _slug(raw: str | None) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", (raw or "").strip()).upper()[:40]
 
 
+def username_from_full_name(raw: str | None) -> str:
+    """Muhammad Sheharyar Khan → muhammad.sheharyar.khan"""
+    text = (raw or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", ".", text)
+    text = re.sub(r"\.+", ".", text).strip(".")
+    return text[:60]
+
+
 def normalize_login_id(raw: str | None) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "", (raw or "").strip()).upper()[:40]
+    text = (raw or "").strip().lower()
+    text = re.sub(r"[^a-z0-9._-]+", "", text)
+    text = re.sub(r"\.+", ".", text).strip(".-_")
+    return text[:60]
 
 
 def infer_staff_role(staff: Staff) -> str | None:
@@ -67,15 +78,15 @@ def infer_staff_location(staff: Staff) -> str | None:
 
 
 def unique_employee_login_id(staff: Staff) -> str:
-    """Prefer a name-based username (e.g. UMARFAROOQ); fall back to employee id then EMP0001."""
+    """Prefer dotted lowercase name (muhammad.ali); fall back to employee id then emp0001."""
     bases: list[str] = []
-    name = _slug(staff.full_name)
+    name = username_from_full_name(staff.full_name)
     if name:
         bases.append(name)
-    emp_id = _slug(staff.employee_id)
+    emp_id = normalize_login_id(staff.employee_id)
     if emp_id and emp_id not in bases:
         bases.append(emp_id)
-    bases.append(f"EMP{staff.pk:04d}")
+    bases.append(f"emp{staff.pk:04d}")
     for base in bases:
         n = 0
         while True:
@@ -89,11 +100,14 @@ def unique_employee_login_id(staff: Staff) -> str:
             n += 1
 
 
+DEFAULT_STAFF_LOGIN_PASSWORD = "123456"
+
+
 def staff_login_preview(staff: Staff) -> dict:
     login_id = unique_employee_login_id(staff)
     role = infer_staff_role(staff)
-    location = infer_staff_location(staff)
-    email = (staff.email or "").strip() or f"{login_id.lower()}@ciis.local"
+    location = infer_staff_location(staff) or "PESHAWAR"
+    email = (staff.email or "").strip() or f"{login_id}@ciis.local"
     return {
         "staff_id": staff.pk,
         "staff_name": staff.full_name,
@@ -105,6 +119,7 @@ def staff_login_preview(staff: Staff) -> dict:
         "role": role,
         "location": location,
         "role_required": not bool(role),
-        "location_required": (role or "INSPECTOR") != "ADMIN" and not bool(location),
+        "location_required": (role or "GUARD") != "ADMIN" and not bool(infer_staff_location(staff)),
         "already_linked": bool(staff.user_id),
+        "default_password": DEFAULT_STAFF_LOGIN_PASSWORD,
     }

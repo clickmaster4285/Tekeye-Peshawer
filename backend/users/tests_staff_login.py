@@ -41,7 +41,7 @@ class StaffLoginLinkTests(TestCase):
 
     def test_unique_id_prefers_name(self):
         staff = _staff(personal_number="PN-7788", employee_id="E99", full_name="Umar Farooq")
-        self.assertEqual(unique_employee_login_id(staff), "UMARFAROOQ")
+        self.assertEqual(unique_employee_login_id(staff), "umar.farooq")
 
     def test_designation_maps_to_role(self):
         staff = _staff(designation="Deputy Collector", role_access_level=None)
@@ -55,7 +55,8 @@ class StaffLoginLinkTests(TestCase):
         )
         preview = self.client.get(f"/api/staff/{staff.id}/login-preview/")
         self.assertEqual(preview.status_code, 200, preview.content)
-        self.assertEqual(preview.data["username"], "AHMEDKHAN")
+        self.assertEqual(preview.data["username"], "ahmed.khan")
+        self.assertEqual(preview.data.get("default_password"), "123456")
         self.assertFalse(preview.data["role_required"])
         self.assertFalse(preview.data["location_required"])
 
@@ -65,9 +66,9 @@ class StaffLoginLinkTests(TestCase):
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)
-        self.assertEqual(created.data["login_id"], "AHMEDKHAN")
+        self.assertEqual(created.data["login_id"], "ahmed.khan")
         staff.refresh_from_db()
-        self.assertEqual(staff.user.username, "AHMEDKHAN")
+        self.assertEqual(staff.user.username, "ahmed.khan")
         self.assertEqual(staff.user.role, "INSPECTOR")
         self.assertEqual(staff.user.location, "PESHAWAR")
 
@@ -103,7 +104,7 @@ class StaffLoginLinkTests(TestCase):
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)
-        self.assertEqual(created.data["login_id"], "UMAR.FAROOQ")
+        self.assertEqual(created.data["login_id"], "umar.farooq")
 
     def test_unlinked_list_excludes_linked_staff(self):
         linked_user = User.objects.create_user(

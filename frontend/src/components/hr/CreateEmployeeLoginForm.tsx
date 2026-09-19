@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react"
+import { Check, ChevronsUpDown, Copy, Eye, EyeOff, KeyRound, Loader2, Search, UserRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,16 +20,18 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DEFAULT_STAFF_LOGIN_PASSWORD,
   createStaffUser,
   fetchStaffLoginPreview,
-  fetchUnlinkedEmployees,
+  usernameFromFullName,
   type StaffLoginPreview,
+  fetchUnlinkedEmployees,
 } from "@/lib/staff-api"
 import { cn } from "@/lib/utils"
 import { LOCATION_OPTIONS, ROLE_OPTIONS } from "@/lib/users-api"
 
 function slugLoginId(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9._-]+/g, "").toUpperCase().slice(0, 40)
+  return usernameFromFullName(raw) || raw.toLowerCase().replace(/[^a-z0-9._-]+/g, ".").replace(/\.+/g, ".").replace(/^\.+|\.+$/g, "").slice(0, 60)
 }
 
 export function CreateEmployeeLoginForm({
@@ -44,11 +46,14 @@ export function CreateEmployeeLoginForm({
   onCancel?: () => void
 }) {
   const [selectedId, setSelectedId] = useState<number | undefined>(staffId)
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState(DEFAULT_STAFF_LOGIN_PASSWORD)
+  const [showPassword, setShowPassword] = useState(true)
   const [role, setRole] = useState("")
   const [location, setLocation] = useState("")
   const [username, setUsername] = useState("")
   const [usernameEdited, setUsernameEdited] = useState(false)
+  const [passwordEdited, setPasswordEdited] = useState(false)
+  const [copied, setCopied] = useState<"user" | "pass" | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -58,6 +63,7 @@ export function CreateEmployeeLoginForm({
   useEffect(() => {
     setSelectedId(staffId)
     setUsernameEdited(false)
+    setPasswordEdited(false)
   }, [staffId])
 
   useEffect(() => {
@@ -81,11 +87,17 @@ export function CreateEmployeeLoginForm({
   const preview: StaffLoginPreview | undefined = previewQuery.data
   const showRole = Boolean(preview?.role_required)
   const showLocation = Boolean(preview?.location_required) || (showRole && role !== "ADMIN" && role !== "")
+  const defaultPassword = preview?.default_password || DEFAULT_STAFF_LOGIN_PASSWORD
 
   useEffect(() => {
     if (!preview?.username || usernameEdited) return
     setUsername(preview.username)
   }, [preview?.username, usernameEdited])
+
+  useEffect(() => {
+    if (!preview || passwordEdited) return
+    setPassword(defaultPassword)
+  }, [preview, defaultPassword, passwordEdited])
 
   const employeeOptions = useMemo(() => {
     const rows = (employeesQuery.data ?? []).slice(0, 50)
@@ -100,6 +112,16 @@ export function CreateEmployeeLoginForm({
     || preview?.staff_name
     || (selectedId ? `Employee #${selectedId}` : "")
 
+  async function copyValue(kind: "user" | "pass", value: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(kind)
+      window.setTimeout(() => setCopied(null), 1500)
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function submit() {
     setError(null)
     if (!selectedId) {
@@ -108,7 +130,7 @@ export function CreateEmployeeLoginForm({
     }
     const loginId = slugLoginId(username)
     if (loginId.length < 3) {
-      setError("User ID must be at least 3 letters or numbers, based on the employee name.")
+      setError("User ID must be at least 3 characters (e.g. first.last).")
       return
     }
     if (password.length < 6) {
@@ -140,7 +162,7 @@ export function CreateEmployeeLoginForm({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {allowSelectEmployee ? (
         <div className="space-y-2">
           <Label>Search employee</Label>
@@ -193,6 +215,7 @@ export function CreateEmployeeLoginForm({
                               setRole("")
                               setLocation("")
                               setUsernameEdited(false)
+                              setPasswordEdited(false)
                               setPickerOpen(false)
                             }}
                           >
@@ -213,64 +236,129 @@ export function CreateEmployeeLoginForm({
       {previewQuery.isLoading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Generating user ID from name…
+          Preparing login credentials…
         </p>
       ) : null}
 
       {preview?.already_linked ? (
-        <p className="text-sm text-amber-700">This employee already has a linked user account.</p>
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          This employee already has a linked user account.
+        </p>
       ) : null}
 
       {preview && !preview.already_linked ? (
         <>
-          <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1">
-            <p><span className="text-muted-foreground">Name:</span> {preview.staff_name}</p>
-            {preview.designation ? (
-              <p><span className="text-muted-foreground">Designation:</span> {preview.designation}</p>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="emp-login-username">User ID *</Label>
-              {usernameEdited && preview.username ? (
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:underline"
-                  onClick={() => {
-                    setUsername(preview.username)
-                    setUsernameEdited(false)
-                  }}
-                >
-                  Reset to name
-                </button>
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-300">Login credentials</p>
+              <p className="mt-0.5 text-sm font-medium">{preview.staff_name}</p>
+              {preview.designation ? (
+                <p className="text-xs text-slate-400">{preview.designation}</p>
               ) : null}
             </div>
-            <Input
-              id="emp-login-username"
-              value={username}
-              onChange={(e) => {
-                setUsername(slugLoginId(e.target.value))
-                setUsernameEdited(true)
-              }}
-              placeholder="Generated from employee name"
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              Suggested from the employee name (e.g. Umar Farooq → UMARFAROOQ). You can edit it before creating the login.
-            </p>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="emp-login-password">Password *</Label>
-            <Input
-              id="emp-login-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Minimum 6 characters"
-              autoComplete="new-password"
-            />
+            <div className="grid gap-4 p-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="emp-login-username" className="flex items-center gap-1.5 text-slate-700">
+                    <UserRound className="h-3.5 w-3.5" />
+                    Username
+                  </Label>
+                  {usernameEdited && preview.username ? (
+                    <button
+                      type="button"
+                      className="text-xs text-[#3366FF] hover:underline"
+                      onClick={() => {
+                        setUsername(preview.username)
+                        setUsernameEdited(false)
+                      }}
+                    >
+                      Reset
+                    </button>
+                  ) : null}
+                </div>
+                <div className="relative">
+                  <Input
+                    id="emp-login-username"
+                    value={username}
+                    onChange={(e) => {
+                      setUsername(slugLoginId(e.target.value))
+                      setUsernameEdited(true)
+                    }}
+                    placeholder="first.last"
+                    autoComplete="off"
+                    className="h-11 border-slate-200 bg-white pr-10 font-mono text-sm tracking-wide"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    onClick={() => void copyValue("user", username)}
+                    title="Copy username"
+                  >
+                    {copied === "user" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  From full name with dots — e.g. Umar Farooq → <span className="font-mono">umar.farooq</span>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="emp-login-password" className="flex items-center gap-1.5 text-slate-700">
+                    <KeyRound className="h-3.5 w-3.5" />
+                    Password
+                  </Label>
+                  {passwordEdited && password !== defaultPassword ? (
+                    <button
+                      type="button"
+                      className="text-xs text-[#3366FF] hover:underline"
+                      onClick={() => {
+                        setPassword(defaultPassword)
+                        setPasswordEdited(false)
+                      }}
+                    >
+                      Use default
+                    </button>
+                  ) : null}
+                </div>
+                <div className="relative">
+                  <Input
+                    id="emp-login-password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value)
+                      setPasswordEdited(true)
+                    }}
+                    placeholder={DEFAULT_STAFF_LOGIN_PASSWORD}
+                    autoComplete="new-password"
+                    className="h-11 border-slate-200 bg-white pr-20 font-mono text-sm tracking-widest"
+                  />
+                  <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                    <button
+                      type="button"
+                      className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={() => setShowPassword((v) => !v)}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={() => void copyValue("pass", password)}
+                      title="Copy password"
+                    >
+                      {copied === "pass" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Default temporary password is <span className="font-mono font-medium text-slate-700">{defaultPassword}</span> (shown so you can share it with the employee).
+                </p>
+              </div>
+            </div>
           </div>
 
           {showRole ? (

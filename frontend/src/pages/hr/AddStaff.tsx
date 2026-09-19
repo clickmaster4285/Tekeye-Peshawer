@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
-import { createStaff, type CreateStaffPayload } from "@/lib/staff-api"
+import { createStaff, usernameFromFullName, type CreateStaffPayload } from "@/lib/staff-api"
 import { ROUTES } from "@/routes/config"
 import { StaffStepIndicator } from "@/components/hr/add-staff/staff-step-indicator"
 import { AddStaffStep1PersonalInfo } from "@/components/hr/add-staff/step1-personal-info"
@@ -519,7 +519,10 @@ export default function AddStaffPage() {
                 formEl?.requestSubmit()
               }}
               submitting={submitting}
-              generatedLoginId={(form.personal_number || form.employee_id || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase()}
+              generatedLoginId={
+                usernameFromFullName(form.full_name)
+                || usernameFromFullName(form.personal_number || form.employee_id || "")
+              }
             />
           )}
               </div>

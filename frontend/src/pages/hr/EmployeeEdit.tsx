@@ -8,6 +8,7 @@ import {
   resolveStaffMediaUrl,
   resolveStaffPhotoGallery,
   updateStaff,
+  usernameFromFullName,
   type CreateStaffPayload,
   type StaffRecord,
 } from "@/lib/staff-api"
@@ -415,7 +416,10 @@ export default function EmployeeEditPage() {
               submitting={submitting}
               mode="edit"
               hasExistingLogin={hasExistingLogin}
-              generatedLoginId={(form.personal_number || form.employee_id || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase()}
+              generatedLoginId={
+                usernameFromFullName(form.full_name)
+                || usernameFromFullName(form.personal_number || form.employee_id || "")
+              }
             />
           )}
         </div>
