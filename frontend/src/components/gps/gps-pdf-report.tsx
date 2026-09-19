@@ -8,6 +8,7 @@ import {
   formatClockWithSeconds,
   formatReportDate,
   gpsPeriodLabel,
+  mapsLinkForCoords,
   trailDistanceKm,
 } from "@/lib/gps-utils"
 
@@ -351,8 +352,7 @@ export function GpsPdfReport({
                   {showDateCol ? <th style={thStyle}>Date</th> : null}
                   <th style={thStyle}>Time</th>
                   <th style={thStyle}>Location</th>
-                  <th style={thStyle}>Latitude</th>
-                  <th style={thStyle}>Longitude</th>
+                  <th style={thStyle}>Map link</th>
                   <th style={thStyle}>Accuracy</th>
                   <th style={thStyle}>Status</th>
                 </tr>
@@ -361,14 +361,17 @@ export function GpsPdfReport({
                 {pageRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={showDateCol ? 7 : 6}
+                      colSpan={showDateCol ? 6 : 5}
                       style={{ ...tdStyle, textAlign: "center", color: MUTED, padding: "12mm 4px" }}
                     >
                       No GPS records for this period.
                     </td>
                   </tr>
                 ) : (
-                  pageRows.map((point, idx) => (
+                  pageRows.map((point, idx) => {
+                    const place = resolveLocationName(point.latitude, point.longitude, locationNames)
+                    const mapUrl = mapsLinkForCoords(point.latitude, point.longitude)
+                    return (
                     <tr key={`${point.recordedAt}-${idx}`}>
                       {showDateCol ? (
                         <td style={tdStyle}>{formatPointDate(point.recordedAt)}</td>
@@ -376,17 +379,17 @@ export function GpsPdfReport({
                       <td style={{ ...tdStyle, fontWeight: 600 }}>
                         {formatClockWithSeconds(point.recordedAt)}
                       </td>
-                      <td style={tdStyle}>
-                        {resolveLocationName(point.latitude, point.longitude, locationNames)}
+                      <td style={tdStyle}>{place}</td>
+                      <td style={{ ...tdStyle, fontSize: "8px", color: "#155DFC", wordBreak: "break-all" }}>
+                        {mapUrl}
                       </td>
-                      <td style={tdStyle}>{point.latitude.toFixed(5)}</td>
-                      <td style={tdStyle}>{point.longitude.toFixed(5)}</td>
                       <td style={tdStyle}>
                         {point.accuracy != null ? `${Math.round(point.accuracy)} m` : "—"}
                       </td>
                       <td style={tdStyle}>{point.status ?? "—"}</td>
                     </tr>
-                  ))
+                    )
+                  })
                 )}
               </tbody>
             </table>

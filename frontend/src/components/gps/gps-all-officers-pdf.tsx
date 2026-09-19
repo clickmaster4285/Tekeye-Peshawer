@@ -2,7 +2,7 @@ import type { CSSProperties, RefObject } from "react"
 import { CUSTOMS_LOGO_SRC } from "@/lib/brand"
 import { resolveLocationName } from "@/lib/gps-geofences"
 import type { GpsOfficer, GpsReportPeriod } from "@/lib/gps-tracking-api"
-import { formatReportDate, gpsPeriodLabel, timeAgo } from "@/lib/gps-utils"
+import { formatReportDate, gpsPeriodLabel, mapsLinkForCoords, timeAgo } from "@/lib/gps-utils"
 import { locationLabel } from "@/lib/locations"
 
 const NAVY = "#0f2744"
@@ -173,7 +173,7 @@ export function GpsAllOfficersPdfReport({
                 <th style={thStyle}>Station</th>
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}>Location</th>
-                <th style={thStyle}>Lat / Lng</th>
+                <th style={thStyle}>Map link</th>
                 <th style={thStyle}>Acc.</th>
                 <th style={thStyle}>Last fix</th>
               </tr>
@@ -195,6 +195,9 @@ export function GpsAllOfficersPdfReport({
                   const place = hasFix
                     ? resolveLocationName(officer.latitude!, officer.longitude!, locationNames)
                     : "—"
+                  const mapUrl = hasFix
+                    ? mapsLinkForCoords(officer.latitude!, officer.longitude!)
+                    : ""
                   return (
                     <tr key={officer.userId}>
                       <td style={tdStyle}>{rowNum}</td>
@@ -208,11 +211,9 @@ export function GpsAllOfficersPdfReport({
                       <td style={tdStyle}>
                         {officer.onDuty ? "On duty" : "Off duty"} · {officer.status}
                       </td>
-                      <td style={{ ...tdStyle, maxWidth: "42mm" }}>{place}</td>
-                      <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                        {hasFix
-                          ? `${officer.latitude!.toFixed(5)}, ${officer.longitude!.toFixed(5)}`
-                          : "—"}
+                      <td style={{ ...tdStyle, maxWidth: "48mm" }}>{place}</td>
+                      <td style={{ ...tdStyle, fontSize: "7.5px", color: "#155DFC", wordBreak: "break-all", maxWidth: "42mm" }}>
+                        {mapUrl || "—"}
                       </td>
                       <td style={tdStyle}>
                         {officer.accuracy != null ? `${Math.round(officer.accuracy)} m` : "—"}

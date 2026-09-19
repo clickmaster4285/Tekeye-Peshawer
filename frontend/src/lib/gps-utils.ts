@@ -11,6 +11,12 @@ export function roleLabel(role: string): string {
   return (role || "").replace(/_/g, " ") || "—"
 }
 
+/** Google Maps link for a GPS fix (opens exact pin). */
+export function mapsLinkForCoords(lat: number, lng: number): string {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return ""
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
+}
+
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return "?"

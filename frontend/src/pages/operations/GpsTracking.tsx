@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { geofencesForStation, officerInsideGeofence, STATION_GEOFENCES, stationCenter } from "@/lib/gps-geofences"
+import { geofencesForStation, officerInsideGeofence, resolveLocationName, STATION_GEOFENCES, stationCenter } from "@/lib/gps-geofences"
 import {
   fetchGpsHistory,
   fetchGpsLive,
@@ -50,6 +50,7 @@ import {
   gpsSignalPct,
   hoursSinceLocalMidnight,
   localDateInputValue,
+  mapsLinkForCoords,
   STATUS_COLOR,
   timeAgo,
   trailDistanceKm,
@@ -186,8 +187,21 @@ export default function GpsTrackingPage() {
   const geocodePoints = useMemo(() => {
     const list = [...reportPoints]
     if (closestPoint) list.push(closestPoint)
+    if (
+      selected &&
+      typeof selected.latitude === "number" &&
+      typeof selected.longitude === "number" &&
+      !(selected.latitude === 0 && selected.longitude === 0)
+    ) {
+      list.push({
+        latitude: selected.latitude,
+        longitude: selected.longitude,
+        accuracy: selected.accuracy ?? null,
+        recordedAt: selected.recordedAt,
+      })
+    }
     return list.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
-  }, [reportPoints, closestPoint])
+  }, [reportPoints, closestPoint, selected])
 
   const locationNamesQuery = useQuery({
     queryKey: [
@@ -654,36 +668,60 @@ export default function GpsTrackingPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Current location
                 </p>
-                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                <dl className="mt-2 space-y-2 text-sm">
                   <div>
-                    <dt className="text-xs text-muted-foreground">Latitude</dt>
-                    <dd className="font-medium">{selected.latitude?.toFixed(5) ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Longitude</dt>
-                    <dd className="font-medium">{selected.longitude?.toFixed(5) ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Accuracy</dt>
+                    <dt className="text-xs text-muted-foreground">Place</dt>
                     <dd className="font-medium">
-                      {selected.accuracy != null ? `${Math.round(selected.accuracy)} m` : "—"}
+                      {typeof selected.latitude === "number" &&
+                      typeof selected.longitude === "number" &&
+                      !(selected.latitude === 0 && selected.longitude === 0)
+                        ? resolveLocationName(selected.latitude, selected.longitude, locationNames)
+                        : "—"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-muted-foreground">Speed</dt>
+                    <dt className="text-xs text-muted-foreground">Map</dt>
                     <dd className="font-medium">
-                      {selected.speedKmh != null ? `${selected.speedKmh.toFixed(0)} km/h` : "—"}
+                      {typeof selected.latitude === "number" &&
+                      typeof selected.longitude === "number" &&
+                      !(selected.latitude === 0 && selected.longitude === 0) ? (
+                        <a
+                          href={mapsLinkForCoords(selected.latitude, selected.longitude)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[#155DFC] hover:underline"
+                        >
+                          <MapPin className="h-3.5 w-3.5" />
+                          Open in Google Maps
+                        </a>
+                      ) : (
+                        "—"
+                      )}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Heading</dt>
-                    <dd className="font-medium">
-                      {selected.headingDeg != null ? `${Math.round(selected.headingDeg)}°` : "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Last update</dt>
-                    <dd className="font-medium">{timeAgo(selected.recordedAt)}</dd>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Accuracy</dt>
+                      <dd className="font-medium">
+                        {selected.accuracy != null ? `${Math.round(selected.accuracy)} m` : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Speed</dt>
+                      <dd className="font-medium">
+                        {selected.speedKmh != null ? `${selected.speedKmh.toFixed(0)} km/h` : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Heading</dt>
+                      <dd className="font-medium">
+                        {selected.headingDeg != null ? `${Math.round(selected.headingDeg)}°` : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Last update</dt>
+                      <dd className="font-medium">{timeAgo(selected.recordedAt)}</dd>
+                    </div>
                   </div>
                 </dl>
               </div>

@@ -21,6 +21,7 @@ import {
   getMonthRange,
   getWeekRange,
   gpsPeriodLabel,
+  mapsLinkForCoords,
   trailDistanceKm,
 } from "@/lib/gps-utils"
 import { cn } from "@/lib/utils"
@@ -198,8 +199,8 @@ export function GpsLocationReport({
               ) : null}
             </p>
           </div>
-          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-5">
-            <div className="col-span-2 sm:col-span-3 lg:col-span-1">
+          <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <div className="sm:col-span-1">
               <dt className="text-xs text-muted-foreground">Location</dt>
               <dd className="font-medium">
                 {locationNamesLoading && locationNames == null
@@ -208,22 +209,26 @@ export function GpsLocationReport({
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Latitude</dt>
-              <dd className="font-medium">{closest.latitude.toFixed(5)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Longitude</dt>
-              <dd className="font-medium">{closest.longitude.toFixed(5)}</dd>
+              <dt className="text-xs text-muted-foreground">Map link</dt>
+              <dd className="font-medium">
+                <a
+                  href={mapsLinkForCoords(closest.latitude, closest.longitude)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[#155DFC] hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  Open in Google Maps
+                </a>
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Accuracy</dt>
               <dd className="font-medium">
                 {closest.accuracy != null ? `${Math.round(closest.accuracy)} m` : "—"}
+                <span className="ml-2 text-muted-foreground">· {closest.status ?? "—"}</span>
               </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Status</dt>
-              <dd className="font-medium">{closest.status ?? "—"}</dd>
             </div>
           </dl>
           {onFocusPoint ? (
@@ -245,14 +250,13 @@ export function GpsLocationReport({
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(240px,0.8fr)]">
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[560px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
                 {showDateCol ? <th className="px-2 py-2 font-semibold">Date</th> : null}
                 <th className="px-2 py-2 font-semibold">Time</th>
                 <th className="px-2 py-2 font-semibold">Location</th>
-                <th className="px-2 py-2 font-semibold">Latitude</th>
-                <th className="px-2 py-2 font-semibold">Longitude</th>
+                <th className="px-2 py-2 font-semibold">Map</th>
                 <th className="px-2 py-2 font-semibold">Accuracy</th>
                 <th className="px-2 py-2 font-semibold">Status</th>
               </tr>
@@ -261,7 +265,7 @@ export function GpsLocationReport({
               {loading ? (
                 <tr>
                   <td
-                    colSpan={showDateCol ? 7 : 6}
+                    colSpan={showDateCol ? 6 : 5}
                     className="px-2 py-8 text-center text-muted-foreground"
                   >
                     Loading GPS points…
@@ -269,14 +273,14 @@ export function GpsLocationReport({
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={showDateCol ? 7 : 6} className="px-2 py-8 text-center text-destructive">
+                  <td colSpan={showDateCol ? 6 : 5} className="px-2 py-8 text-center text-destructive">
                     {error}
                   </td>
                 </tr>
               ) : points.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={showDateCol ? 7 : 6}
+                    colSpan={showDateCol ? 6 : 5}
                     className="px-2 py-8 text-center text-muted-foreground"
                   >
                     No GPS records for this employee in {periodRangeText(reportPeriod, reportDate)}.
@@ -296,6 +300,7 @@ export function GpsLocationReport({
                   )
                   const stillResolving =
                     Boolean(locationNamesLoading) && locationNames == null
+                  const mapUrl = mapsLinkForCoords(point.latitude, point.longitude)
                   return (
                     <tr
                       key={`${point.recordedAt}-${point.latitude}-${point.longitude}`}
@@ -320,17 +325,27 @@ export function GpsLocationReport({
                         {formatClockWithSeconds(point.recordedAt)}
                       </td>
                       <td
-                        className="max-w-[14rem] truncate px-2 py-2"
+                        className="max-w-[16rem] px-2 py-2"
                         title={stillResolving ? "Resolving place name…" : locationName}
                       >
                         {stillResolving ? (
                           <span className="text-muted-foreground">Resolving…</span>
                         ) : (
-                          locationName
+                          <span className="line-clamp-2 font-medium">{locationName}</span>
                         )}
                       </td>
-                      <td className="px-2 py-2 tabular-nums">{point.latitude.toFixed(5)}</td>
-                      <td className="px-2 py-2 tabular-nums">{point.longitude.toFixed(5)}</td>
+                      <td className="whitespace-nowrap px-2 py-2">
+                        <a
+                          href={mapUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm font-medium text-[#155DFC] hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MapPin className="h-3.5 w-3.5" />
+                          Open map
+                        </a>
+                      </td>
                       <td className="px-2 py-2">
                         {point.accuracy != null ? `${Math.round(point.accuracy)} m` : "—"}
                       </td>
