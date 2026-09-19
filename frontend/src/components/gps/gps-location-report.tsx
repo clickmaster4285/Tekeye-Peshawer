@@ -203,9 +203,9 @@ export function GpsLocationReport({
             <div className="sm:col-span-1">
               <dt className="text-xs text-muted-foreground">Location</dt>
               <dd className="font-medium">
-                {locationNamesLoading && locationNames == null
-                  ? "Resolving…"
-                  : resolveLocationName(closest.latitude, closest.longitude, locationNames)}
+                {resolveLocationName(closest.latitude, closest.longitude, locationNames, {
+                  loading: Boolean(locationNamesLoading) && locationNames == null,
+                })}
               </dd>
             </div>
             <div>
@@ -296,10 +296,10 @@ export function GpsLocationReport({
                   const locationName = resolveLocationName(
                     point.latitude,
                     point.longitude,
-                    locationNames
+                    locationNames,
+                    { loading: Boolean(locationNamesLoading) && locationNames == null }
                   )
-                  const stillResolving =
-                    Boolean(locationNamesLoading) && locationNames == null
+                  const stillResolving = locationName === "Looking up…"
                   const mapUrl = mapsLinkForCoords(point.latitude, point.longitude)
                   return (
                     <tr
@@ -329,7 +329,7 @@ export function GpsLocationReport({
                         title={stillResolving ? "Resolving place name…" : locationName}
                       >
                         {stillResolving ? (
-                          <span className="text-muted-foreground">Resolving…</span>
+                          <span className="text-muted-foreground">Looking up…</span>
                         ) : (
                           <span className="line-clamp-2 font-medium">{locationName}</span>
                         )}

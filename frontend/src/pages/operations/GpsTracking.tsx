@@ -99,7 +99,7 @@ export default function GpsTrackingPage() {
   const { toast } = useToast()
   const gpsSession = useOfficerGpsTrackingStatus()
   const allStations = canSeeAllLocations(user?.role)
-  const [station, setStation] = useState(allStations ? "all" : user?.location || "all")
+  const [station, setStation] = useState(allStations ? "PESHAWAR" : user?.location || "PESHAWAR")
   const [dateRange, setDateRange] = useState<"today" | "24h" | "48h">("today")
   const [reportDate, setReportDate] = useState(localDateInputValue())
   const [reportPeriod, setReportPeriod] = useState<GpsReportPeriod>("day")
@@ -156,7 +156,7 @@ export default function GpsTrackingPage() {
   const fences = useMemo(() => {
     if (station !== "all") return geofencesForStation(station)
     const locs = new Set(officers.map((o) => o.location).filter(Boolean))
-    if (locs.size === 0) return geofencesForStation("DI_KHAN")
+    if (locs.size === 0) return geofencesForStation("PESHAWAR")
     return STATION_GEOFENCES.filter((g) => locs.has(g.location))
   }, [station, officers])
 
@@ -214,9 +214,11 @@ export default function GpsTrackingPage() {
     queryFn: () => fetchGpsLocationNames(geocodePoints),
     enabled: geocodePoints.length > 0,
     staleTime: 60 * 60 * 1000,
+    retry: 2,
   })
 
-  const locationNames = locationNamesQuery.data
+  const locationNames =
+    locationNamesQuery.data ?? (locationNamesQuery.isError ? {} : undefined)
   const locationNamesLoading = locationNamesQuery.isLoading || locationNamesQuery.isFetching
 
   const alerts = useMemo(() => deriveGpsAlerts(officers, fences), [officers, fences])
@@ -675,7 +677,9 @@ export default function GpsTrackingPage() {
                       {typeof selected.latitude === "number" &&
                       typeof selected.longitude === "number" &&
                       !(selected.latitude === 0 && selected.longitude === 0)
-                        ? resolveLocationName(selected.latitude, selected.longitude, locationNames)
+                        ? resolveLocationName(selected.latitude, selected.longitude, locationNames, {
+                            loading: Boolean(locationNamesLoading) && locationNames == null,
+                          })
                         : "—"}
                     </dd>
                   </div>

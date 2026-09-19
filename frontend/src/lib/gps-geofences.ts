@@ -67,8 +67,9 @@ export function stationCenter(station: string | "all"): [number, number] {
     const fence = STATION_GEOFENCES.find((g) => g.location === station)
     if (fence) return [fence.latitude, fence.longitude]
   }
-  const di = STATION_GEOFENCES.find((g) => g.location === "DI_KHAN")
-  return [di?.latitude ?? 31.8315, di?.longitude ?? 70.9017]
+  // Default map pin: Customs Peshawar (Head Office)
+  const peshawar = STATION_GEOFENCES.find((g) => g.location === "PESHAWAR")
+  return [peshawar?.latitude ?? 34.008, peshawar?.longitude ?? 71.5789]
 }
 
 export function geofencesForStation(station: string | "all"): GpsGeofence[] {
@@ -104,11 +105,12 @@ export function haversineM(a: { lat: number; lng: number }, b: { lat: number; ln
 const NEAR_STATION_M = 2_000
 
 /**
- * Human-readable place label for a GPS fix using customs station geofences.
- * Inside radius → fence name; within ~2 km → "Near {name}"; else → "Outside station".
+ * Station-compound label only (customs geofence).
+ * Returns empty string when outside all compounds — do NOT use "Outside station"
+ * as a place name; reverse-geocoding owns city/street labels.
  */
 export function locationNameForCoords(lat: number, lng: number): string {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "—"
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return ""
 
   let nearest: GpsGeofence | null = null
   let nearestDist = Number.POSITIVE_INFINITY
@@ -126,22 +128,38 @@ export function locationNameForCoords(lat: number, lng: number): string {
   }
 
   if (nearest && nearestDist <= NEAR_STATION_M) return `Near ${nearest.name}`
-  return "Outside station"
+  return ""
+}
+
+function coordKey(lat: number, lng: number): string {
+  const r = (n: number) => (Math.round(n * 1e4) / 1e4).toFixed(4)
+  return `${r(lat)},${r(lng)}`
 }
 
 /**
- * Prefer exact reverse-geocoded place name; fall back to station geofence label.
+ * Prefer exact reverse-geocoded place name; then customs compound; never "Outside station".
  */
 export function resolveLocationName(
   lat: number,
   lng: number,
-  exactNames?: Record<string, string> | null
+  exactNames?: Record<string, string> | null,
+  opts?: { loading?: boolean }
 ): string {
+  if (opts?.loading) return "Looking up…"
+
+  const key = coordKey(lat, lng)
   if (exactNames) {
-    const key = `${(Math.round(lat * 1e4) / 1e4).toFixed(4)},${(Math.round(lng * 1e4) / 1e4).toFixed(4)}`
     const exact = (exactNames[key] || "").trim()
     if (exact) return exact
   }
-  return locationNameForCoords(lat, lng)
+
+  const fenceOrNear = locationNameForCoords(lat, lng)
+  if (fenceOrNear) return fenceOrNear
+
+  // Names not loaded yet (still waiting on first response).
+  if (exactNames == null) return "Looking up…"
+
+  // Geocode finished but no street name for this point.
+  return "Place name unavailable"
 }
 

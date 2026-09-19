@@ -13,8 +13,8 @@ const PIN_DEEP: Record<string, string> = {
 
 const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
 const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-export const GPS_DEFAULT_CENTER: [number, number] = [31.8315, 70.9017]
-const DEFAULT_ZOOM = 12
+export const GPS_DEFAULT_CENTER: [number, number] = [34.008, 71.5789] // Peshawar Customs Office
+const DEFAULT_ZOOM = 14
 
 type LeafletNs = {
   map: (el: HTMLElement, opts?: Record<string, unknown>) => LeafletMap

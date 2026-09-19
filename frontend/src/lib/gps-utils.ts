@@ -17,6 +17,12 @@ export function mapsLinkForCoords(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
 }
 
+/** Round key matching backend gps_tracking.geocode.coord_key (4 decimal places). */
+export function gpsCoordKey(lat: number, lng: number): string {
+  const r = (n: number) => (Math.round(n * 1e4) / 1e4).toFixed(4)
+  return `${r(lat)},${r(lng)}`
+}
+
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return "?"

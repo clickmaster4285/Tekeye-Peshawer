@@ -179,27 +179,41 @@ export type GpsReverseGeocodeResult = {
   locationName: string
 }
 
-/** Batch reverse-geocode (street / area names via OSM). */
+/** Batch reverse-geocode (street / area names via OSM). Chunks requests to avoid timeouts. */
 export async function fetchGpsLocationNames(
   points: Array<{ latitude: number; longitude: number }>
 ): Promise<Record<string, string>> {
   if (!points.length) return {}
-  const res = await fetch(`${API}/reverse-geocode/`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      points: points.map((p) => ({
-        latitude: p.latitude,
-        longitude: p.longitude,
-      })),
-    }),
-  })
-  if (!res.ok) throw new Error(await readError(res, "Failed to resolve location names"))
-  const data = await res.json()
+
+  // Deduplicate by rounded key so we don't spam the API.
+  const unique = new Map<string, { latitude: number; longitude: number }>()
+  for (const p of points) {
+    if (!Number.isFinite(p.latitude) || !Number.isFinite(p.longitude)) continue
+    const key = gpsCoordKey(p.latitude, p.longitude)
+    if (!unique.has(key)) unique.set(key, { latitude: p.latitude, longitude: p.longitude })
+  }
+  const uniquePoints = [...unique.values()]
   const out: Record<string, string> = {}
-  const results = Array.isArray(data?.results) ? data.results : []
-  for (const row of results as GpsReverseGeocodeResult[]) {
-    if (row?.key && row.locationName) out[row.key] = row.locationName
+  const CHUNK = 25
+
+  for (let i = 0; i < uniquePoints.length; i += CHUNK) {
+    const chunk = uniquePoints.slice(i, i + CHUNK)
+    const res = await fetch(`${API}/reverse-geocode/`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        points: chunk.map((p) => ({
+          latitude: p.latitude,
+          longitude: p.longitude,
+        })),
+      }),
+    })
+    if (!res.ok) throw new Error(await readError(res, "Failed to resolve location names"))
+    const data = await res.json()
+    const results = Array.isArray(data?.results) ? data.results : []
+    for (const row of results as GpsReverseGeocodeResult[]) {
+      if (row?.key && row.locationName) out[row.key] = row.locationName
+    }
   }
   return out
 }
