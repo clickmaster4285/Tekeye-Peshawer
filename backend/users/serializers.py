@@ -436,23 +436,19 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             first = (initial.get("first_name") or data.get("first_name") or "").strip()
             last = (initial.get("last_name") or data.get("last_name") or "").strip()
             full_name = f"{first} {last}".strip() or initial.get("full_name")
-        if not full_name:
+        if not full_name or not str(full_name).strip():
             raise serializers.ValidationError(
-                {"first_name": "Either full_name or first_name and last_name are required."}
+                {"full_name": "Employee name is required."}
             )
-        data["full_name"] = full_name[:150]
+        data["full_name"] = str(full_name).strip()[:150]
         data["first_name"] = (initial.get("first_name") or data.get("first_name") or "").strip()[:80] or None
         data["last_name"] = (initial.get("last_name") or data.get("last_name") or "").strip()[:80] or None
 
-        address = data.get("address") or initial.get("street_address")
+        address = data.get("address") or initial.get("street_address") or initial.get("address")
         if not address:
             parts = [initial.get("city"), initial.get("state"), initial.get("country"), initial.get("postal_code")]
-            address = ", ".join(str(p).strip() for p in parts if p) or initial.get("address")
-        if not address:
-            raise serializers.ValidationError(
-                {"street_address": "Either address or street_address (or city/state/country) is required."}
-            )
-        data["address"] = address
+            address = ", ".join(str(p).strip() for p in parts if p)
+        data["address"] = (str(address).strip()[:5000] if address else None) or None
 
         ec = (
             data.get("emergency_contact")
@@ -460,31 +456,30 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             or initial.get("emergency_contact_name") or data.get("emergency_contact_name")
             or initial.get("emergency_contact")
         )
-        if not ec:
-            raise serializers.ValidationError(
-                {"emergency_contact_phone": "Either emergency_contact or emergency_contact_phone/emergency_contact_name is required."}
-            )
-        data["emergency_contact"] = str(ec)[:100]
+        data["emergency_contact"] = str(ec).strip()[:100] if ec else None
 
         national_id_val = initial.get("national_id") or data.get("national_id") or data.get("cnic")
-        if not national_id_val:
-            raise serializers.ValidationError({"national_id": "National ID / CNIC is required."})
-        cnic_clean = "".join(c for c in str(national_id_val) if c.isdigit())[:15]
-        data["cnic"] = cnic_clean or str(national_id_val)[:15]
-        if Staff.objects.filter(cnic=data["cnic"]).exists():
-            raise serializers.ValidationError({"national_id": "Staff with this National ID already exists."})
-        data["national_id"] = str(national_id_val)[:30]
+        if national_id_val and str(national_id_val).strip():
+            cnic_clean = "".join(c for c in str(national_id_val) if c.isdigit())[:15]
+            data["cnic"] = cnic_clean or str(national_id_val).strip()[:15]
+            qs = Staff.objects.filter(cnic=data["cnic"])
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"national_id": "Staff with this National ID already exists."})
+            data["national_id"] = str(national_id_val).strip()[:30]
+        else:
+            data["cnic"] = None
+            data["national_id"] = None
 
         doj = initial.get("date_of_joining") or data.get("date_of_joining")
         if doj:
             data["joining_date"] = doj
-        if not data.get("joining_date"):
-            data["joining_date"] = timezone.now().date()
+        elif not data.get("joining_date"):
+            data["joining_date"] = None
 
-        if not data.get("department"):
-            raise serializers.ValidationError({"department": "Department is required."})
-        if not data.get("designation"):
-            raise serializers.ValidationError({"designation": "Designation is required."})
+        data["department"] = (str(data.get("department") or initial.get("department") or "").strip()[:100] or None)
+        data["designation"] = (str(data.get("designation") or initial.get("designation") or "").strip()[:100] or None)
 
         data.setdefault("record_source", Staff.RECORD_SOURCE_DATABASE)
 

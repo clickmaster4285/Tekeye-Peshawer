@@ -477,14 +477,14 @@ export function AddStaffStep1PersonalInfo({
         { value: form.transferred_to, label: form.transferred_to } : null,
     },
     validationSchema: Yup.object({
-      personal_number: Yup.string().trim().required("Personal number is required"),
+      personal_number: Yup.string().trim(),
       full_name: Yup.string().trim().required("Employee name is required"),
-      gender: Yup.string().trim().required("Gender is required"),
-      cnic: Yup.string().trim().required("CNIC is required"),
-      phone: Yup.string().trim().required("Mobile number is required"),
-      department: Yup.string().trim().required("Department is required"),
-      designation: Yup.string().trim().required("Designation is required"),
-      role: Yup.string().trim().required("Role is required"),
+      gender: Yup.string().trim(),
+      cnic: Yup.string().trim(),
+      phone: Yup.string().trim(),
+      department: Yup.string().trim(),
+      designation: Yup.string().trim(),
+      role: Yup.string().trim(),
       date_of_birth: Yup.string().trim(),
       joining_date: Yup.string().trim(),
       address: Yup.string().trim(),
@@ -492,7 +492,7 @@ export function AddStaffStep1PersonalInfo({
       emergency_contact_relationship: Yup.string().trim(),
       emergency_contact_phone: Yup.string().trim(),
       emergency_contact_address: Yup.string().trim(),
-      qualification: Yup.array().min(1, "At least one qualification is required"),
+      qualification: Yup.array(),
       current_posting: Yup.object().nullable(),
       transferred_from: Yup.object().nullable(),
       transferred_to: Yup.object().nullable(),
@@ -859,7 +859,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Personal Number</RequiredLabel>
+            <RequiredLabel required={false}>Personal Number</RequiredLabel>
             <Input
               placeholder="e.g. 12345"
               name="personal_number"
@@ -892,7 +892,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Gender</RequiredLabel>
+            <RequiredLabel required={false}>Gender</RequiredLabel>
             <Select
               value={formik.values.gender || undefined}
               onValueChange={(value) => {
@@ -923,7 +923,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>CNIC Number</RequiredLabel>
+            <RequiredLabel required={false}>CNIC Number</RequiredLabel>
             <Input
               placeholder="00000-0000000-0"
               name="cnic"
@@ -965,7 +965,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Mobile Number</RequiredLabel>
+            <RequiredLabel required={false}>Mobile Number</RequiredLabel>
             <Input
               placeholder="0000-0000000"
               name="phone"
@@ -997,7 +997,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2 md:col-span-2">
-            <RequiredLabel>Qualification</RequiredLabel>
+            <RequiredLabel required={false}>Qualification</RequiredLabel>
             <div className="space-y-1">
               <ReactSelect
                 components={animatedComponents}
@@ -1074,7 +1074,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Department</RequiredLabel>
+            <RequiredLabel required={false}>Department</RequiredLabel>
             <Select
               value={formik.values.department || undefined}
               onValueChange={(value) => {
@@ -1107,7 +1107,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Designation</RequiredLabel>
+            <RequiredLabel required={false}>Designation</RequiredLabel>
             <ReactSelect
               name="designation"
               isMulti={false}
@@ -1139,7 +1139,7 @@ export function AddStaffStep1PersonalInfo({
           </div>
 
           <div className="space-y-2">
-            <RequiredLabel>Role</RequiredLabel>
+            <RequiredLabel required={false}>Role</RequiredLabel>
             <Select
               value={formik.values.role || ""}
               onValueChange={(value) => {
