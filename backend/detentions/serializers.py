@@ -61,9 +61,9 @@ def _located_camera_payload(camera, request=None) -> dict | None:
         "mlServerId": getattr(ml, "pk", None) if ml else None,
         "mlServerName": getattr(ml, "name", "") if ml else "",
         "displayLabel": (
-            f"{camera.code or f'cam-{camera.pk}'} — {camera.name}"
-            if camera.name
-            else (camera.code or f"cam-{camera.pk}")
+            (camera.name or "").strip()
+            or (camera.code or "").strip()
+            or "Camera"
         ),
     }
 

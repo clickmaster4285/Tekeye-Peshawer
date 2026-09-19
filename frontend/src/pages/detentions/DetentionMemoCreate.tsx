@@ -56,6 +56,7 @@ import {
   fetchDetentionMemoById,
   updateDetentionMemo,
   type DetentionMemoApiRecord,
+  type LocatedCameraApi,
 } from "@/lib/detention-memo-api"
 import { useCameras } from "@/hooks/use-cameras"
 import type { CameraRecord } from "@/lib/cameras-api"
@@ -124,6 +125,8 @@ export type GoodsLineItem = {
   locatedZone: string
   /** Camera DB id where this item was located/detected. */
   locatedCameraId: number | null
+  /** Cached camera details for display (name, zone, …). */
+  locatedCamera?: LocatedCameraApi | null
   detectedAt: string
   detectionEventId: number | null
 }
@@ -182,7 +185,7 @@ function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
 }
 
 function cameraOptionLabel(cam: CameraRecord): string {
-  return (cam.name || "").trim() || cam.code || `Camera ${cam.id}`
+  return (cam.name || "").trim() || cam.code || "Camera"
 }
 
 function noteSheetDateTime(value: string | undefined | null): string {
@@ -372,6 +375,7 @@ export default function DetentionMemoCreatePage() {
             images: g.images || [],
             imageFiles: [],
             locatedCameraId: g.locatedCameraId ?? g.locatedCamera?.id ?? null,
+            locatedCamera: g.locatedCamera ?? null,
             locatedZone: g.locatedCamera?.zone || "",
             detectedAt: g.detectedAt || "",
             detectionEventId: g.detectionEventId ?? null,
@@ -1144,6 +1148,16 @@ export default function DetentionMemoCreatePage() {
                         ) : (
                           goodsItems.map((item, idx) => {
                             const zoneCameras = camerasForZone(locationCameras, item.locatedZone)
+                            const selectedCam =
+                              item.locatedCameraId != null
+                                ? zoneCameras.find((c) => c.id === item.locatedCameraId) ||
+                                  locationCameras.find((c) => c.id === item.locatedCameraId) ||
+                                  null
+                                : null
+                            const cameraSelectOptions =
+                              selectedCam && !zoneCameras.some((c) => c.id === selectedCam.id)
+                                ? [selectedCam, ...zoneCameras]
+                                : zoneCameras
                             return (
                             <TableRow key={item.id} className={idx % 2 === 1 ? "bg-muted/10" : ""}>
                               <TableCell className={goodsControlCellClass}>
@@ -1295,7 +1309,7 @@ export default function DetentionMemoCreatePage() {
                                       setGoodsItems((prev) =>
                                         prev.map((row) =>
                                           row.id === item.id
-                                            ? { ...row, locatedZone: zone, locatedCameraId: null }
+                                            ? { ...row, locatedZone: zone, locatedCameraId: null, locatedCamera: null }
                                             : row
                                         )
                                       )
@@ -1334,6 +1348,16 @@ export default function DetentionMemoCreatePage() {
                                                 locatedCameraId:
                                                   Number.isFinite(camId as number) ? (camId as number) : null,
                                                 locatedZone: cam?.zone?.trim() || row.locatedZone,
+                                                locatedCamera: cam
+                                                  ? {
+                                                      id: cam.id,
+                                                      code: cam.code,
+                                                      name: cam.name,
+                                                      zone: cam.zone,
+                                                      location: cam.location,
+                                                      displayLabel: cam.name || cam.code,
+                                                    }
+                                                  : null,
                                               }
                                             : row
                                         )
@@ -1342,11 +1366,13 @@ export default function DetentionMemoCreatePage() {
                                     disabled={!item.locatedZone}
                                   >
                                     <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
-                                      <SelectValue placeholder={item.locatedZone ? "Select camera" : "Pick zone first"} />
+                                      <SelectValue placeholder={item.locatedZone ? "Select camera" : "Pick zone first"}>
+                                        {selectedCam ? cameraOptionLabel(selectedCam) : undefined}
+                                      </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="__none__">Not set</SelectItem>
-                                      {zoneCameras.map((cam) => (
+                                      {cameraSelectOptions.map((cam) => (
                                         <SelectItem key={cam.id} value={String(cam.id)}>
                                           {cameraOptionLabel(cam)}
                                         </SelectItem>

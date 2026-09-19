@@ -445,10 +445,14 @@ export default function ObjectDetectionPage() {
                           {row.site_name || row.site_code || "—"}
                         </TableCell>
                         <TableCell>
-                          <div className="font-medium">{row.camera_code}</div>
-                          <div className="text-xs text-muted-foreground truncate max-w-[160px]">
-                            {row.name ?? row.camera_name ?? row.camera_code}
+                          <div className="font-medium">
+                            {row.name ?? row.camera_name ?? row.camera_code ?? "—"}
                           </div>
+                          {(row.camera_code || row.site_code) && (
+                            <div className="text-xs text-muted-foreground truncate max-w-[160px]">
+                              {row.camera_code || row.site_code}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="font-normal">

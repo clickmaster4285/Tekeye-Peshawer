@@ -74,11 +74,11 @@ function CameraChip({
         "flex cursor-grab items-center gap-1.5 rounded-md border border-border/80 bg-background px-2 py-1.5 shadow-sm active:cursor-grabbing",
         dragging && "opacity-40 ring-2 ring-sky-300"
       )}
-      title={[camera.code, camera.name, camera.nvr_name].filter(Boolean).join(" · ")}
+      title={[camera.name, camera.code, camera.nvr_name].filter(Boolean).join(" · ")}
     >
       <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium leading-tight">{camera.code || camera.name}</p>
+        <p className="truncate text-xs font-medium leading-tight">{camera.name || camera.code}</p>
         {camera.nvr_name ? (
           <p className="truncate text-[10px] leading-tight text-muted-foreground">{camera.nvr_name}</p>
         ) : null}
@@ -275,8 +275,8 @@ export default function OpsCameraDistributionPage() {
       const warnings = result.routing?.warnings || []
       setStatusMsg(
         ml_server_id == null
-          ? `Unassigned camera ${result.camera.code || cameraId}`
-          : `Moved ${result.camera.code || cameraId} → server ${ml_server_id}${
+          ? `Unassigned camera ${result.camera.name || result.camera.code || "camera"}`
+          : `Moved ${result.camera.name || result.camera.code || "camera"} → server ${ml_server_id}${
               warnings.length ? ` (${warnings[0]})` : ""
             }`
       )

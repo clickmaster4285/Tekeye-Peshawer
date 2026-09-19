@@ -47,13 +47,17 @@ function locatedCameraId(item: GoodsLineItem): number | null {
   return camId == null ? null : Number(camId)
 }
 
-function cameraLabel(cam: LocatedCameraApi | null | undefined, fallbackId?: number | null): string {
+function cameraLabel(cam: LocatedCameraApi | null | undefined, _fallbackId?: number | null): string {
   if (cam) {
-    const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
-    const zone = (cam.zone || "").trim()
-    return zone ? `${name} · ${zone}` : name
+    const name =
+      (cam.name || "").trim() ||
+      (cam.displayLabel || "").trim() ||
+      (cam.code || "").trim()
+    if (name) {
+      const zone = (cam.zone || "").trim()
+      return zone ? `${name} · ${zone}` : name
+    }
   }
-  if (fallbackId != null) return `Camera #${fallbackId}`
   return "—"
 }
 
@@ -137,7 +141,8 @@ function ViewLocatedCameraDialog({
           ) : camera ? (
             <div className="space-y-2 p-2 sm:p-3">
               <p className="px-1 text-xs text-muted-foreground">
-                {cameraSourceLabel(camera)}
+                {(camera.name || "").trim() || camera.code || "Camera"}
+                {cameraSourceLabel(camera) ? ` · ${cameraSourceLabel(camera)}` : ""}
                 {camera.zone ? ` · ${camera.zone}` : ""}
               </p>
               <MlCameraFeed
@@ -244,7 +249,7 @@ function GoodsInformationBlock({
                   <div><span className="text-muted-foreground">Condition: </span>{item.condition || "—"}</div>
                   <div><span className="text-muted-foreground">Assessable Value (PKR): </span>{item.assessableValuePkr?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">Perishable: </span>{item.perishable ? "Yes" : "No"}</div>
-                  <div><span className="text-muted-foreground">Located Camera: </span>{item.locatedCamera?.name?.trim() || cameraLabel(item.locatedCamera, item.locatedCameraId)}</div>
+                  <div><span className="text-muted-foreground">Located Camera: </span>{cameraLabel(item.locatedCamera, item.locatedCameraId)}</div>
                   <div><span className="text-muted-foreground">Zone: </span>{item.locatedCamera?.zone?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">Detected At: </span>{item.detectedAt?.trim() || "—"}</div>
                   <div><span className="text-muted-foreground">ID/Chassis: </span><span className="break-words">{item.identificationRef || "—"}</span></div>
@@ -322,9 +327,7 @@ function GoodsInformationBlock({
                       <TableCell className={cn(goodsDetailCellClass, "min-w-[9rem] text-xs")}>
                         <div className="space-y-0.5">
                           <p className="font-medium text-sm">
-                            {item.locatedCamera?.name?.trim() ||
-                              item.locatedCamera?.code ||
-                              (item.locatedCameraId != null ? `Camera #${item.locatedCameraId}` : "—")}
+                            {cameraLabel(item.locatedCamera, item.locatedCameraId)}
                           </p>
                           <p className="text-muted-foreground">
                             Zone: {item.locatedCamera?.zone?.trim() || "—"}

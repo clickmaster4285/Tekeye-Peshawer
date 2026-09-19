@@ -41,14 +41,18 @@ export function locatedCameraIdOf(
 
 export function locatedCameraLabel(
   cam: LocatedCameraApi | null | undefined,
-  fallbackId?: number | null
+  _fallbackId?: number | null
 ): string {
   if (cam) {
-    const name = (cam.name || "").trim() || cam.code || `cam-${cam.id}`
-    const zone = (cam.zone || "").trim()
-    return zone ? `${name} · ${zone}` : name
+    const name =
+      (cam.name || "").trim() ||
+      (cam.displayLabel || "").trim() ||
+      (cam.code || "").trim()
+    if (name) {
+      const zone = (cam.zone || "").trim()
+      return zone ? `${name} · ${zone}` : name
+    }
   }
-  if (fallbackId != null) return `Camera #${fallbackId}`
   return "—"
 }
 
@@ -136,7 +140,8 @@ export function ViewLocatedCameraDialog({
             ) : camera ? (
               <div className="space-y-2 p-2 sm:p-3">
                 <p className="px-1 text-xs text-muted-foreground">
-                  {cameraSourceLabel(camera)}
+                  {(camera.name || "").trim() || camera.code || "Camera"}
+                  {cameraSourceLabel(camera) ? ` · ${cameraSourceLabel(camera)}` : ""}
                   {camera.zone ? ` · ${camera.zone}` : ""}
                   {camera.location ? ` · ${camera.location}` : ""}
                 </p>

@@ -52,7 +52,7 @@ function cameraLabel(ev: DetectionEvent): string {
     (ev.camera_name || "").trim() ||
     (ev.name || "").trim() ||
     (ev.camera_code || "").trim() ||
-    (ev.camera != null ? `Camera ${ev.camera}` : "Camera")
+    "Camera"
   )
 }
 

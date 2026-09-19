@@ -3,6 +3,8 @@ from __future__ import annotations
 from django.utils import timezone
 from rest_framework import serializers
 
+from users.serializers import user_profile_image_url
+
 from .models import OfficerGpsHistory, OfficerGpsLatest
 
 LIVE_SECONDS = 120
@@ -91,6 +93,7 @@ def latest_to_dict(row: OfficerGpsLatest) -> dict:
         "name": officer_display_name(user),
         "role": getattr(user, "role", "") or "",
         "employeeId": _employee_id(user),
+        "profileImage": user_profile_image_url(user),
         "location": row.location or getattr(user, "location", "") or "",
         "latitude": lat,
         "longitude": lng,
@@ -115,6 +118,7 @@ def me_payload(user, row: OfficerGpsLatest | None) -> dict:
         "name": officer_display_name(user),
         "role": getattr(user, "role", "") or "",
         "employeeId": _employee_id(user),
+        "profileImage": user_profile_image_url(user),
         "location": getattr(user, "location", "") or "",
         "onDuty": bool(row and row.on_duty),
         "status": gps_status(row),

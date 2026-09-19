@@ -538,7 +538,7 @@ class CCTVWorkerManager:
                             if snapshot:
                                 event["snapshot"] = snapshot_to_dict(snapshot)
                                 event["message"] = (
-                                    f"Detected on Camera #{state.camera_id} ({state.name})"
+                                    f"Detected on {state.name or 'Camera'}"
                                 )
                             _emit_attendance_realtime(throttle_sec=1.0)
                             logger.info(

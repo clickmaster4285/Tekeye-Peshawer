@@ -247,7 +247,7 @@ function detectionToHeaderNotification(
     row.camera_name ||
     row.name ||
     row.camera_code ||
-    (row.camera != null ? `Camera ${row.camera}` : "Camera")
+    "Camera"
   const zone = (row.zone || "").trim() || "—"
   const alertName = alertNameForClass(row.class_name)
   return {

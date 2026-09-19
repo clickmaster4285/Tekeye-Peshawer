@@ -151,7 +151,7 @@ export default function LiveCameraGridPage() {
     <ModulePageLayout
       title={
         hasFocusCamera
-          ? `Live View — ${focusedCamera?.name || focusedCamera?.code || `Camera ${focusCameraId}`}`
+          ? `Live View — ${focusedCamera?.name || focusedCamera?.code || "Camera"}`
           : "Live View — Real-time camera monitoring and control"
       }
       description={
@@ -167,8 +167,8 @@ export default function LiveCameraGridPage() {
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
             <div>
               <p className="font-medium text-sky-950">
-                Located camera: {focusedCamera?.code || `cam-${focusCameraId}`}
-                {focusedCamera?.name ? ` — ${focusedCamera.name}` : ""}
+                Located camera: {focusedCamera?.name || focusedCamera?.code || "Camera"}
+                {focusedCamera?.code && focusedCamera?.name ? ` (${focusedCamera.code})` : ""}
               </p>
               <p className="text-xs text-sky-900/80">
                 {[focusedCamera?.zone && `Zone ${focusedCamera.zone}`, focusedCamera?.location, itemLabel]
@@ -402,7 +402,7 @@ export default function LiveCameraGridPage() {
               {gridCameras.length === 0 ? (
                 <div className="aspect-video rounded-lg border border-dashed flex items-center justify-center text-sm text-muted-foreground">
                   {hasFocusCamera
-                    ? `Camera #${focusCameraId} not found or not available.`
+                    ? `${focusedCamera?.name || focusedCamera?.code || "Camera"} not found or not available.`
                     : "No allocated cameras. Assign cameras in Camera Distribution."}
                 </div>
               ) : (

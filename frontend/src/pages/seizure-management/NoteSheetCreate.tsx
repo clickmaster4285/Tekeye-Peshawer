@@ -149,7 +149,7 @@ function camerasForZone(cameras: CameraRecord[], zone: string): CameraRecord[] {
 }
 
 function cameraOptionLabel(cam: CameraRecord): string {
-  return (cam.name || "").trim() || cam.code || `Camera ${cam.id}`
+  return (cam.name || "").trim() || cam.code || "Camera"
 }
 
 type MediaKey = keyof NoteSheetCreateMedia
@@ -829,6 +829,16 @@ export default function NoteSheetCreatePage() {
                       ) : (
                         items.map((row, index) => {
                           const zoneCameras = camerasForZone(locationCameras, row.locatedZone || "")
+                          const selectedCam =
+                            row.locatedCameraId != null
+                              ? zoneCameras.find((c) => c.id === row.locatedCameraId) ||
+                                locationCameras.find((c) => c.id === row.locatedCameraId) ||
+                                null
+                              : null
+                          const cameraSelectOptions =
+                            selectedCam && !zoneCameras.some((c) => c.id === selectedCam.id)
+                              ? [selectedCam, ...zoneCameras]
+                              : zoneCameras
                           return (
                           <TableRow key={row.clientLineId || index} className={index % 2 === 1 ? "bg-muted/10" : ""}>
                             <TableCell className={goodsControlCellClass}>
@@ -997,7 +1007,7 @@ export default function NoteSheetCreatePage() {
                                     setItems((prev) =>
                                       prev.map((item, i) =>
                                         i === index
-                                          ? { ...item, locatedZone: zone, locatedCameraId: null }
+                                          ? { ...item, locatedZone: zone, locatedCameraId: null, locatedCamera: null }
                                           : item
                                       )
                                     )
@@ -1024,6 +1034,11 @@ export default function NoteSheetCreatePage() {
                                   onValueChange={(v) => {
                                     if (v === "__none__") {
                                       updateItem(index, "locatedCameraId", null)
+                                      setItems((prev) =>
+                                        prev.map((item, i) =>
+                                          i === index ? { ...item, locatedCamera: null } : item
+                                        )
+                                      )
                                       return
                                     }
                                     const camId = Number(v)
@@ -1037,6 +1052,16 @@ export default function NoteSheetCreatePage() {
                                               ...item,
                                               locatedCameraId: Number.isFinite(camId) ? camId : null,
                                               locatedZone: cam?.zone?.trim() || item.locatedZone || "",
+                                              locatedCamera: cam
+                                                ? {
+                                                    id: cam.id,
+                                                    code: cam.code,
+                                                    name: cam.name,
+                                                    zone: cam.zone,
+                                                    location: cam.location,
+                                                    displayLabel: cam.name || cam.code,
+                                                  }
+                                                : null,
                                             }
                                           : item
                                       )
@@ -1047,11 +1072,13 @@ export default function NoteSheetCreatePage() {
                                   <SelectTrigger className={goodsSelectTriggerClass} title="Located camera">
                                     <SelectValue
                                       placeholder={row.locatedZone ? "Select camera" : "Pick zone first"}
-                                    />
+                                    >
+                                      {selectedCam ? cameraOptionLabel(selectedCam) : undefined}
+                                    </SelectValue>
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="__none__">No camera</SelectItem>
-                                    {zoneCameras.map((cam) => (
+                                    {cameraSelectOptions.map((cam) => (
                                       <SelectItem key={cam.id} value={String(cam.id)}>
                                         {cameraOptionLabel(cam)}
                                       </SelectItem>

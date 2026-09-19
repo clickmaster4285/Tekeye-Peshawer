@@ -13,9 +13,11 @@ import {
   Search,
   Shrink,
 } from "lucide-react"
+import { GpsLocationReport } from "@/components/gps/gps-location-report"
 import { GpsMiniMap } from "@/components/gps/gps-mini-map"
+import { downloadGpsPdf, GpsPdfReport } from "@/components/gps/gps-pdf-report"
 import { OfficerGpsMap } from "@/components/gps/officer-gps-map"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { StaffAvatar } from "@/components/hr/staff-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,11 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useToast } from "@/hooks/use-toast"
 import { geofencesForStation, officerInsideGeofence, STATION_GEOFENCES, stationCenter } from "@/lib/gps-geofences"
 import {
   fetchGpsHistory,
   fetchGpsLive,
   fetchGpsMe,
+  type GpsReportPeriod,
   type GpsStatus,
 } from "@/lib/gps-tracking-api"
 import {
@@ -38,9 +42,10 @@ import {
   buildRouteEvents,
   deriveGpsAlerts,
   formatClock,
+  gpsPeriodLabel,
   gpsSignalPct,
   hoursSinceLocalMidnight,
-  initials,
+  localDateInputValue,
   STATUS_COLOR,
   timeAgo,
   trailDistanceKm,
@@ -86,10 +91,15 @@ function AccuracyGauge({ accuracy }: { accuracy: number | null | undefined }) {
 
 export default function GpsTrackingPage() {
   const user = getStoredUser()
+  const { toast } = useToast()
   const gpsSession = useOfficerGpsTrackingStatus()
   const allStations = canSeeAllLocations(user?.role)
   const [station, setStation] = useState(allStations ? "all" : user?.location || "all")
   const [dateRange, setDateRange] = useState<"today" | "24h" | "48h">("today")
+  const [reportDate, setReportDate] = useState(localDateInputValue())
+  const [reportPeriod, setReportPeriod] = useState<GpsReportPeriod>("day")
+  const [lookupTime, setLookupTime] = useState("")
+  const [pdfExporting, setPdfExporting] = useState(false)
   const [search, setSearch] = useState("")
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [showGeofences, setShowGeofences] = useState(true)
@@ -100,21 +110,34 @@ export default function GpsTrackingPage() {
   const mapRef = useRef<HTMLElement | null>(null)
   const officersRef = useRef<HTMLElement | null>(null)
   const detailsRef = useRef<HTMLElement | null>(null)
+  const reportRef = useRef<HTMLElement | null>(null)
+  const pdfReportRef = useRef<HTMLDivElement | null>(null)
 
   const historyHours = dateRange === "today" ? hoursSinceLocalMidnight() : dateRange === "24h" ? 24 : 48
 
   const meQuery = useQuery({
     queryKey: ["gps-me"],
-    queryFn: fetchGpsMe
+    queryFn: fetchGpsMe,
   })
   const liveQuery = useQuery({
     queryKey: ["gps-live", station],
-    queryFn: () => fetchGpsLive(station)
+    queryFn: () => fetchGpsLive(station),
+    refetchInterval: LIVE_POLL_MS,
   })
   const historyQuery = useQuery({
     queryKey: ["gps-history", selectedUserId, historyHours],
-    queryFn: () => fetchGpsHistory(selectedUserId!, historyHours),
+    queryFn: () => fetchGpsHistory(selectedUserId!, { hours: historyHours }),
     enabled: selectedUserId != null,
+  })
+  const reportQuery = useQuery({
+    queryKey: ["gps-report", selectedUserId, reportDate, reportPeriod, lookupTime],
+    queryFn: () =>
+      fetchGpsHistory(selectedUserId!, {
+        date: reportDate,
+        period: reportPeriod,
+        at: reportPeriod === "day" && lookupTime ? lookupTime : undefined,
+      }),
+    enabled: selectedUserId != null && Boolean(reportDate),
   })
 
   const onDuty = Boolean(meQuery.data?.onDuty)
@@ -145,7 +168,9 @@ export default function GpsTrackingPage() {
   }, [officers, search])
 
   const selected = officers.find((o) => o.userId === selectedUserId) ?? null
-  const trail = historyQuery.data ?? []
+  const trail = historyQuery.data?.points ?? []
+  const reportPoints = reportQuery.data?.points ?? []
+  const closestPoint = reportQuery.data?.closest ?? null
   const alerts = useMemo(() => deriveGpsAlerts(officers, fences), [officers, fences])
   const todayKm = trailDistanceKm(trail)
   const routeEvents = buildRouteEvents(selected, trail)
@@ -153,6 +178,45 @@ export default function GpsTrackingPage() {
 
   const scrollToMap = () => {
     mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  const handleExportGpsPdf = async () => {
+    if (!selected) {
+      toast({
+        title: "Select an employee",
+        description: "Choose an officer before exporting the GPS PDF.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (reportPoints.length === 0) {
+      toast({
+        title: "No GPS records",
+        description: "Change the day/week/month and try again.",
+        variant: "destructive",
+      })
+      return
+    }
+    const safeName = selected.name.replace(/[^a-zA-Z0-9-_]+/g, "_") || "officer"
+    setPdfExporting(true)
+    try {
+      await new Promise((r) => setTimeout(r, 350))
+      const el = pdfReportRef.current
+      if (!el) throw new Error("PDF report not ready")
+      await downloadGpsPdf(el, `gps-${reportPeriod}-${reportDate}-${safeName}.pdf`)
+      toast({
+        title: "PDF downloaded",
+        description: `${selected.name} · ${gpsPeriodLabel(reportPeriod, reportDate)}`,
+      })
+    } catch (err) {
+      toast({
+        title: "PDF export failed",
+        description: err instanceof Error ? err.message : "Could not generate PDF",
+        variant: "destructive",
+      })
+    } finally {
+      setPdfExporting(false)
+    }
   }
 
   const mapBlock = (
@@ -239,6 +303,7 @@ export default function GpsTrackingPage() {
               meQuery.refetch()
               liveQuery.refetch()
               historyQuery.refetch()
+              reportQuery.refetch()
             }}
           >
             <RefreshCw className="h-4 w-4" />
@@ -339,6 +404,12 @@ export default function GpsTrackingPage() {
                         active ? "bg-[#EBF2FF]" : "hover:bg-muted/60"
                       )}
                     >
+                      <StaffAvatar
+                        profileImage={officer.profileImage}
+                        fullName={officer.name}
+                        className="mt-0.5 size-9 shrink-0 border"
+                        fallbackClassName="bg-[#EBF2FF] text-[10px] font-semibold text-[#155DFC]"
+                      />
                       <span
                         className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ background: STATUS_COLOR[officer.status] }}
@@ -379,11 +450,12 @@ export default function GpsTrackingPage() {
           {selected ? (
             <div className="flex flex-1 flex-col overflow-y-auto p-4">
               <div className="flex items-start gap-3">
-                <Avatar className="size-14 border">
-                  <AvatarFallback className="bg-[#EBF2FF] text-sm font-semibold text-[#155DFC]">
-                    {initials(selected.name)}
-                  </AvatarFallback>
-                </Avatar>
+                <StaffAvatar
+                  profileImage={selected.profileImage}
+                  fullName={selected.name}
+                  className="size-14 border"
+                  fallbackClassName="bg-[#EBF2FF] text-sm font-semibold text-[#155DFC]"
+                />
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{selected.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -481,6 +553,14 @@ export default function GpsTrackingPage() {
                 <Button
                   variant="outline"
                   className="w-full"
+                  onClick={() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                >
+                  <Route className="h-4 w-4" />
+                  Location report
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
                   onClick={() => alertsRef.current?.scrollIntoView({ behavior: "smooth" })}
                 >
                   <AlertTriangle className="h-4 w-4" />
@@ -493,6 +573,40 @@ export default function GpsTrackingPage() {
           )}
         </section>
       </div>
+
+      <div ref={reportRef} className="scroll-mt-28 px-3 lg:px-6">
+        <GpsLocationReport
+          officer={selected}
+          reportDate={reportDate}
+          reportPeriod={reportPeriod}
+          lookupTime={lookupTime}
+          onReportDateChange={setReportDate}
+          onReportPeriodChange={setReportPeriod}
+          onLookupTimeChange={setLookupTime}
+          points={reportPoints}
+          closest={closestPoint}
+          totalCount={reportQuery.data?.totalCount}
+          sampled={reportQuery.data?.sampled}
+          loading={reportQuery.isLoading || reportQuery.isFetching}
+          error={reportQuery.error instanceof Error ? reportQuery.error.message : null}
+          pdfExporting={pdfExporting}
+          onPrintPdf={handleExportGpsPdf}
+          onFocusPoint={(lat, lng) => {
+            setFocus({ lat, lng, zoom: 16 })
+            scrollToMap()
+          }}
+        />
+      </div>
+
+      <GpsPdfReport
+        officer={selected}
+        points={reportPoints}
+        period={reportPeriod}
+        anchorDate={reportDate}
+        totalCount={reportQuery.data?.totalCount}
+        sampled={reportQuery.data?.sampled}
+        reportRef={pdfReportRef}
+      />
 
       <div className="grid grid-cols-1 gap-3 px-3 pb-2 sm:grid-cols-2 xl:grid-cols-4 lg:px-6">
         <section className="rounded-xl border bg-white p-4">
