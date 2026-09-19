@@ -530,3 +530,26 @@ export async function autoDistributeCameras(payload: {
   }
 }
 
+export async function unassignAllCamerasFromServer(ml_server_id: number): Promise<{
+  ml_server_id: number
+  ml_server_name: string
+  total: number
+  unassigned: number
+  warnings: string[]
+}> {
+  const res = await fetch(`${API}/ops/distribution/unassign-all/`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ ml_server_id }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to unassign cameras"))
+  return {
+    ml_server_id: data.ml_server_id,
+    ml_server_name: data.ml_server_name || "",
+    total: data.total ?? 0,
+    unassigned: data.unassigned ?? 0,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+  }
+}
+

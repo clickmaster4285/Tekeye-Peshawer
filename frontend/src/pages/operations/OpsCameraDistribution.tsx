@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import {
   GripVertical,
@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Server,
   Sparkles,
+  Unlink,
   Wifi,
   WifiOff,
 } from "lucide-react"
@@ -30,6 +31,7 @@ import {
   assignCameraToMlServer,
   autoDistributeCameras,
   fetchDistributionBoard,
+  unassignAllCamerasFromServer,
   type AutoDistributeResult,
   type DistributionBoard,
   type DistributionCamera,
@@ -85,6 +87,7 @@ function Column({
   onDragStart,
   onDropCamera,
   accent,
+  headerAction,
 }: {
   title: string
   subtitle?: string
@@ -95,6 +98,7 @@ function Column({
   onDragStart: (id: number) => void
   onDropCamera: (cameraIdFromTransfer: number | null) => void
   accent?: boolean
+  headerAction?: ReactNode
 }) {
   const [over, setOver] = useState(false)
   const healthy =
@@ -143,6 +147,7 @@ function Column({
             {healthy ? "Healthy" : status}
           </p>
         ) : null}
+        {headerAction ? <div className="mt-2">{headerAction}</div> : null}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto p-2">
         {cameras.length === 0 ? (
@@ -289,6 +294,32 @@ export default function OpsCameraDistributionPage() {
     }
   }
 
+  const onUnassignAllFromServer = async (serverId: number, serverName: string, count: number) => {
+    if (count <= 0) return
+    if (
+      !window.confirm(
+        `Unassign all ${count} camera(s) from “${serverName}”? They will move to Unassigned.`
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setStatusMsg(null)
+    try {
+      const result = await unassignAllCamerasFromServer(serverId)
+      setStatusMsg(
+        `Unassigned ${result.unassigned} camera(s) from “${result.ml_server_name || serverName}”` +
+          (result.warnings.length ? ` (${result.warnings[0]})` : "")
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unassign all failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!isOpsAdmin) {
     return <Navigate to={ROUTES.DASHBOARD} replace />
   }
@@ -426,6 +457,25 @@ export default function OpsCameraDistributionPage() {
                     dragCameraId={dragCameraId}
                     onDragStart={setDragCameraId}
                     onDropCamera={(id) => onDropTo(server.id, id)}
+                    headerAction={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full text-xs"
+                        disabled={busy || server.cameras.length === 0}
+                        onClick={() =>
+                          void onUnassignAllFromServer(
+                            server.id,
+                            server.name,
+                            server.cameras.length
+                          )
+                        }
+                      >
+                        <Unlink className="mr-1.5 h-3.5 w-3.5" />
+                        Unassign all cameras
+                      </Button>
+                    }
                   />
                 </div>
               ))}

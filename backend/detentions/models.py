@@ -97,6 +97,7 @@ class DetentionMemo(models.Model):
     memo_qr_code_payload = models.TextField(blank=True)
 
     created_by = models.TextField(blank=True)
+    updated_by = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -187,3 +187,8 @@ class AutoDistributeSerializer(serializers.Serializer):
     location_code = serializers.CharField(required=False, allow_blank=True, default="")
     dry_run = serializers.BooleanField(required=False, default=False)
     apply = serializers.BooleanField(required=False, default=True)
+
+
+class UnassignAllCamerasSerializer(serializers.Serializer):
+    ml_server_id = serializers.IntegerField(min_value=1)
+

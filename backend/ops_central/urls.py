@@ -1,7 +1,12 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .distribution_views import AssignCameraAPIView, AutoDistributeAPIView, DistributionBoardAPIView
+from .distribution_views import (
+    AssignCameraAPIView,
+    AutoDistributeAPIView,
+    DistributionBoardAPIView,
+    UnassignAllCamerasAPIView,
+)
 from .views import (
     AllCitiesCameraSelectionAPIView,
     AllCitiesStreamsAPIView,
@@ -40,6 +45,11 @@ urlpatterns = [
         "ops/distribution/auto/",
         AutoDistributeAPIView.as_view(),
         name="ops-distribution-auto",
+    ),
+    path(
+        "ops/distribution/unassign-all/",
+        UnassignAllCamerasAPIView.as_view(),
+        name="ops-distribution-unassign-all",
     ),
     path(
         "ops/servers/<int:pk>/mjpeg/",

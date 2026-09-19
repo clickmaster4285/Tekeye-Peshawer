@@ -50,6 +50,11 @@ import {
 } from "@/components/detention/view-located-camera-dialog"
 import NoteSheetReportPrint from "@/components/seizure/NoteSheetReportPrint"
 
+function getQrCodeUrl(data: string, size = 120) {
+  const responsiveSize = typeof window !== "undefined" && window.innerWidth < 640 ? Math.min(size, 100) : size
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${responsiveSize}x${responsiveSize}&data=${encodeURIComponent(data)}`
+}
+
 function statusBadge(status: NoteSheetStatus) {
   if (status === "Approved") return <Badge>Approved</Badge>
   if (status === "Submitted") return <Badge variant="secondary">Submitted</Badge>
@@ -381,6 +386,7 @@ export default function NoteSheetDetailPage() {
         )}
 
         {/* 1. Basic Information */}
+        <div className="grid gap-4 sm:gap-6 md:grid-cols-[1fr_200px]">
         <Card className="rounded-[10px] border-gray-200">
           <CardHeader>
             <CardTitle className="text-base">1. Basic Information</CardTitle>
@@ -397,6 +403,25 @@ export default function NoteSheetDetailPage() {
             </dl>
           </CardContent>
         </Card>
+        <Card className="rounded-[10px] border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-base">QR Code</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-2 pt-0">
+            <img
+              src={getQrCodeUrl(
+                `${typeof window !== "undefined" ? window.location.origin : ""}${getSeizureMgmtNoteSheetDetailPath(row.id)}`,
+                160
+              )}
+              alt="Note sheet QR code"
+              className="rounded-lg border bg-white p-2"
+            />
+            <p className="text-center font-mono text-[10px] text-muted-foreground break-all">
+              {row.noteSheetNo || row.referenceNumber || row.id}
+            </p>
+          </CardContent>
+        </Card>
+        </div>
 
         {/* 2. Officer Information */}
         <Card className="rounded-[10px] border-gray-200">
@@ -462,7 +487,22 @@ export default function NoteSheetDetailPage() {
                   <TableBody>
                     {row.items.map((item, i) => (
                       <TableRow key={item.id ?? i}>
-                        <TableCell className="font-mono text-xs">{item.qrCodeNumber || "—"}</TableCell>
+                        <TableCell>
+                          {item.qrCodeNumber ? (
+                            <div className="flex flex-col items-start gap-1">
+                              <img
+                                src={getQrCodeUrl(item.qrCodeNumber, 64)}
+                                alt={item.qrCodeNumber}
+                                className="rounded border bg-white p-0.5"
+                              />
+                              <span className="font-mono text-[10px] text-muted-foreground break-all max-w-[88px]">
+                                {item.qrCodeNumber}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                         <TableCell className={goodsLineCellClass}>
                           <GoodsLineText>{item.product || item.description || "—"}</GoodsLineText>
                         </TableCell>
