@@ -409,7 +409,11 @@ export default function GpsTrackingPage() {
       )}
     >
       <OfficerGpsMap
-        officers={officers}
+        officers={
+          trackAll || selectedUserId == null
+            ? officers
+            : officers.filter((o) => o.userId === selectedUserId)
+        }
         selectedUserId={trackAll ? null : selectedUserId}
         trail={trail}
         geofences={fences}
