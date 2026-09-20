@@ -48,7 +48,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { getStoredUser } from "@/lib/auth"
-import { canViewAllCitiesCameras, getCamerasWallLabel } from "@/lib/all-cities-cameras"
+import {
+  canViewAllCitiesCameras,
+  getCamerasWallLabel,
+  readAllCitiesStreamsCache,
+  setAllCitiesCamerasPreference,
+  writeAllCitiesStreamsCache,
+} from "@/lib/all-cities-cameras"
 import {
   WALL_WIDGET_CATALOG,
   hasAnySidePanel,
@@ -62,9 +68,6 @@ import {
 } from "@/lib/custom-wall-layout"
 import { normalizeRole } from "@/lib/role-access"
 import { ROUTES } from "@/routes/config"
-import {
-  setAllCitiesCamerasPreference,
-} from "@/lib/all-cities-cameras"
 import { WebRtcPlayer, type WebRtcPlayerHandle } from "@/components/cameras/webrtc-player"
 import {
   fetchAllCitiesSelection,
@@ -1010,8 +1013,8 @@ export default function AllCitiesCamerasPage() {
     else setLoading(true)
     setError(null)
 
-    // Soft refresh stays under overall backend ~14s; hard refresh gets a bit more headroom
-    const timeoutId = window.setTimeout(() => controller.abort(), refresh ? 18_000 : 16_000)
+    // Soft load is cache-first on the API (~6s). Hard refresh may contact remotes (~10s).
+    const timeoutId = window.setTimeout(() => controller.abort(), refresh ? 22_000 : 14_000)
 
     try {
       const data = await fetchAllCitiesStreams({
@@ -1019,15 +1022,17 @@ export default function AllCitiesCamerasPage() {
         signal: controller.signal,
       })
       if (gen !== loadGenRef.current) return
-      setServers(Array.isArray(data.servers) ? data.servers : [])
+      const nextServers = Array.isArray(data.servers) ? data.servers : []
       const nextCameras = Array.isArray(data.cameras) ? data.cameras : []
+      setServers(nextServers as ServerSummary[])
       setCameras((prev) =>
         camerasFingerprint(prev) === camerasFingerprint(nextCameras) ? prev : nextCameras
       )
+      writeAllCitiesStreamsCache(nextServers, nextCameras)
     } catch (e) {
       if (gen !== loadGenRef.current) return
       if (controller.signal.aborted) {
-        setError("Request timed out. Existing cameras kept — try again.")
+        setError("Request timed out. Existing cameras kept — try Refresh.")
       } else {
         setError(e instanceof Error ? e.message : "Failed to load streams")
       }
@@ -1047,6 +1052,13 @@ export default function AllCitiesCamerasPage() {
     if (!preferenceSetRef.current) {
       preferenceSetRef.current = true
       setAllCitiesCamerasPreference(true)
+    }
+    // Instant paint from last session (helps mobile when API is slow)
+    const cached = readAllCitiesStreamsCache()
+    if (cached && cached.cameras.length > 0) {
+      setServers(Array.isArray(cached.servers) ? (cached.servers as ServerSummary[]) : [])
+      setCameras(Array.isArray(cached.cameras) ? (cached.cameras as CityCamera[]) : [])
+      setLoading(false)
     }
     void load(false)
     return () => {

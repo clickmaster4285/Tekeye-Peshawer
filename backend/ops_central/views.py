@@ -492,6 +492,7 @@ class AllCitiesStreamsAPIView(APIView):
     permission_classes = [IsOpsViewer]
 
     def get(self, request):
+        ensure_default_remote_server(request.user)
         refresh = str(request.query_params.get("refresh", "")).lower() in ("1", "true", "yes")
         servers = list(RemoteServer.objects.filter(is_active=True).order_by("name"))
         servers_out: list[dict] = []
@@ -509,13 +510,16 @@ class AllCitiesStreamsAPIView(APIView):
             return fetch_remote_cameras(server.normalized_base_url(), token)
 
         live_results: dict = {}
+        # Soft load: never block on servers that already have any camera cache.
+        # Only contact remotes when refresh=1 or the cache is empty (first paint).
+        # TTL freshness still applies on refresh paths via _cache_is_fresh.
         servers_to_fetch = [
-            server for server in servers if refresh or not server.cached_cameras
+            server
+            for server in servers
+            if refresh or not (server.cached_cameras and len(server.cached_cameras) > 0)
         ]
-        # One overall deadline for ALL servers (parallel). Sequential per-future
-        # timeouts used to stack (N × 12s) and freeze Refresh when remote nodes hang.
-        # Important: shutdown(wait=False) so hung requests.get threads don't block the response.
-        overall_fetch_timeout = 14.0 if refresh else 12.0
+        # Keep soft loads snappy for mobile / WAN; hard refresh gets a bit more time.
+        overall_fetch_timeout = 10.0 if refresh else 6.0
         if servers_to_fetch:
             executor = ThreadPoolExecutor(max_workers=min(8, len(servers_to_fetch)))
             try:
@@ -565,7 +569,10 @@ class AllCitiesStreamsAPIView(APIView):
             }
             raw_cameras: list = []
 
-            use_cache = _cache_is_fresh(server, refresh=refresh)
+            # Soft load: serve any existing cache immediately (ignore TTL) so mobile
+            # clients never wait on distant ML nodes when we already know the cameras.
+            soft_cache_ok = (not refresh) and bool(server.cached_cameras)
+            use_cache = soft_cache_ok or _cache_is_fresh(server, refresh=refresh)
             if use_cache:
                 raw_cameras = list(server.cached_cameras or [])
                 entry["ok"] = True

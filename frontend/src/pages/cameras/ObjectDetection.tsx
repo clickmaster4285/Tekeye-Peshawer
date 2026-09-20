@@ -41,7 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { MlSystemStatus } from "@/components/cameras/ml-system-status"
-import { DetectionSnapshotThumb, detectionDisplayLabel } from "@/components/cameras/detection-snapshot-thumb"
+import { DetectionSnapshotThumb } from "@/components/cameras/detection-snapshot-thumb"
 import {
   fetchDetectionEventsPage,
   fetchDetectionSummary,
@@ -470,14 +470,14 @@ export default function ObjectDetectionPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-2 md:col-span-2 xl:col-span-2">
-              <Label htmlFor="det-search">Search (class, label, synonyms)</Label>
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="space-y-2">
+              <Label htmlFor="det-search">Search (class, synonyms)</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="det-search"
-                  className="pl-9"
+                  className="w-full pl-9"
                   placeholder="e.g. smoke, person, vehicle, fire…"
                   value={draft.q}
                   onChange={(e) => setDraft((f) => ({ ...f, q: e.target.value }))}
@@ -491,7 +491,7 @@ export default function ObjectDetectionPage() {
                 value={draft.site}
                 onValueChange={(v) => setDraft((f) => ({ ...f, site: v, camera: "all" }))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="All sites" />
                 </SelectTrigger>
                 <SelectContent>
@@ -510,7 +510,7 @@ export default function ObjectDetectionPage() {
                 value={draft.camera}
                 onValueChange={(v) => setDraft((f) => ({ ...f, camera: v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="All cameras" />
                 </SelectTrigger>
                 <SelectContent>
@@ -528,6 +528,7 @@ export default function ObjectDetectionPage() {
               <Input
                 id="det-from"
                 type="date"
+                className="w-full"
                 value={draft.date_from}
                 onChange={(e) => setDraft((f) => ({ ...f, date_from: e.target.value }))}
               />
@@ -537,6 +538,7 @@ export default function ObjectDetectionPage() {
               <Input
                 id="det-to"
                 type="date"
+                className="w-full"
                 value={draft.date_to}
                 onChange={(e) => setDraft((f) => ({ ...f, date_to: e.target.value }))}
               />
@@ -547,7 +549,7 @@ export default function ObjectDetectionPage() {
                 value={draft.alert}
                 onValueChange={(v) => setDraft((f) => ({ ...f, alert: v as AppliedFilters["alert"] }))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -558,9 +560,10 @@ export default function ObjectDetectionPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="det-class">Class name</Label>
+              <Label htmlFor="det-class">Class</Label>
               <Input
                 id="det-class"
+                className="w-full"
                 placeholder="e.g. person, car"
                 value={draft.class_name}
                 onChange={(e) => setDraft((f) => ({ ...f, class_name: e.target.value }))}
@@ -633,7 +636,6 @@ export default function ObjectDetectionPage() {
                     <TableHead>Site</TableHead>
                     <TableHead>Camera</TableHead>
                     <TableHead>Class</TableHead>
-                    <TableHead>Label</TableHead>
                     <TableHead className="w-[140px]">Confidence</TableHead>
                     <TableHead>Alert</TableHead>
                     <TableHead className="w-[140px]">Snapshot</TableHead>
@@ -643,13 +645,13 @@ export default function ObjectDetectionPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={isAdmin ? 8 : 7} className="text-center text-muted-foreground py-12">
                         Loading detection records…
                       </TableCell>
                     </TableRow>
                   ) : events.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={isAdmin ? 8 : 7} className="text-center text-muted-foreground py-12">
                         <Camera className="h-8 w-8 mx-auto mb-2 opacity-40" />
                         {hasActiveFilters
                           ? "No detections match your filters. Try broader search terms or clear filters."
@@ -679,9 +681,6 @@ export default function ObjectDetectionPage() {
                           <Badge variant="outline" className="font-normal">
                             {row.class_name}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-[180px] truncate" title={detectionDisplayLabel(row)}>
-                          {detectionDisplayLabel(row)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -882,21 +881,12 @@ export default function ObjectDetectionPage() {
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="edit-class">Class name</Label>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="edit-class">Class</Label>
                 <Input
                   id="edit-class"
                   value={editForm.class_name}
                   onChange={(e) => setEditForm((f) => ({ ...f, class_name: e.target.value }))}
-                  disabled={savingEdit}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-label">Label</Label>
-                <Input
-                  id="edit-label"
-                  value={editForm.label}
-                  onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
                   disabled={savingEdit}
                 />
               </div>
