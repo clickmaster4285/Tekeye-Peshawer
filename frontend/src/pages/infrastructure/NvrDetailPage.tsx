@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Server,
   Thermometer,
+  Trash2,
   Video,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -29,9 +30,12 @@ import {
 import { ROUTES, getInfrastructureNvrDetailPath } from "@/routes/config"
 import {
   fetchNvrDetail,
+  deleteNvrLogs,
   refreshNvrLogs,
   type NvrDetailPayload,
 } from "@/lib/infrastructure-api"
+import { getStoredUser } from "@/lib/auth"
+import { normalizeRole } from "@/lib/role-access"
 
 function MetricRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -70,6 +74,7 @@ export default function NvrDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const nvrId = Number(id)
+  const isAdmin = normalizeRole(getStoredUser()?.role) === "ADMIN"
   const [data, setData] = useState<NvrDetailPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [probing, setProbing] = useState(false)
@@ -453,40 +458,75 @@ export default function NvrDetailPage() {
                     …) — same columns as the NVR log viewer
                   </CardDescription>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={probing}
-                  onClick={() =>
-                    void (async () => {
-                      setProbing(true)
-                      setError(null)
-                      try {
-                        const res = await refreshNvrLogs(nvrId)
-                        setData((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                nvr_logs: res.results,
-                                nvr_logs_count: res.count,
-                              }
-                            : prev
-                        )
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : "Failed to pull NVR logs")
-                      } finally {
-                        setProbing(false)
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={probing}
+                    onClick={() =>
+                      void (async () => {
+                        setProbing(true)
+                        setError(null)
+                        try {
+                          const res = await refreshNvrLogs(nvrId)
+                          setData((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  nvr_logs: res.results,
+                                  nvr_logs_count: res.count,
+                                }
+                              : prev
+                          )
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : "Failed to pull NVR logs")
+                        } finally {
+                          setProbing(false)
+                        }
+                      })()
+                    }
+                  >
+                    {probing ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1.5 h-4 w-4" />
+                    )}
+                    Pull all logs
+                  </Button>
+                  {isAdmin ? (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={probing || !(data.nvr_logs_count || data.nvr_logs?.length)}
+                      onClick={() =>
+                        void (async () => {
+                          if (
+                            !window.confirm(
+                              "Delete ALL stored NVR logs for this device? This cannot be undone."
+                            )
+                          ) {
+                            return
+                          }
+                          setProbing(true)
+                          setError(null)
+                          try {
+                            await deleteNvrLogs(nvrId)
+                            setData((prev) =>
+                              prev ? { ...prev, nvr_logs: [], nvr_logs_count: 0 } : prev
+                            )
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : "Failed to delete NVR logs")
+                          } finally {
+                            setProbing(false)
+                          }
+                        })()
                       }
-                    })()
-                  }
-                >
-                  {probing ? (
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-1.5 h-4 w-4" />
-                  )}
-                  Pull all logs
-                </Button>
+                    >
+                      <Trash2 className="mr-1.5 h-4 w-4" />
+                      Delete logs
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </CardHeader>
             <CardContent>

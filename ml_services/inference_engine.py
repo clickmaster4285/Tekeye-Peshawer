@@ -154,6 +154,7 @@ _yolo_custom = None
 _yolo_smoke = None
 _yolo_weapon = None
 _face_db: KnownFaceDB | None = None
+_face_db_lock = threading.Lock()
 _warmup_done = False
 _custom_class_ids_cache: list[int] | None = None
 _custom_class_names_cache: dict[int, str] | None = None
@@ -519,8 +520,10 @@ def get_yolo_model():
 def get_face_db() -> KnownFaceDB:
     global _face_db
     if _face_db is None:
-        threshold = float(os.getenv("ML_FACE_THRESHOLD", "0.32"))
-        _face_db = KnownFaceDB(threshold=threshold)
+        with _face_db_lock:
+            if _face_db is None:
+                threshold = float(os.getenv("ML_FACE_THRESHOLD", "0.32"))
+                _face_db = KnownFaceDB(threshold=threshold)
     return _face_db
 
 

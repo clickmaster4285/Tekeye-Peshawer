@@ -214,15 +214,17 @@ class InfraDeviceViewSet(viewsets.ModelViewSet):
             device.refresh_from_db()
         return Response(build_server_detail_payload(device))
 
-    @action(detail=True, methods=["get", "post"])
+    @action(detail=True, methods=["get", "post", "delete"])
     def server_logs(self, request, pk=None):
         """
-        List / refresh server logs.
-        GET  — stored logs (optional ?category=)
-        POST — re-enrich from agent then return stored set
+        List / refresh / delete server logs.
+        GET    — stored logs (optional ?category=)
+        POST   — re-enrich from agent then return stored set
+        DELETE — clear stored logs (Super Admin only; optional ?category=)
         """
-        from .models import DeviceType
+        from .models import DeviceType, InfraServerLog
         from .server_health import enrich_server_metrics, load_stored_server_logs
+        from users.permissions import is_global_admin
 
         device = self.get_object()
         if device.device_type != DeviceType.SERVER:
@@ -230,6 +232,22 @@ class InfraDeviceViewSet(viewsets.ModelViewSet):
                 {"detail": "This endpoint is only for server devices."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        category = (request.query_params.get("category") or "").strip() or None
+        if isinstance(request.data, dict) and not category:
+            category = (request.data.get("category") or "").strip() or None
+
+        if request.method == "DELETE":
+            if not is_global_admin(request.user):
+                return Response(
+                    {"detail": "Only Super Admin can delete server logs."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            qs = InfraServerLog.objects.filter(device=device)
+            if category:
+                qs = qs.filter(category=category)
+            deleted, _ = qs.delete()
+            return Response({"ok": True, "deleted": deleted, "category": category or "all"})
 
         if request.method == "POST":
             metrics = enrich_server_metrics(device)
@@ -243,19 +261,20 @@ class InfraDeviceViewSet(viewsets.ModelViewSet):
             limit = min(10000, max(100, int(request.query_params.get("limit") or 2000)))
         except (TypeError, ValueError):
             pass
-        category = (request.query_params.get("category") or "").strip() or None
         logs = load_stored_server_logs(device, limit=limit, category=category)
         return Response({"count": len(logs), "results": logs})
 
-    @action(detail=True, methods=["get", "post"])
+    @action(detail=True, methods=["get", "post", "delete"])
     def nvr_logs(self, request, pk=None):
         """
-        List / refresh full NVR logs (all major types).
-        GET  — stored logs from DB
-        POST — pull latest from NVR then return stored set
+        List / refresh / delete NVR logs.
+        GET    — stored logs from DB
+        POST   — pull latest from NVR then return stored set
+        DELETE — clear stored logs (Super Admin only)
         """
-        from .models import DeviceType
+        from .models import DeviceType, InfraNvrLog
         from .nvr_health import enrich_nvr_metrics, load_stored_nvr_logs
+        from users.permissions import is_global_admin
 
         device = self.get_object()
         if device.device_type != DeviceType.NVR:
@@ -263,6 +282,15 @@ class InfraDeviceViewSet(viewsets.ModelViewSet):
                 {"detail": "This endpoint is only for NVR devices."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        if request.method == "DELETE":
+            if not is_global_admin(request.user):
+                return Response(
+                    {"detail": "Only Super Admin can delete NVR logs."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            deleted, _ = InfraNvrLog.objects.filter(device=device).delete()
+            return Response({"ok": True, "deleted": deleted})
 
         if request.method == "POST":
             metrics = enrich_nvr_metrics(device)

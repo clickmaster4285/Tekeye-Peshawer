@@ -297,6 +297,12 @@ class DetectionEvent(models.Model):
         choices=ClipStatus.choices,
         default=ClipStatus.PENDING,
     )
+    video = models.FileField(
+        upload_to="detection_videos/%Y/%m/%d/",
+        blank=True,
+        null=True,
+        help_text="Optional alert video clip attached to this detection event.",
+    )
     # Journey / tracking columns (required by DB schema for cross-camera person linking)
     local_track_id = models.PositiveIntegerField(
         null=True,

@@ -671,6 +671,18 @@ export async function refreshServerLogs(
   return apiJson(`/infra/devices/${id}/server_logs/`, { method: "POST", body: "{}" })
 }
 
+export async function deleteServerLogs(
+  id: number,
+  opts?: { category?: string }
+): Promise<{ deleted: number; category: string }> {
+  const q = opts?.category ? `?category=${encodeURIComponent(opts.category)}` : ""
+  return apiJson(`/infra/devices/${id}/server_logs/${q}`, { method: "DELETE" })
+}
+
+export async function deleteNvrLogs(id: number): Promise<{ deleted: number }> {
+  return apiJson(`/infra/devices/${id}/nvr_logs/`, { method: "DELETE" })
+}
+
 export async function refreshInfraMonitoring(): Promise<{
   sync: { created: number; updated: number; skipped: number }
   poll: {

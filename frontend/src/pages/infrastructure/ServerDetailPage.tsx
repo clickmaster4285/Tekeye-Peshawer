@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Server,
   Thermometer,
+  Trash2,
   Zap,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -31,10 +32,13 @@ import {
 import { ROUTES, getInfrastructureServerDetailPath } from "@/routes/config"
 import {
   fetchServerDetail,
+  deleteServerLogs,
   refreshServerLogs,
   type ServerDetailPayload,
   type ServerLogEntry,
 } from "@/lib/infrastructure-api"
+import { getStoredUser } from "@/lib/auth"
+import { normalizeRole } from "@/lib/role-access"
 
 function MetricRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -114,6 +118,7 @@ export default function ServerDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const serverId = Number(id)
+  const isAdmin = normalizeRole(getStoredUser()?.role) === "ADMIN"
   const [data, setData] = useState<ServerDetailPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [probing, setProbing] = useState(false)
@@ -589,29 +594,66 @@ export default function ServerDetailPage() {
                     Error, access, system, security, and application logs · {data.logs.total} stored
                   </CardDescription>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={logBusy}
-                  onClick={async () => {
-                    setLogBusy(true)
-                    try {
-                      await refreshServerLogs(serverId)
-                      await load(false)
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : "Failed to refresh logs")
-                    } finally {
-                      setLogBusy(false)
-                    }
-                  }}
-                >
-                  {logBusy ? (
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-1.5 h-4 w-4" />
-                  )}
-                  Pull logs
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={logBusy}
+                    onClick={async () => {
+                      setLogBusy(true)
+                      try {
+                        await refreshServerLogs(serverId)
+                        await load(false)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : "Failed to refresh logs")
+                      } finally {
+                        setLogBusy(false)
+                      }
+                    }}
+                  >
+                    {logBusy ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1.5 h-4 w-4" />
+                    )}
+                    Pull logs
+                  </Button>
+                  {isAdmin ? (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={logBusy || (data.logs.total || 0) === 0}
+                      onClick={async () => {
+                        const scope =
+                          logTab === "all"
+                            ? "ALL stored server logs"
+                            : `stored “${logTab}” logs`
+                        if (
+                          !window.confirm(
+                            `Delete ${scope} for this server? This cannot be undone.`
+                          )
+                        ) {
+                          return
+                        }
+                        setLogBusy(true)
+                        try {
+                          await deleteServerLogs(
+                            serverId,
+                            logTab === "all" ? undefined : { category: logTab }
+                          )
+                          await load(false)
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : "Failed to delete logs")
+                        } finally {
+                          setLogBusy(false)
+                        }
+                      }}
+                    >
+                      <Trash2 className="mr-1.5 h-4 w-4" />
+                      Delete {logTab === "all" ? "all" : logTab} logs
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">

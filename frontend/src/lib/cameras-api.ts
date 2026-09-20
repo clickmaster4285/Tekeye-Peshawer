@@ -1,4 +1,4 @@
-import { API_BASE_URL, getAuthHeaders, getStoredToken } from "@/lib/api";
+import { API_BASE_URL, getAuthHeaders, getAuthHeadersFormData, getStoredToken } from "@/lib/api";
 
 export type CameraPurpose =
   | "general_objects"
@@ -157,6 +157,7 @@ export type DetectionEvent = {
   is_alert: boolean;
   clip_status?: ClipStatus;
   clip_url?: string;
+  video_url?: string;
   created_at: string;
 };
 
@@ -589,6 +590,152 @@ export async function fetchDetectionEventsPage(
   });
   if (!res.ok) throw new Error(`Failed to load detection events (${res.status})`);
   return res.json();
+}
+
+export async function deleteDetectionEvents(ids: number[]): Promise<{ deleted: number }> {
+  const res = await fetch(`${API}/cameras/detection-events/bulk-delete/`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ ids }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.detail === "string" ? data.detail : "Failed to delete detection events"
+    );
+  }
+  return { deleted: Number(data.deleted) || 0 };
+}
+
+export async function deleteDetectionEvent(id: number): Promise<{ deleted: number }> {
+  const res = await fetch(`${API}/cameras/detection-events/${id}/`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.detail === "string" ? data.detail : "Failed to delete detection event"
+    );
+  }
+  return { deleted: Number(data.deleted) || 1 };
+}
+
+export type DetectionEventUpdatePayload = {
+  camera?: number;
+  created_at?: string;
+  class_name?: string;
+  label?: string;
+  employee_name?: string;
+  personal_number?: string;
+  person_qr?: string;
+  track_event?: string;
+  confidence?: number;
+  is_alert?: boolean;
+  clip_status?: ClipStatus | string;
+  local_track_id?: number | null;
+  person_identity_id?: number | null;
+  bbox?: number[] | null;
+  infer_frame_width?: number | null;
+  infer_frame_height?: number | null;
+  clear_clip?: boolean;
+  clip?: File | null;
+  clear_video?: boolean;
+  video?: File | null;
+};
+
+export async function updateDetectionEvent(
+  id: number,
+  payload: DetectionEventUpdatePayload
+): Promise<DetectionEvent> {
+  const hasFile = payload.clip instanceof File || payload.video instanceof File;
+  const useForm = hasFile || Boolean(payload.clear_clip) || Boolean(payload.clear_video);
+
+  let res: Response;
+  if (useForm) {
+    const form = new FormData();
+    const append = (key: string, value: string | Blob) => form.append(key, value);
+    if (payload.camera != null) append("camera", String(payload.camera));
+    if (payload.created_at != null) append("created_at", payload.created_at);
+    if (payload.class_name != null) append("class_name", payload.class_name);
+    if (payload.label != null) append("label", payload.label);
+    if (payload.employee_name != null) append("employee_name", payload.employee_name);
+    if (payload.personal_number != null) append("personal_number", payload.personal_number);
+    if (payload.person_qr != null) append("person_qr", payload.person_qr);
+    if (payload.track_event != null) append("track_event", payload.track_event);
+    if (payload.confidence != null) append("confidence", String(payload.confidence));
+    if (payload.is_alert != null) append("is_alert", payload.is_alert ? "true" : "false");
+    if (payload.clip_status != null) append("clip_status", String(payload.clip_status));
+    if (payload.local_track_id !== undefined) {
+      append("local_track_id", payload.local_track_id == null ? "" : String(payload.local_track_id));
+    }
+    if (payload.person_identity_id !== undefined) {
+      append(
+        "person_identity_id",
+        payload.person_identity_id == null ? "" : String(payload.person_identity_id)
+      );
+    }
+    if (payload.bbox !== undefined) {
+      append("bbox", payload.bbox == null ? "[]" : JSON.stringify(payload.bbox));
+    }
+    if (payload.infer_frame_width !== undefined) {
+      append(
+        "infer_frame_width",
+        payload.infer_frame_width == null ? "" : String(payload.infer_frame_width)
+      );
+    }
+    if (payload.infer_frame_height !== undefined) {
+      append(
+        "infer_frame_height",
+        payload.infer_frame_height == null ? "" : String(payload.infer_frame_height)
+      );
+    }
+    if (payload.clear_clip) append("clear_clip", "true");
+    if (payload.clear_video) append("clear_video", "true");
+    if (payload.clip instanceof File) form.append("clip", payload.clip);
+    if (payload.video instanceof File) form.append("video", payload.video);
+
+    res = await fetch(`${API}/cameras/detection-events/${id}/`, {
+      method: "PATCH",
+      headers: getAuthHeadersFormData(),
+      body: form,
+    });
+  } else {
+    const { clip: _clip, clear_clip: _clear, video: _video, clear_video: _clearVid, ...jsonBody } =
+      payload;
+    res = await fetch(`${API}/cameras/detection-events/${id}/`, {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(jsonBody),
+    });
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.detail === "string" ? data.detail : "Failed to update detection event"
+    );
+  }
+  return data as DetectionEvent;
+}
+
+export async function clearDetectionEvents(opts?: {
+  camera?: number;
+  class_name?: string;
+  is_alert?: boolean;
+}): Promise<{ deleted: number }> {
+  const res = await fetch(`${API}/cameras/detection-events/clear/`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(opts || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.detail === "string" ? data.detail : "Failed to clear detection events"
+    );
+  }
+  return { deleted: Number(data.deleted) || 0 };
 }
 
 /** @deprecated Use fetchDetectionEventsPage for server-side pagination and filters. */
