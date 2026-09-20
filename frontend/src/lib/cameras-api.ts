@@ -279,11 +279,31 @@ export function getMlLiveMultipartUrl(
 }
 
 export function getRawMjpegUrl(
-  camera: Pick<CameraRecord, "id" | "ml_stream_key" | "raw_stream_url">
+  camera: Pick<
+    CameraRecord,
+    "id" | "ml_stream_key" | "raw_stream_url" | "ml_live_stream_url" | "ml_live_stream_path"
+  >
 ): string | null {
-  const direct = (camera.raw_stream_url || "").trim();
-  if (!direct) return null;
-  let url = direct;
+  let url = (camera.raw_stream_url || "").trim();
+  if (!url) {
+    // Derive raw from live URL when Django only returned the annotated feed.
+    const live = (camera.ml_live_stream_url || "").trim();
+    if (live) {
+      if (/[?&]kind=live\b/i.test(live)) {
+        url = live.replace(/([?&])kind=live\b/i, "$1kind=raw");
+      } else if (live.includes("/mjpeg/raw")) {
+        url = live;
+      } else if (live.includes("/mjpeg")) {
+        url = live.replace(/\/mjpeg(\/|$|\?)/, "/mjpeg/raw$1");
+      }
+    }
+  }
+  if (!url) {
+    const streamKey = (camera.ml_stream_key || "").trim();
+    const route = streamKey || (camera.id ? `cam-${camera.id}` : "");
+    if (route) url = `/ml/live/cam/${encodeURIComponent(route)}/mjpeg/raw`;
+  }
+  if (!url) return null;
   if (url.includes("/api/ops/")) {
     const token = getStoredToken();
     if (token && !/[?&]token=/.test(url)) {

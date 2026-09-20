@@ -84,6 +84,7 @@ export function DashboardLiveCameraGrid() {
               <MlCameraFeed
                 key={cam.id}
                 camera={cam}
+                preferRaw
                 pollMl={false}
                 pollIntervalMs={800}
                 showBrandLogo

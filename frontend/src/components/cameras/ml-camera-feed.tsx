@@ -24,6 +24,11 @@ type MlCameraFeedProps = {
   camera: CameraRecord
   /** Extra detection JSON polling — off by default; overlays are already on the MJPEG. */
   pollMl?: boolean
+  /**
+   * Prefer the clean camera feed (no YOLO boxes). Dashboard uses this.
+   * Default keeps the AI-annotated ML live stream for ops/management views.
+   */
+  preferRaw?: boolean
   showOverlay?: boolean
   pollIntervalMs?: number
   className?: string
@@ -64,6 +69,7 @@ function StreamBrandMarks() {
 export function MlCameraFeed({
   camera,
   pollMl = false,
+  preferRaw = false,
   pollIntervalMs = 5000,
   className = "",
   showBrandLogo = true,
@@ -88,11 +94,15 @@ export function MlCameraFeed({
   }, [])
 
   const mlLiveSrc = getMlLiveMultipartUrl(camera)
-  const rawMjpegSrc = !mlLiveSrc && camera.is_rtsp ? getRawMjpegUrl(camera) : null
-  const streamSrcBase = mlLiveSrc || rawMjpegSrc
+  const rawMjpegSrc = getRawMjpegUrl(camera)
+  // Dashboard: clean camera only. Elsewhere: AI live feed, raw as fallback.
+  const streamSrcBase = preferRaw
+    ? rawMjpegSrc || mlLiveSrc
+    : mlLiveSrc || rawMjpegSrc
   const streamSrc = streamSrcBase && pageVisible
     ? `${streamSrcBase}${streamSrcBase.includes("?") ? "&" : "?"}r=${streamRetry}`
     : null
+  const usingMlAnnotated = Boolean(streamSrcBase && mlLiveSrc && streamSrcBase === mlLiveSrc)
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
@@ -176,14 +186,14 @@ export function MlCameraFeed({
             onLoad={() => setStreamError(null)}
             onError={() => {
               if (retryTimer.current != null) window.clearTimeout(retryTimer.current)
-              if (mlLiveSrc && streamRetry < 12) {
+              if (streamRetry < 12) {
                 retryTimer.current = window.setTimeout(() => {
                   setStreamRetry((n) => n + 1)
                 }, 4000)
                 return
               }
               setStreamError(
-                mlLiveSrc
+                usingMlAnnotated
                   ? "ML stream failed — ensure ML service is running."
                   : "Cannot load stream — verify camera / ML service."
               )
@@ -199,7 +209,7 @@ export function MlCameraFeed({
           <Badge variant="secondary" className="text-xs">
             {camera.name}
           </Badge>
-          {mlLiveSrc && <Badge className="bg-[#3b82f6] text-xs">Live</Badge>}
+          {streamSrc && <Badge className="bg-[#3b82f6] text-xs">Live</Badge>}
         </div>
 
         {showFullscreenButton && (

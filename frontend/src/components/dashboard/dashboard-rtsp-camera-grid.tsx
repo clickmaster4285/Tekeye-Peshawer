@@ -238,6 +238,7 @@ export function DashboardRtspCameraGrid() {
               <MlCameraFeed
                 key={cam.id}
                 camera={cam}
+                preferRaw
                 pollMl={false}
                 showBrandLogo
                 showFullscreenButton
