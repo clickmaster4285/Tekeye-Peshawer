@@ -39,6 +39,7 @@ from .go2rtc import (
     ensure_stream as _go2rtc_ensure_stream,
     exchange_webrtc_sdp as _go2rtc_exchange_sdp,
     go2rtc_configured as _go2rtc_configured,
+    health_ok as _go2rtc_health_ok,
     stream_name_for as _go2rtc_stream_name,
     warm_stream as _go2rtc_warm_stream,
 )
@@ -169,7 +170,11 @@ def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]
     """Rewrite stream URLs to hub proxy endpoints."""
     from django.conf import settings
 
-    webrtc_on = bool(getattr(settings, "GO2RTC_ENABLED", False)) and _go2rtc_configured()
+    webrtc_on = (
+        bool(getattr(settings, "GO2RTC_ENABLED", False))
+        and _go2rtc_configured()
+        and _go2rtc_health_ok()
+    )
     out = []
     for cam in cameras:
         row = dict(cam)
@@ -923,13 +928,13 @@ class RemoteWebRtcProxyView(APIView):
             )
 
         name = _go2rtc_stream_name(pk, stream_key)
+        # ensure_stream registers + warms; skip duplicate warm if already hot
         if not _go2rtc_ensure_stream(name, rtsp_url):
             return Response(
                 {"detail": "Could not register stream with go2rtc. Is go2rtc running?"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-
-        # Start ffmpeg/RTSP before SDP so the browser does not abort mid-handshake
+        # Ensure still warm (ensure_stream may have returned last-resort without warm)
         if not _go2rtc_warm_stream(name):
             return Response(
                 {

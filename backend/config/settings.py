@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "video_recovery.apps.VideoRecoveryConfig",
     "camera_health.apps.CameraHealthConfig",
     "realtime.apps.RealtimeConfig",
+    "infrastructure_monitoring.apps.InfrastructureMonitoringConfig",
 ]
 
 # -----------------------------
@@ -283,11 +284,11 @@ GO2RTC_ENABLED = bool(GO2RTC_URL) and os.getenv("GO2RTC_ENABLED", "true").strip(
     "1",
     "yes",
 )
-# All Cities viewing path (direct NVR via ffmpeg) — 0 = native 4K; 1920 = sharp wall default
+# All Cities viewing path (direct NVR via ffmpeg) — 0 = native 4K (grid + fullscreen)
 try:
-    VIEW_STREAM_MAX_WIDTH = max(0, int(os.getenv("VIEW_STREAM_MAX_WIDTH", "1920")))
+    VIEW_STREAM_MAX_WIDTH = max(0, int(os.getenv("VIEW_STREAM_MAX_WIDTH", "0")))
 except (TypeError, ValueError):
-    VIEW_STREAM_MAX_WIDTH = 1920
+    VIEW_STREAM_MAX_WIDTH = 0
 try:
     VIEW_STREAM_FPS = max(5, min(int(os.getenv("VIEW_STREAM_FPS", "15")), 30))
 except (TypeError, ValueError):
@@ -317,6 +318,12 @@ CAMERA_HEALTH_WORKER_ENABLED = os.getenv("CAMERA_HEALTH_WORKER_ENABLED", "True")
     "yes",
 )
 CAMERA_HEALTH_INTERVAL_SEC = float(os.getenv("CAMERA_HEALTH_INTERVAL_SEC", "45"))
+
+# Infrastructure Monitoring — auto-sync cameras/NVRs + poll device status
+INFRA_MONITORING_WORKER_ENABLED = os.getenv(
+    "INFRA_MONITORING_WORKER_ENABLED", "True"
+).lower() in ("true", "1", "yes")
+INFRA_POLL_INTERVAL_SEC = float(os.getenv("INFRA_POLL_INTERVAL_SEC", "45"))
 
 # Background worker throttling (cycle sleep + ffmpeg spawn spacing)
 WORKER_MIN_CYCLE_SLEEP_MS = int(os.getenv("WORKER_MIN_CYCLE_SLEEP_MS", "100"))

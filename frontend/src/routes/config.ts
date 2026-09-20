@@ -236,6 +236,23 @@ export const ROUTES = {
   AI_ALERTS_HISTORY: "/ai-zone-alerts",
   AI_ALERTS_CONFIGURATION: "/system-alerts",
 
+  // Infrastructure Monitoring (IT Super Admin)
+  INFRASTRUCTURE_OVERVIEW: "/infrastructure",
+  INFRASTRUCTURE_CAMERAS: "/infrastructure/cameras",
+  INFRASTRUCTURE_CAMERA_DETAIL: "/infrastructure/cameras/:id",
+  INFRASTRUCTURE_NVRS: "/infrastructure/nvrs",
+  INFRASTRUCTURE_NVR_DETAIL: "/infrastructure/nvrs/:id",
+  INFRASTRUCTURE_UPS: "/infrastructure/ups",
+  INFRASTRUCTURE_INVERTERS: "/infrastructure/inverters",
+  INFRASTRUCTURE_NETWORK: "/infrastructure/network-devices",
+  INFRASTRUCTURE_SERVERS: "/infrastructure/servers",
+  INFRASTRUCTURE_SERVER_DETAIL: "/infrastructure/servers/:id",
+  INFRASTRUCTURE_DEVICE_HEALTH: "/infrastructure/device-health",
+  INFRASTRUCTURE_POWER: "/infrastructure/power-monitoring",
+  INFRASTRUCTURE_ALERTS: "/infrastructure/alerts",
+  INFRASTRUCTURE_EVENTS: "/infrastructure/events",
+  INFRASTRUCTURE_REPORTS: "/infrastructure/reports",
+
   // Fallback
   NOT_FOUND: "/404",
 } as const
@@ -249,6 +266,18 @@ export function getEmployeeDetailPath(id: number): string {
 
 export function getEmployeeDevicePath(id: number): string {
   return `/employees/${id}/device`
+}
+
+export function getInfrastructureNvrDetailPath(id: number): string {
+  return `/infrastructure/nvrs/${id}`
+}
+
+export function getInfrastructureCameraDetailPath(id: number): string {
+  return `/infrastructure/cameras/${id}`
+}
+
+export function getInfrastructureServerDetailPath(id: number): string {
+  return `/infrastructure/servers/${id}`
 }
 
 /** Person journey lookup by PQR code */
@@ -397,7 +426,8 @@ export function getPeopleDatabaseDetailPath(id: number | string): string {
 /** Nav item for sidebar (leaf) */
 export interface NavItem {
   label: string
-  href: RoutePath
+  /** Route path; may include :id segments resolved elsewhere, or hash anchors on detail pages */
+  href: string
 }
 
 /** Nav group for sidebar (with children; children can be items or nested groups). Optional overviewHref: when user clicks the group, navigate here and expand. */
@@ -725,6 +755,26 @@ const SEIZURE_MANAGEMENT_NAV = ALL_NAV_ITEMS[3] as NavGroup
 const HUMAN_RESOURCE_NAV = ALL_NAV_ITEMS[4] as NavGroup
 const AUCTION_MANAGEMENT_NAV = ALL_NAV_ITEMS[7] as NavGroup
 
+/** IT Super Admin only — not part of Super Admin sidebar. */
+const INFRASTRUCTURE_MONITORING_NAV: NavGroup = {
+  label: "Infrastructure Monitoring",
+  overviewHref: ROUTES.INFRASTRUCTURE_OVERVIEW,
+  children: [
+    { label: "Overview", href: ROUTES.INFRASTRUCTURE_OVERVIEW },
+    { label: "Cameras", href: ROUTES.INFRASTRUCTURE_CAMERAS },
+    { label: "NVRs", href: ROUTES.INFRASTRUCTURE_NVRS },
+    { label: "UPS Systems", href: ROUTES.INFRASTRUCTURE_UPS },
+    { label: "Inverters", href: ROUTES.INFRASTRUCTURE_INVERTERS },
+    { label: "Network Devices", href: ROUTES.INFRASTRUCTURE_NETWORK },
+    { label: "Servers", href: ROUTES.INFRASTRUCTURE_SERVERS },
+    { label: "Device Health", href: ROUTES.INFRASTRUCTURE_DEVICE_HEALTH },
+    { label: "Power Monitoring", href: ROUTES.INFRASTRUCTURE_POWER },
+    { label: "Alerts", href: ROUTES.INFRASTRUCTURE_ALERTS },
+    { label: "Events", href: ROUTES.INFRASTRUCTURE_EVENTS },
+    { label: "Reports", href: ROUTES.INFRASTRUCTURE_REPORTS },
+  ],
+}
+
 const VEHICLE_MANAGEMENT_NAV: NavGroup = {
   label: "Vehicle Management",
   children: [
@@ -909,7 +959,7 @@ export function getNavSectionsForRole(
   // Super Admin — full sidebar, no Central Ops.
   if (normalized === "ADMIN") return NAV_SECTIONS
 
-  // IT Super Admin — Central Ops only.
+  // IT Super Admin — Central Ops + Infrastructure Monitoring.
   if (normalized === "IT_SUPERADMIN") {
     return [
       {
@@ -920,6 +970,10 @@ export function getNavSectionsForRole(
           { label: "Camera Distribution", href: ROUTES.OPS_CAMERA_DISTRIBUTION },
           { label: "All Cities Cameras", href: ROUTES.ALL_CITIES_CAMERAS },
         ],
+      },
+      {
+        title: "Infrastructure Monitoring",
+        items: [INFRASTRUCTURE_MONITORING_NAV],
       },
     ]
   }
@@ -1014,12 +1068,15 @@ export function getModuleLabelForPath(
 }
 
 /** All leaf nav items (label + href) from the full nav tree, for favorites etc. */
-export function getAllNavItems(): { label: string; href: RoutePath }[] {
-  const out: { label: string; href: RoutePath }[] = []
+export function getAllNavItems(): { label: string; href: string }[] {
+  const out: { label: string; href: string }[] = []
   function walk(nodes: (NavItem | NavGroup)[]) {
     for (const node of nodes) {
-      if ("href" in node) out.push({ label: node.label, href: node.href })
-      else walk(node.children)
+      if ("href" in node && typeof node.href === "string") {
+        out.push({ label: node.label, href: node.href })
+      } else if ("children" in node) {
+        walk(node.children)
+      }
     }
   }
   for (const section of NAV_SECTIONS) walk(section.items)
