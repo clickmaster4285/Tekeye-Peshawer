@@ -563,9 +563,15 @@ export default function OpsCameraDistributionPage() {
                       )}
                       title={server.name}
                       subtitle={
-                        server.max_cameras
-                          ? `${server.cameras.length}/${server.max_cameras} capacity`
-                          : server.gpu || undefined
+                        [
+                          server.gpu ||
+                            (server.gpu_device != null ? `GPU ${server.gpu_device}` : ""),
+                          server.max_cameras
+                            ? `${server.cameras.length}/${server.max_cameras} capacity`
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || undefined
                       }
                       count={server.filteredCameras.length}
                       totalCount={server.cameras.length}

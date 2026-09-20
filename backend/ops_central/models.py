@@ -52,10 +52,15 @@ class RemoteServer(models.Model):
         help_text="Optional site this ML node primarily serves (e.g. D.I. Khan).",
     )
     gpu = models.CharField(
-        max_length=64,
+        max_length=128,
         blank=True,
         default="",
-        help_text="GPU label e.g. P4000",
+        help_text="GPU display label e.g. GPU 0 · RTX A6000 (auto-filled from ML /health).",
+    )
+    gpu_device = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="CUDA device index assigned for this ML node (0, 1, …).",
     )
     max_cameras = models.PositiveIntegerField(
         default=25,

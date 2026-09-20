@@ -31,6 +31,7 @@ class RemoteServerSerializer(serializers.ModelSerializer):
             "site_code",
             "site_name",
             "gpu",
+            "gpu_device",
             "max_cameras",
             "assigned_count",
             "available_slots",
@@ -63,6 +64,7 @@ class RemoteServerSerializer(serializers.ModelSerializer):
             "ml_base_url": {"required": False, "allow_blank": True},
             "site": {"required": False, "allow_null": True},
             "gpu": {"required": False, "allow_blank": True},
+            "gpu_device": {"required": False, "allow_null": True},
             "max_cameras": {"required": False},
         }
 
@@ -147,6 +149,7 @@ class QuickConnectSerializer(serializers.Serializer):
     save = serializers.BooleanField(required=False, default=True)
     site = serializers.IntegerField(required=False, allow_null=True)
     gpu = serializers.CharField(required=False, allow_blank=True, default="")
+    gpu_device = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     max_cameras = serializers.IntegerField(required=False, min_value=1, default=25)
 
     def validate_base_url(self, value: str) -> str:

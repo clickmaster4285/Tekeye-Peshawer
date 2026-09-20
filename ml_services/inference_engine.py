@@ -206,6 +206,55 @@ def use_gpu_half() -> bool:
     return resolve_ml_device() != "cpu"
 
 
+def _list_gpus_nvidia_smi() -> list[dict[str, Any]]:
+    """Full host GPU inventory via nvidia-smi (ignores CUDA_VISIBLE_DEVICES)."""
+    import shutil
+    import subprocess
+
+    smi = shutil.which("nvidia-smi")
+    if not smi:
+        return []
+    try:
+        proc = subprocess.run(
+            [
+                smi,
+                "--query-gpu=index,name,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    out: list[dict[str, Any]] = []
+    for line in (proc.stdout or "").splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            idx = int(parts[0])
+        except ValueError:
+            continue
+        name = parts[1] or f"GPU {idx}"
+        row: dict[str, Any] = {"index": idx, "name": name}
+        if len(parts) >= 3:
+            try:
+                row["total_memory_mb"] = int(float(parts[2]))
+            except ValueError:
+                pass
+        if len(parts) >= 4:
+            try:
+                row["free_memory_mb"] = int(float(parts[3]))
+            except ValueError:
+                pass
+        out.append(row)
+    return out
+
+
 def get_cuda_status() -> dict[str, Any]:
     device = resolve_ml_device()
     info: dict[str, Any] = {
@@ -213,17 +262,60 @@ def get_cuda_status() -> dict[str, Any]:
         "cuda_available": False,
         "cuda_device_name": None,
         "cuda_device_count": 0,
+        "gpus": [],
     }
+    # Prefer host-wide inventory so admin UI sees GPU 0 + GPU 1 even when
+    # this process is pinned with CUDA_VISIBLE_DEVICES.
+    host_gpus = _list_gpus_nvidia_smi()
     try:
         import torch
 
         info["cuda_available"] = bool(torch.cuda.is_available())
-        info["cuda_device_count"] = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+        torch_count = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+        torch_gpus: list[dict[str, Any]] = []
+        for idx in range(torch_count):
+            props = torch.cuda.get_device_properties(idx)
+            total_mb = int(getattr(props, "total_memory", 0) or 0) // (1024 * 1024)
+            free_mb = None
+            try:
+                free_b, _total_b = torch.cuda.mem_get_info(idx)
+                free_mb = int(free_b) // (1024 * 1024)
+            except Exception:
+                free_mb = None
+            torch_gpus.append(
+                {
+                    "index": idx,
+                    "name": torch.cuda.get_device_name(idx),
+                    "total_memory_mb": total_mb or None,
+                    "free_memory_mb": free_mb,
+                }
+            )
+        gpus = host_gpus or torch_gpus
+        info["gpus"] = gpus
+        info["cuda_device_count"] = len(gpus) if gpus else torch_count
         if torch.cuda.is_available() and device != "cpu":
             idx = int(device) if isinstance(device, int) else 0
-            info["cuda_device_name"] = torch.cuda.get_device_name(idx)
+            if 0 <= idx < torch_count:
+                info["cuda_device_name"] = torch.cuda.get_device_name(idx)
+            elif gpus:
+                # Map visible torch index → host name when possible
+                match = next((g for g in gpus if g.get("index") == idx), None)
+                info["cuda_device_name"] = (match or gpus[0]).get("name")
+        elif gpus and not info["cuda_device_name"]:
+            info["cuda_device_name"] = gpus[0].get("name")
+            info["cuda_available"] = True
     except Exception as exc:
         info["cuda_error"] = str(exc)
+        if host_gpus:
+            info["gpus"] = host_gpus
+            info["cuda_device_count"] = len(host_gpus)
+            info["cuda_available"] = True
+            info["cuda_device_name"] = host_gpus[0].get("name")
+    if not info["gpus"] and host_gpus:
+        info["gpus"] = host_gpus
+        info["cuda_device_count"] = len(host_gpus)
+        info["cuda_available"] = True
+        info["cuda_device_name"] = info["cuda_device_name"] or host_gpus[0].get("name")
     return info
 
 

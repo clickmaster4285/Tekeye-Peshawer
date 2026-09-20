@@ -17,6 +17,7 @@ export type RemoteServerRecord = {
   site_code?: string
   site_name?: string
   gpu?: string
+  gpu_device?: number | null
   max_cameras?: number
   assigned_count?: number
   available_slots?: number | null
@@ -26,6 +27,13 @@ export type RemoteServerRecord = {
   created_by_username?: string
   created_at?: string
   updated_at?: string
+}
+
+export type MlGpuInfo = {
+  index: number
+  name: string
+  total_memory_mb?: number | null
+  free_memory_mb?: number | null
 }
 
 export type RemoteServerWrite = {
@@ -39,6 +47,7 @@ export type RemoteServerWrite = {
   notes?: string
   site?: number | null
   gpu?: string
+  gpu_device?: number | null
   max_cameras?: number
 }
 
@@ -67,6 +76,7 @@ export type DistributionServerColumn = {
   site_code: string
   site_name: string
   gpu: string
+  gpu_device?: number | null
   max_cameras: number
   assigned_count: number
   available_slots: number | null
@@ -325,6 +335,7 @@ export async function createRemoteServer(payload: RemoteServerWrite): Promise<Re
     is_active: payload.is_active !== false,
     notes: payload.notes || "",
     gpu: payload.gpu || "",
+    gpu_device: payload.gpu_device ?? null,
     max_cameras: payload.max_cameras ?? 25,
     site: payload.site ?? null,
   }
@@ -387,14 +398,73 @@ export async function removeServerCamera(
   }
 }
 
-export async function testRemoteServer(id: number): Promise<{ ok: boolean; error?: string }> {
+export async function testRemoteServer(
+  id: number,
+  opts?: { gpu_device?: number | null }
+): Promise<{
+  ok: boolean
+  error?: string
+  gpus?: MlGpuInfo[]
+  server?: RemoteServerRecord
+}> {
+  const body: Record<string, unknown> = {}
+  if (opts && "gpu_device" in opts) body.gpu_device = opts.gpu_device ?? null
   const res = await fetch(`${API}/ops/servers/${id}/test/`, {
     method: "POST",
     headers: getAuthHeaders(),
+    body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(formatApiError(data, "Connection test failed"))
   return data
+}
+
+export async function probeMlGpus(mlBaseUrl?: string): Promise<{
+  ok: boolean
+  ml_base_url: string
+  gpus: MlGpuInfo[]
+  ml_device?: string | number | null
+  cuda_available?: boolean
+  cuda_device_name?: string | null
+  cuda_device_count?: number
+  error?: string
+  source?: string
+}> {
+  const trimmed = (mlBaseUrl || "").trim()
+  const body: Record<string, unknown> = {}
+  if (trimmed) body.ml_base_url = normalizeMlUrl(trimmed)
+
+  const tryFetch = async (path: string) => {
+    const res = await fetch(`${API}${path}`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    return { res, data }
+  }
+
+  // Prefer probe-gpus; fall back to host-gpus alias if an old server returns 404.
+  let { res, data } = await tryFetch("/ops/probe-gpus/")
+  if (res.status === 404) {
+    ;({ res, data } = await tryFetch("/ops/host-gpus/"))
+  }
+
+  const gpus = Array.isArray(data.gpus) ? data.gpus : []
+  if (!res.ok && gpus.length === 0) {
+    throw new Error(formatApiError(data, "Failed to detect GPUs"))
+  }
+  return {
+    ok: Boolean(data.ok) || gpus.length > 0,
+    ml_base_url: data.ml_base_url || (trimmed ? normalizeMlUrl(trimmed) : ""),
+    gpus,
+    ml_device: data.ml_device ?? null,
+    cuda_available: data.cuda_available,
+    cuda_device_name: data.cuda_device_name ?? null,
+    cuda_device_count: data.cuda_device_count,
+    error: data.error,
+    source: data.source,
+  }
 }
 
 export async function fetchServerCameras(id: number): Promise<{

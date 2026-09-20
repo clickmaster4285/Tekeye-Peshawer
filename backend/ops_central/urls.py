@@ -11,6 +11,7 @@ from .views import (
     AllCitiesCameraSelectionAPIView,
     AllCitiesStreamsAPIView,
     EphemeralMjpegProxyView,
+    ProbeMlGpusAPIView,
     QuickConnectView,
     RemoteMjpegProxyView,
     RemoteServerViewSet,
@@ -23,6 +24,9 @@ router.register(r"ops/servers", RemoteServerViewSet, basename="ops-remote-server
 
 urlpatterns = [
     path("ops/quick-connect/", QuickConnectView.as_view(), name="ops-quick-connect"),
+    path("ops/probe-gpus/", ProbeMlGpusAPIView.as_view(), name="ops-probe-gpus"),
+    # Alias — same handler (avoids stale clients / bookmarks hitting a missing path)
+    path("ops/host-gpus/", ProbeMlGpusAPIView.as_view(), name="ops-host-gpus"),
     path(
         "ops/all-cities-streams/",
         AllCitiesStreamsAPIView.as_view(),

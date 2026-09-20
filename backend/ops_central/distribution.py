@@ -85,6 +85,7 @@ def server_row(server) -> dict:
         "site_code": server.site.code if server.site_id else "",
         "site_name": server.site.name if server.site_id else "",
         "gpu": server.gpu or "",
+        "gpu_device": server.gpu_device,
         "max_cameras": max_cam,
         "assigned_count": assigned,
         "available_slots": max(0, max_cam - assigned) if max_cam else None,

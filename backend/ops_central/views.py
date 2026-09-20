@@ -23,6 +23,7 @@ from .cache import (
     resolve_stream_key as _resolve_stream_key,
 )
 from .client import (
+    apply_detected_gpu,
     delete_remote_camera,
     fetch_ml_cameras,
     fetch_remote_cameras,
@@ -224,7 +225,13 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
     permission_classes = [IsOpsViewer]
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy", "remove_camera"):
+        if self.action in (
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "remove_camera",
+        ):
             return [IsITSuperAdminOnly()]
         return [IsOpsViewer()]
 
@@ -251,6 +258,13 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
         # Persist real probe result so UI does not stay "offline" after a successful save.
         if server.is_ml_mode():
             result = probe_ml_health(server.resolved_ml_base_url())
+            if result.get("ok"):
+                apply_detected_gpu(
+                    server,
+                    result,
+                    preferred_index=server.gpu_device,
+                    force=not (server.gpu or "").strip(),
+                )
         else:
             result = probe_health(server.normalized_base_url(), token)
         mark_server_health(server, ok=bool(result.get("ok")), error=result.get("error", ""))
@@ -270,8 +284,21 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="test")
     def test_connection(self, request, pk=None):
         server = self.get_object()
+        gpus: list = []
         if server.is_ml_mode():
             result = probe_ml_health(server.resolved_ml_base_url())
+            if result.get("ok"):
+                preferred = request.data.get("gpu_device") if isinstance(request.data, dict) else None
+                try:
+                    preferred_idx = int(preferred) if preferred is not None and str(preferred).strip() != "" else None
+                except (TypeError, ValueError):
+                    preferred_idx = None
+                gpus = apply_detected_gpu(
+                    server,
+                    result,
+                    preferred_index=preferred_idx,
+                    force=preferred_idx is not None,
+                )
         else:
             token = self._effective_token(server)
             result = probe_health(server.normalized_base_url(), token)
@@ -280,6 +307,7 @@ class RemoteServerViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 **result,
+                "gpus": gpus or result.get("gpus") or [],
                 "server": RemoteServerSerializer(server).data,
             }
         )
@@ -594,6 +622,102 @@ class AllCitiesStreamsAPIView(APIView):
         )
 
 
+class ProbeMlGpusAPIView(APIView):
+    """Discover CUDA GPUs on an ML node or this Django host (IT Super Admin)."""
+
+    permission_classes = [IsITSuperAdminOnly]
+
+    def post(self, request):
+        return self._probe(request)
+
+    def get(self, request):
+        return self._probe(request)
+
+    def _probe(self, request):
+        from .client import list_host_gpus_nvidia_smi, _is_local_ml_url
+        from .utils import ensure_ml_url
+
+        raw_url = ""
+        if hasattr(request, "data") and isinstance(request.data, dict):
+            raw_url = (request.data.get("ml_base_url") or request.data.get("url") or "").strip()
+        if not raw_url:
+            raw_url = (
+                request.query_params.get("ml_base_url")
+                or request.query_params.get("url")
+                or ""
+            ).strip()
+
+        # No URL → list GPUs on this Django machine (nvidia-smi).
+        if not raw_url:
+            host_gpus = list_host_gpus_nvidia_smi()
+            if not host_gpus:
+                return Response(
+                    {
+                        "ok": False,
+                        "error": "No NVIDIA GPUs found on this host (nvidia-smi empty or missing).",
+                        "ml_base_url": "",
+                        "gpus": [],
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return Response(
+                {
+                    "ok": True,
+                    "ml_base_url": "",
+                    "gpus": host_gpus,
+                    "ml_device": host_gpus[0]["index"],
+                    "cuda_available": True,
+                    "cuda_device_name": host_gpus[0].get("name"),
+                    "cuda_device_count": len(host_gpus),
+                    "source": "host_nvidia_smi",
+                    "error": None,
+                }
+            )
+
+        ml_base = ensure_ml_url(raw_url)
+        result = probe_ml_health(ml_base)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        gpus = list(result.get("gpus") or [])
+
+        # Local ML: prefer full host inventory (sees all GPUs even if CUDA_VISIBLE_DEVICES pins one).
+        if _is_local_ml_url(ml_base):
+            host_gpus = list_host_gpus_nvidia_smi()
+            if host_gpus and len(host_gpus) >= max(len(gpus), 1):
+                gpus = host_gpus
+
+        if not result.get("ok") and not gpus:
+            # Last resort for any URL that points at this box by LAN IP
+            host_gpus = list_host_gpus_nvidia_smi()
+            if host_gpus:
+                gpus = host_gpus
+            else:
+                return Response(
+                    {
+                        "ok": False,
+                        "error": result.get("error") or "ML unreachable",
+                        "ml_base_url": ml_base,
+                        "gpus": [],
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+        return Response(
+            {
+                "ok": True if gpus else bool(result.get("ok")),
+                "ml_base_url": ml_base,
+                "gpus": gpus,
+                "ml_device": data.get("ml_device"),
+                "cuda_available": data.get("cuda_available") if data else bool(gpus),
+                "cuda_device_name": data.get("cuda_device_name")
+                if data
+                else (gpus[0]["name"] if gpus else None),
+                "cuda_device_count": data.get("cuda_device_count") if data else len(gpus),
+                "source": "ml_health" if result.get("ok") else "host_nvidia_smi",
+                "error": None if gpus else (result.get("error") or None),
+            }
+        )
+
+
 class QuickConnectView(APIView):
     """Connect to an ML node (default) or remote Django; save + list that server's cameras."""
 
@@ -647,6 +771,9 @@ class QuickConnectView(APIView):
                 gpu = (ser.validated_data.get("gpu") or "").strip()
                 if gpu:
                     defaults["gpu"] = gpu
+                gpu_device = ser.validated_data.get("gpu_device")
+                if gpu_device is not None:
+                    defaults["gpu_device"] = int(gpu_device)
                 max_cameras = ser.validated_data.get("max_cameras")
                 if max_cameras:
                     defaults["max_cameras"] = int(max_cameras)
@@ -654,6 +781,13 @@ class QuickConnectView(APIView):
                     name=name,
                     defaults=defaults,
                 )
+                if health.get("ok"):
+                    apply_detected_gpu(
+                        server,
+                        health,
+                        preferred_index=server.gpu_device,
+                        force=not (server.gpu or "").strip(),
+                    )
                 mark_server_health(server, ok=True, error="")
                 server_id = server.pk
                 cameras = _attach_proxy_urls(server_id, cams.get("cameras") or [])
