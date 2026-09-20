@@ -603,11 +603,11 @@ const StreamTile = memo(function StreamTile({
   const pollTimerRef = useRef<number | null>(null)
   const hasFrameRef = useRef(false)
 
-  // High-quality viewing: NVR via Django ffmpeg (1080p/4K) — NOT ML 720p AI buffer.
-  // WebRTC stays optional; H.265 go2rtc path is unstable, so wall uses view MJPEG.
+  // Viewing path: WebRTC (go2rtc H.265→H.264) first; fallback = native 4K NVR MJPEG (/view/).
+  // Never use ML 720p AI buffer for the All Cities wall.
   const viewRaw = (camera.view_stream_url || "").trim()
-  const webrtcRaw = ""
-  const useWebrtc = false
+  const webrtcRaw = (camera.webrtc_stream_url || "").trim()
+  const useWebrtc = Boolean(webrtcRaw) && !webrtcFailed && (liveEnabled || isFullscreen)
 
   const raw =
     viewRaw ||
@@ -615,11 +615,11 @@ const StreamTile = memo(function StreamTile({
     (camera.ml_live_stream_url || "").trim()
   const tokenizedMjpeg = raw ? withOpsStreamToken(raw) : null
   const tokenizedJpeg = raw ? withOpsStreamToken(opsMjpegUrlToJpeg(raw)) : null
-  // Continuous MJPEG for All Cities viewing (sharp live motion).
-  const useMjpeg = Boolean(tokenizedMjpeg) && (liveEnabled || isFullscreen)
+  // 4K MJPEG whenever WebRTC is off/failed (grid + fullscreen).
+  const useMjpeg = !useWebrtc && Boolean(tokenizedMjpeg) && (liveEnabled || isFullscreen)
   const mjpegSrc =
     useMjpeg && tokenizedMjpeg
-      ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}${isFullscreen ? "&max_width=0" : ""}`
+      ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}&max_width=0`
       : null
   const src = useMjpeg ? mjpegSrc : jpegSrc
 
@@ -632,7 +632,7 @@ const StreamTile = memo(function StreamTile({
 
   useEffect(() => {
     setWebrtcFailed(false)
-  }, [camera.webrtc_stream_url, camera.id, camera.server_id])
+  }, [camera.webrtc_stream_url, camera.view_stream_url, camera.id, camera.server_id])
 
   useEffect(() => {
     if (liveEnabled) return
@@ -837,9 +837,9 @@ const StreamTile = memo(function StreamTile({
             {camera.server_name || "Server"}
           </Badge>
           {useWebrtc && hasFrame ? (
-            <Badge className="bg-violet-600/90 text-white">WebRTC</Badge>
+            <Badge className="bg-violet-600/90 text-white">WebRTC 4K</Badge>
           ) : viewRaw && hasFrame ? (
-            <Badge className="bg-violet-600/90 text-white">HD</Badge>
+            <Badge className="bg-violet-600/90 text-white">4K</Badge>
           ) : null}
           {hasFrame || (useWebrtc && !error) || (useMjpeg && src && !error) ? (
             <Badge className="bg-emerald-600/90 text-white">Live</Badge>

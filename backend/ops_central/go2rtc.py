@@ -26,52 +26,52 @@ def stream_name_for(server_id: int | None, stream_key: str) -> str:
     return f"s{server_id}_{key}"
 
 
-def _webrtc_source(rtsp_url: str) -> str:
+def _source_variants(rtsp_url: str) -> list[str]:
     """
-    NVR cameras are H.265; Chrome WebRTC needs H.264.
-    go2rtc ffmpeg source transcodes. Avoid #hardware (hangs often on Windows).
+    H.265 NVR → H.264 for Chrome WebRTC.
+
+    Soft libx264 first (stable SDP on these cameras). Optional GPU hardware next.
+    Never use bare RTSP copy for WebRTC — Chrome rejects HEVC.
     """
     mode = (getattr(settings, "GO2RTC_VIDEO_MODE", "h264") or "h264").strip().lower()
     rtsp = (rtsp_url or "").strip()
     if not rtsp:
-        return ""
+        return []
     if mode in ("copy", "hevc", "h265", "passthrough"):
-        return rtsp
-    return f"ffmpeg:{rtsp}#video=h264#audio=copy"
+        # Still wrap — bare HEVC breaks browser WebRTC
+        return [f"ffmpeg:{rtsp}#video=h264#audio=copy"]
+    soft = f"ffmpeg:{rtsp}#video=h264#audio=copy"
+    hw = f"ffmpeg:{rtsp}#video=h264#hardware#audio=copy"
+    if mode in ("h264_hw", "hardware", "gpu"):
+        return [hw, soft]
+    if mode in ("h264_soft", "soft", "cpu"):
+        return [soft]
+    return [soft, hw]
 
 
-def ensure_stream(name: str, rtsp_url: str) -> bool:
-    """Register or refresh a named stream on go2rtc. Returns False if go2rtc unreachable."""
+def _put_stream(name: str, src: str) -> bool:
     base = go2rtc_base()
-    src = _webrtc_source(rtsp_url)
-    if not base or not name or not src:
-        return False
-
-    # quote() encodes '#' → %23 so go2rtc receives the full ffmpeg options
-    url = f"{base}/api/streams?name={quote(name, safe='')}&src={quote(src, safe='')}"
     try:
+        try:
+            requests.delete(f"{base}/api/streams", params={"src": name}, timeout=5)
+        except requests.RequestException:
+            pass
+        url = f"{base}/api/streams?name={quote(name, safe='')}&src={quote(src, safe='')}"
         res = requests.put(url, timeout=8)
-        # go2rtc may return 200 with body, or 400 yaml noise while still registering
         check = requests.get(f"{base}/api/streams", timeout=5)
         streams = check.json() if check.ok else {}
-        if name in streams:
-            return True
-        if res.status_code in (200, 201, 204):
-            return True
-        logger.warning(
-            "go2rtc ensure_stream %s → HTTP %s %s",
-            name,
-            res.status_code,
-            (res.text or "")[:200],
+        return bool(isinstance(streams, dict) and name in streams) or res.status_code in (
+            200,
+            201,
+            204,
         )
-        return False
     except requests.RequestException as exc:
-        logger.warning("go2rtc ensure_stream failed: %s", exc)
+        logger.warning("go2rtc put %s failed: %s", name, exc)
         return False
 
 
-def warm_stream(name: str, *, timeout: float = 20.0) -> bool:
-    """Pull one JPEG so go2rtc starts ffmpeg/RTSP before WebRTC SDP (avoids client timeout)."""
+def warm_stream(name: str, *, timeout: float = 25.0) -> bool:
+    """Pull one JPEG so go2rtc starts ffmpeg/RTSP before WebRTC SDP."""
     base = go2rtc_base()
     if not base or not name:
         return False
@@ -81,17 +81,40 @@ def warm_stream(name: str, *, timeout: float = 20.0) -> bool:
             params={"src": name},
             timeout=timeout,
         )
-        return res.status_code == 200 and len(res.content or b"") > 1000
+        ok = res.status_code == 200 and len(res.content or b"") > 1000
+        if not ok:
+            logger.warning(
+                "go2rtc warm_stream %s → HTTP %s bytes=%s",
+                name,
+                res.status_code,
+                len(res.content or b""),
+            )
+        return ok
     except requests.RequestException as exc:
         logger.warning("go2rtc warm_stream %s failed: %s", name, exc)
         return False
 
 
+def ensure_stream(name: str, rtsp_url: str) -> bool:
+    """Register stream; prefer first variant that warms a real JPEG frame."""
+    base = go2rtc_base()
+    variants = _source_variants(rtsp_url)
+    if not base or not name or not variants:
+        return False
+
+    for src in variants:
+        if not _put_stream(name, src):
+            continue
+        if warm_stream(name, timeout=20.0):
+            logger.info("go2rtc stream %s ready via %s", name, src[:90])
+            return True
+        logger.warning("go2rtc stream %s warm failed for %s", name, src[:90])
+
+    return _put_stream(name, variants[0])
+
+
 def exchange_webrtc_sdp(name: str, offer_sdp: str) -> tuple[str | None, str]:
-    """
-    POST browser SDP offer to go2rtc; return (answer_sdp, error).
-    go2rtc returns 200 or 201 with application/sdp body.
-    """
+    """POST browser SDP offer to go2rtc; accept HTTP 200/201 with SDP body."""
     base = go2rtc_base()
     if not base:
         return None, "GO2RTC_URL is not configured."
@@ -106,15 +129,13 @@ def exchange_webrtc_sdp(name: str, offer_sdp: str) -> tuple[str | None, str]:
             url,
             data=offer_sdp.encode("utf-8"),
             headers={"Content-Type": "application/sdp"},
-            timeout=25,
+            timeout=30,
         )
         answer = (res.text or "").strip()
-        # Success: 200/201 with SDP (starts with v=0)
         if res.status_code in (200, 201) and answer.startswith("v="):
             return answer, ""
         if res.status_code in (200, 201) and "v=0" in answer:
-            idx = answer.find("v=0")
-            return answer[idx:], ""
+            return answer[answer.find("v=0") :], ""
         return None, f"go2rtc WebRTC HTTP {res.status_code}: {answer[:300]}"
     except requests.RequestException as exc:
         return None, str(exc)

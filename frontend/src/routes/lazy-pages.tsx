@@ -221,6 +221,36 @@ export const PAGE_LOADERS = {
   MobileApp: () => import("@/pages/operations/MobileApp").then((m) => ({ default: m.default })),
   DatabaseTables: () => import("@/pages/operations/DatabaseTables").then((m) => ({ default: m.default })),
   VehicleDatabaseDetail: () => import("@/pages/operations/VehicleDatabaseDetail").then((m) => ({ default: m.default })),
+  InfrastructureOverview: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.default })),
+  InfrastructureCameras: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureCameras })),
+  InfrastructureNvrs: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureNvrs })),
+  InfrastructureNvrDetail: () =>
+    import("@/pages/infrastructure/NvrDetailPage").then((m) => ({ default: m.default })),
+  InfrastructureCameraDetail: () =>
+    import("@/pages/infrastructure/CameraDetailPage").then((m) => ({ default: m.default })),
+  InfrastructureUps: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureUps })),
+  InfrastructureInverters: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureInverters })),
+  InfrastructureNetwork: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureNetwork })),
+  InfrastructureServers: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureServers })),
+  InfrastructureServerDetail: () =>
+    import("@/pages/infrastructure/ServerDetailPage").then((m) => ({ default: m.default })),
+  InfrastructureDeviceHealth: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureDeviceHealth })),
+  InfrastructurePower: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructurePower })),
+  InfrastructureAlerts: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureAlerts })),
+  InfrastructureEvents: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureEvents })),
+  InfrastructureReports: () =>
+    import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureReports })),
 } as const satisfies Record<string, PageLoader>
 
 function toLazyPages<T extends Record<string, PageLoader>>(loaders: T) {

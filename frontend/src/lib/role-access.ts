@@ -511,7 +511,9 @@ export function isPathAllowedForRole(
       path === ROUTES.OPS_CENTRAL ||
       path.startsWith(`${ROUTES.OPS_CENTRAL}/`) ||
       path === ROUTES.ALL_CITIES_CAMERAS ||
-      path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`)
+      path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`) ||
+      path === ROUTES.INFRASTRUCTURE_OVERVIEW ||
+      path.startsWith(`${ROUTES.INFRASTRUCTURE_OVERVIEW}/`)
     )
   }
   // Collectorate officers and location admins may open the live camera wall
