@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Input } from "@/components/ui/input"
@@ -709,33 +709,39 @@ export default function PeopleDatabasePage() {
     return false
   }
 
-  const filteredPeople = people.filter(person => {
-    // Filter by status tab
-    if (activeTab !== "all" && person.status !== activeTab) return false
-    
-    // Filter by search criteria
-    const matchesName = person.name.toLowerCase().includes(searchFilters.name.toLowerCase())
-    const matchesCNIC = person.cnic.includes(searchFilters.cnic)
-    const matchesPhone = person.phone.includes(searchFilters.phone)
-    const matchesEmail = person.email.toLowerCase().includes(searchFilters.email.toLowerCase())
-    const matchesNationality = !searchFilters.nationality || person.nationality.toLowerCase().includes(searchFilters.nationality.toLowerCase())
-    const matchesOrganization = !searchFilters.organization || (person.organization?.toLowerCase() || "").includes(searchFilters.organization.toLowerCase())
-    const matchesRiskLevel = !searchFilters.riskLevel || person.riskLevel === searchFilters.riskLevel
-    const matchesStatus = !searchFilters.status || person.status === searchFilters.status
-    
-    // If any filter has value, match accordingly
-    if (searchFilters.name && !matchesName) return false
-    if (searchFilters.cnic && !matchesCNIC) return false
-    if (searchFilters.phone && !matchesPhone) return false
-    if (searchFilters.email && !matchesEmail) return false
-    if (searchFilters.nationality && !matchesNationality) return false
-    if (searchFilters.organization && !matchesOrganization) return false
-    if (searchFilters.riskLevel && !matchesRiskLevel) return false
-    if (searchFilters.status && !matchesStatus) return false
-    if (!imageMatchesPerson(person)) return false
-    
-    return true
-  })
+  // Memoized: this re-runs a per-row string-filter pass over the whole dataset, which
+  // otherwise re-ran on every render (e.g. opening a dropdown, hovering) even when
+  // nothing filter-relevant changed.
+  const filteredPeople = useMemo(() => {
+    return people.filter(person => {
+      // Filter by status tab
+      if (activeTab !== "all" && person.status !== activeTab) return false
+
+      // Filter by search criteria
+      const matchesName = person.name.toLowerCase().includes(searchFilters.name.toLowerCase())
+      const matchesCNIC = person.cnic.includes(searchFilters.cnic)
+      const matchesPhone = person.phone.includes(searchFilters.phone)
+      const matchesEmail = person.email.toLowerCase().includes(searchFilters.email.toLowerCase())
+      const matchesNationality = !searchFilters.nationality || person.nationality.toLowerCase().includes(searchFilters.nationality.toLowerCase())
+      const matchesOrganization = !searchFilters.organization || (person.organization?.toLowerCase() || "").includes(searchFilters.organization.toLowerCase())
+      const matchesRiskLevel = !searchFilters.riskLevel || person.riskLevel === searchFilters.riskLevel
+      const matchesStatus = !searchFilters.status || person.status === searchFilters.status
+
+      // If any filter has value, match accordingly
+      if (searchFilters.name && !matchesName) return false
+      if (searchFilters.cnic && !matchesCNIC) return false
+      if (searchFilters.phone && !matchesPhone) return false
+      if (searchFilters.email && !matchesEmail) return false
+      if (searchFilters.nationality && !matchesNationality) return false
+      if (searchFilters.organization && !matchesOrganization) return false
+      if (searchFilters.riskLevel && !matchesRiskLevel) return false
+      if (searchFilters.status && !matchesStatus) return false
+      if (!imageMatchesPerson(person)) return false
+
+      return true
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [people, activeTab, searchFilters, imageSearch, normalizedImageSearchToken])
 
   const clearFilters = () => {
     setSearchFilters({
@@ -837,14 +843,22 @@ export default function PeopleDatabasePage() {
     reader.readAsDataURL(file)
   }
 
-  const getRiskLevelCount = (level: string) => {
-    return people.filter(p => p.riskLevel === level).length
-  }
+  // Memoized count maps: these badges previously called people.filter(...).length up to
+  // ~11 times per render, each a full scan of the dataset.
+  const riskLevelCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const p of people) counts[p.riskLevel] = (counts[p.riskLevel] || 0) + 1
+    return counts
+  }, [people])
 
-  const getStatusCount = (status: string) => {
-    if (status === "all") return people.length
-    return people.filter(p => p.status === status).length
-  }
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: people.length }
+    for (const p of people) counts[p.status] = (counts[p.status] || 0) + 1
+    return counts
+  }, [people])
+
+  const getRiskLevelCount = (level: string) => riskLevelCounts[level] || 0
+  const getStatusCount = (status: string) => statusCounts[status] || 0
 
   // Pagination
   const indexOfLastItem = currentPage * itemsPerPage

@@ -44,8 +44,9 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = UserActivityLog.objects.all().select_related("user").order_by("-time")
-        source = (self.request.query_params.get("source") or "").strip()
-        username = (self.request.query_params.get("username") or "").strip()
+        params = self.request.query_params
+        source = (params.get("source") or "").strip()
+        username = (params.get("username") or "").strip()
         if source:
             qs = qs.filter(source=source)
         if username:
@@ -56,12 +57,42 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
             scope = get_location_scope(self.request.user)
             if scope:
                 qs = qs.filter(user__location=scope)
-        day = parse_date((self.request.query_params.get("date") or "").strip())
+
+        icontains_fields = {
+            "ip_address": "ip_address",
+            "country": "country",
+            "city": "city",
+            "device": "device",
+            "os": "os",
+            "browser": "browser",
+            "action": "action",
+        }
+        for query_param, field_name in icontains_fields.items():
+            value = (params.get(query_param) or "").strip()
+            if value:
+                qs = qs.filter(**{f"{field_name}__icontains": value})
+
+        day = parse_date((params.get("date") or "").strip())
         if day:
             start = datetime.combine(day, time.min)
             if timezone.is_naive(start):
                 start = timezone.make_aware(start, timezone.get_current_timezone())
             qs = qs.filter(time__gte=start, time__lt=start + timedelta(days=1))
+
+        date_from = parse_date((params.get("date_from") or "").strip())
+        if date_from:
+            start = datetime.combine(date_from, time.min)
+            if timezone.is_naive(start):
+                start = timezone.make_aware(start, timezone.get_current_timezone())
+            qs = qs.filter(time__gte=start)
+
+        date_to = parse_date((params.get("date_to") or "").strip())
+        if date_to:
+            end = datetime.combine(date_to, time.max)
+            if timezone.is_naive(end):
+                end = timezone.make_aware(end, timezone.get_current_timezone())
+            qs = qs.filter(time__lte=end)
+
         return qs
 
 

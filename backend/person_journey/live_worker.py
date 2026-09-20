@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
 from django.db import close_old_connections
@@ -76,50 +77,72 @@ def _poll_camera(camera_id: int) -> int:
     return ingest_camera_detections(camera, detections)
 
 
+def _poll_camera_safe(camera_id: int) -> int:
+    """Entry point for worker-pool threads: each thread owns its own DB connection."""
+    close_old_connections()
+    try:
+        return _poll_camera(camera_id)
+    finally:
+        release_db()
+
+
+def _max_concurrency() -> int:
+    return max(1, int(getattr(settings, "PERSON_JOURNEY_LIVE_MAX_CONCURRENCY", 10)))
+
+
 def _worker_loop() -> None:
+    """Poll all active cameras concurrently each cycle (was one camera per tick
+    round-robin, which meant each camera's effective refresh interval scaled with the
+    total camera count instead of staying fixed)."""
     camera_ids: list[int] = []
-    index = 0
     last_refresh = 0.0
     refresh_sec = _camera_refresh()
     interval = _interval()
+    max_workers = _max_concurrency()
 
     logger.info(
-        "Person journey live ingest started (interval=%.1fs, cameras refresh=%ss)",
+        "Person journey live ingest started (interval=%.1fs, cameras refresh=%ss, concurrency=%s)",
         interval,
         refresh_sec,
+        max_workers,
     )
 
-    while not _stop.is_set():
-        close_old_connections()
-        try:
-            now = time.monotonic()
-            if not camera_ids or now - last_refresh >= refresh_sec:
-                camera_ids = _active_camera_ids()
-                last_refresh = now
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="journeywrk") as pool:
+        while not _stop.is_set():
+            close_old_connections()
+            backoff = False
+            try:
+                now = time.monotonic()
+                if not camera_ids or now - last_refresh >= refresh_sec:
+                    camera_ids = _active_camera_ids()
+                    last_refresh = now
+                    if camera_ids:
+                        logger.info("Journey live ingest tracking %s camera(s)", len(camera_ids))
+
                 if camera_ids:
-                    logger.info("Journey live ingest tracking %s camera(s)", len(camera_ids))
+                    futures = {pool.submit(_poll_camera_safe, cam_id): cam_id for cam_id in camera_ids}
+                    for future in as_completed(futures):
+                        cam_id = futures[future]
+                        try:
+                            count = future.result()
+                            if count:
+                                logger.debug("Journey live ingest camera %s: %s persons", cam_id, count)
+                        except OperationalError:
+                            logger.warning("Journey live ingest: Postgres full; backing off 15s")
+                            backoff = True
+                        except Exception:
+                            logger.exception("Journey live ingest failed for camera %s", cam_id)
+            finally:
+                release_db()
 
-            if camera_ids:
-                cam_id = camera_ids[index % len(camera_ids)]
-                index += 1
-                try:
-                    count = _poll_camera(cam_id)
-                    if count:
-                        logger.debug("Journey live ingest camera %s: %s persons", cam_id, count)
-                except OperationalError:
-                    logger.warning("Journey live ingest: Postgres full; backing off 15s")
-                    release_db()
-                    _stop.wait(15)
-                    continue
-                except Exception:
-                    logger.exception("Journey live ingest failed for camera %s", cam_id)
-        finally:
-            release_db()
+            if backoff:
+                _stop.wait(15)
+                continue
 
-        from config.worker_throttle import maybe_pause_for_cpu
+            from config.worker_throttle import maybe_pause_for_cpu
 
-        maybe_pause_for_cpu(logger, label="journey-live-ingest")
-        _stop.wait(interval)
+            maybe_pause_for_cpu(logger, label="journey-live-ingest")
+            _stop.wait(interval)
 
 
 def start_live_ingest_worker() -> None:

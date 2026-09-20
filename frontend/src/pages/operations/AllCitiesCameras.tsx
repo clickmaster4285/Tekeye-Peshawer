@@ -594,7 +594,11 @@ const StreamTile = memo(function StreamTile({
   const [retry, setRetry] = useState(0)
   const [error, setError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [now, setNow] = useState(() => new Date())
+  // Clock text is written directly to these spans (see the interval effect below)
+  // instead of via React state, so the once-a-second tick never re-renders the tile —
+  // with up to ~100 tiles on a wall, a state-driven clock meant ~100 re-renders/sec.
+  const clockRef = useRef<HTMLSpanElement | null>(null)
+  const fullscreenClockRef = useRef<HTMLSpanElement | null>(null)
   const [jpegSrc, setJpegSrc] = useState<string | null>(null)
   const [hasFrame, setHasFrame] = useState(false)
   const [webrtcFailed, setWebrtcFailed] = useState(false)
@@ -619,6 +623,15 @@ const StreamTile = memo(function StreamTile({
   const tokenizedJpeg = raw ? withOpsStreamToken(opsMjpegUrlToJpeg(raw)) : null
   // 4K MJPEG whenever WebRTC is off/failed (grid + fullscreen).
   const useMjpeg = !useWebrtc && Boolean(tokenizedMjpeg) && (liveEnabled || isFullscreen)
+  // Spread WebRTC cold-starts across up to ~1.8s so turning on several cameras at once
+  // doesn't fire simultaneous go2rtc/ffmpeg registrations that compete for CPU and push
+  // some tiles past their connect timeout (seen as a black tile that never loads).
+  const webrtcStartDelayMs = useMemo(() => {
+    const key = `${camera.server_id ?? 0}:${camera.id}:${camera.code}`
+    let stagger = 0
+    for (let i = 0; i < key.length; i++) stagger = (stagger + key.charCodeAt(i) * (i + 1)) % 1800
+    return stagger
+  }, [camera.server_id, camera.id, camera.code])
   const mjpegSrc =
     useMjpeg && tokenizedMjpeg
       ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}&max_width=0`
@@ -714,7 +727,13 @@ const StreamTile = memo(function StreamTile({
 
   useEffect(() => {
     if (!showTimestamp && !isFullscreen) return
-    const id = window.setInterval(() => setNow(new Date()), 1000)
+    const tick = () => {
+      const text = new Date().toLocaleTimeString()
+      if (clockRef.current) clockRef.current.textContent = text
+      if (fullscreenClockRef.current) fullscreenClockRef.current.textContent = text
+    }
+    tick()
+    const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
   }, [showTimestamp, isFullscreen])
 
@@ -786,6 +805,7 @@ const StreamTile = memo(function StreamTile({
               wallMode || isFullscreen ? "object-cover" : "object-contain",
             )}
             restartKey={retry}
+            startDelayMs={webrtcStartDelayMs}
             onPlaying={() => {
               setError(false)
               hasFrameRef.current = true
@@ -917,9 +937,8 @@ const StreamTile = memo(function StreamTile({
               "absolute z-20 rounded bg-black/80 px-2 py-1 text-xs font-semibold tabular-nums text-white shadow-md",
               isFullscreen ? "left-2 top-12" : "bottom-12 right-2 sm:bottom-14",
             )}
-          >
-            {now.toLocaleTimeString()}
-          </span>
+            ref={clockRef}
+          />
         )}
 
         <div className="absolute bottom-0 left-0 right-0 z-[5] bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
@@ -941,9 +960,10 @@ const StreamTile = memo(function StreamTile({
 
       {isFullscreen && (
         <div className="flex shrink-0 items-center justify-center gap-3 border-t border-white/10 bg-black px-4 py-2.5 text-xs text-white/80">
-          <span className="rounded bg-white/10 px-2 py-0.5 text-sm font-semibold tabular-nums text-white">
-            {now.toLocaleTimeString()}
-          </span>
+          <span
+            className="rounded bg-white/10 px-2 py-0.5 text-sm font-semibold tabular-nums text-white"
+            ref={fullscreenClockRef}
+          />
           <span className="text-white/40">·</span>
           <span>
             {camera.name}

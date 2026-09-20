@@ -41,7 +41,6 @@ from .go2rtc import (
     go2rtc_configured as _go2rtc_configured,
     health_ok as _go2rtc_health_ok,
     stream_name_for as _go2rtc_stream_name,
-    warm_stream as _go2rtc_warm_stream,
 )
 from .utils import (
     ensure_default_remote_server,
@@ -928,14 +927,10 @@ class RemoteWebRtcProxyView(APIView):
             )
 
         name = _go2rtc_stream_name(pk, stream_key)
-        # ensure_stream registers + warms; skip duplicate warm if already hot
+        # ensure_stream() confirms the stream is actually producing frames before
+        # returning True (skipping re-registration if it's already live) — no need
+        # for a second, separate warm_stream() call here anymore.
         if not _go2rtc_ensure_stream(name, rtsp_url):
-            return Response(
-                {"detail": "Could not register stream with go2rtc. Is go2rtc running?"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-        # Ensure still warm (ensure_stream may have returned last-resort without warm)
-        if not _go2rtc_warm_stream(name):
             return Response(
                 {
                     "detail": (

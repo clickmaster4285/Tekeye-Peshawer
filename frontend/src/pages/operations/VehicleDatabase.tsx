@@ -1,7 +1,7 @@
 // src/pages/operations/VehicleDatabase.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Input } from "@/components/ui/input"
@@ -898,26 +898,39 @@ export default function VehicleDatabasePage() {
     reader.readAsDataURL(file)
   }
 
-  const getStatusCount = (status: string) => {
-    if (status === "all") return vehicles.length
-    return vehicles.filter(v => v.status === status).length
-  }
+  // Memoized count maps: these badges previously called vehicles.filter(...)/.reduce(...)
+  // up to ~18 times per render, each a full scan of the dataset.
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: vehicles.length }
+    for (const v of vehicles) counts[v.status] = (counts[v.status] || 0) + 1
+    return counts
+  }, [vehicles])
 
-  const getTypeCount = (type: string) => {
-    return vehicles.filter(v => v.type === type).length
-  }
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const v of vehicles) counts[v.type] = (counts[v.type] || 0) + 1
+    return counts
+  }, [vehicles])
 
-  const getCategoryCount = (category: string) => {
-    return vehicles.filter(v => v.category === category).length
-  }
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const v of vehicles) counts[v.category] = (counts[v.category] || 0) + 1
+    return counts
+  }, [vehicles])
 
-  const getAlertCount = () => {
+  const totalAlertCount = useMemo(() => {
     return vehicles.reduce((acc, v) => acc + v.alerts.filter(a => !a.resolved).length, 0)
-  }
+  }, [vehicles])
 
-  const getInsideCount = () => {
+  const totalInsideCount = useMemo(() => {
     return vehicles.filter(v => v.entries.some(e => e.status === "inside")).length
-  }
+  }, [vehicles])
+
+  const getStatusCount = (status: string) => statusCounts[status] || 0
+  const getTypeCount = (type: string) => typeCounts[type] || 0
+  const getCategoryCount = (category: string) => categoryCounts[category] || 0
+  const getAlertCount = () => totalAlertCount
+  const getInsideCount = () => totalInsideCount
 
   // Pagination
   const indexOfLastItem = currentPage * itemsPerPage

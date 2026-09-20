@@ -1877,15 +1877,17 @@ class LiveStreamManager:
                 class_filter = frozenset(int(c) for c in coco_classes)
             if class_filter:
                 results = self._predict(self._coco_model, infer_frame, classes=class_filter)
+                # Face ID is resolved once, per-track, in enrich_detections() below —
+                # never here, to avoid running SFace recognition twice per frame.
                 coco_detections = parse_yolo_result(
                     frame,
                     results[0],
                     sx=sx,
                     sy=sy,
-                    recognize_faces=bool(pipeline.get("recognize_faces")),
+                    recognize_faces=False,
                     smoke_model=False,
                     model_tag="coco",
-                    face_db=self._face_db if pipeline.get("recognize_faces") else None,
+                    face_db=None,
                 )
 
         if pipeline.get("custom") and self._custom_model is not None:
@@ -1989,6 +1991,7 @@ class LiveStreamManager:
             frame,
             detections,
             face_db=self._face_db,
+            recognize_faces=bool(pipeline.get("recognize_faces")),
         )
         detections = assign_overlay_ids(detections)
         return detections

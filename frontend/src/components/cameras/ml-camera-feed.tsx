@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { Maximize2, Minimize2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,13 +22,8 @@ type DetectionBox = {
 
 type MlCameraFeedProps = {
   camera: CameraRecord
-  /** Extra detection JSON polling — off by default; overlays are already on the MJPEG. */
+  /** Extra detection JSON polling — off by default; used only to feed alert badges/logs. */
   pollMl?: boolean
-  /**
-   * Draw AI boxes on the video. Off by default: the tile then plays the box-free
-   * view stream, which never waits on inference. Detection still runs server-side.
-   */
-  showOverlay?: boolean
   pollIntervalMs?: number
   className?: string
   showBrandLogo?: boolean
@@ -68,10 +63,9 @@ function StreamBrandMarks() {
   )
 }
 
-export function MlCameraFeed({
+function MlCameraFeedImpl({
   camera,
   pollMl = false,
-  showOverlay = false,
   pollIntervalMs = 5000,
   className = "",
   showBrandLogo = true,
@@ -99,8 +93,10 @@ export function MlCameraFeed({
 
   const annotatedSrc = getMlLiveMultipartUrl(camera)
   const viewSrc = getViewMjpegUrl(camera)
-  // Overlays off (the live wall) → box-free stream. Overlays on → annotated stream.
-  const streamSrcBase = showOverlay ? annotatedSrc || viewSrc : viewSrc || annotatedSrc
+  // Live panels never draw detection tags/boxes — always play the box-free raw stream.
+  // Detections still run server-side and surface as log entries (ObjectDetection page)
+  // and alert badges, not as overlays on the video.
+  const streamSrcBase = viewSrc || annotatedSrc
   const streamSrc = streamSrcBase && pageVisible
     ? `${streamSrcBase}${streamSrcBase.includes("?") ? "&" : "?"}r=${streamRetry}`
     : null
@@ -257,3 +253,7 @@ export function MlCameraFeed({
     </div>
   )
 }
+
+// Memoized: on grid pages this re-renders on every 5s alert-badge poll otherwise,
+// since a new alertCount/onDetections closure gets passed down each tick.
+export const MlCameraFeed = memo(MlCameraFeedImpl)

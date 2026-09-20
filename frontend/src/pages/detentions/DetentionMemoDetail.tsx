@@ -147,7 +147,6 @@ function ViewLocatedCameraDialog({
               </p>
               <MlCameraFeed
                 camera={camera}
-                showOverlay
                 className="min-h-[min(62vh,500px)] rounded-md"
                 showBrandLogo
                 showFullscreenButton

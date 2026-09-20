@@ -152,7 +152,6 @@ export function ViewLocatedCameraDialog({
                 ) : null}
                 <MlCameraFeed
                   camera={camera}
-                  showOverlay
                   className="rounded-md"
                   showBrandLogo
                   showFullscreenButton

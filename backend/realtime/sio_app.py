@@ -83,7 +83,10 @@ def emit_invalidate(
         _last_emit_at[key] = now
     body = {"domains": domain_list, **(payload or {})}
     try:
-        sio.emit("realtime:invalidate", body)
+        # Every client subscribes to its relevant domain rooms on connect (see
+        # startRealtimeSocket in the frontend), so emitting to each room is sufficient —
+        # previously this also did a global sio.emit(), which delivered the same event a
+        # second time to every subscribed client.
         for domain in domain_list:
             sio.emit("realtime:invalidate", body, room=domain)
     except Exception:

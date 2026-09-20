@@ -87,5 +87,9 @@ def protected_media(request, path: str):
         response = serve(request, path, document_root=settings.MEDIA_ROOT)
     except SuspiciousFileOperation:
         raise Http404("Not found")
-    response["Cache-Control"] = "private, no-store"
+    # `no-store` forced a full re-download of every detection/journey snapshot image on
+    # every render. `no-cache` still revalidates on every request (so an edited file is
+    # never served stale) but lets django.views.static.serve's built-in Last-Modified
+    # support return a cheap 304 instead of re-transferring unchanged image bytes.
+    response["Cache-Control"] = "private, no-cache"
     return response

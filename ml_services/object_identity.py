@@ -155,6 +155,40 @@ def _resolve_face_identity(face_db: Any, frame: np.ndarray, bbox: list, class_na
     return "", 0.0, []
 
 
+def _resolve_face_identity_tracked(
+    face_db: Any,
+    frame: np.ndarray,
+    bbox: list,
+    class_name: str,
+    camera_key: str,
+    track_id: int | None,
+) -> tuple[str, float, list[float]]:
+    """Recognize a person's face once per track, reusing the cached identity for
+    ``TRACK_REVERIFY_SEC`` instead of re-running SFace detection every frame."""
+    if face_db is None or frame is None or frame.size == 0 or len(bbox) < 4:
+        return "", 0.0, []
+    if track_id is None or not hasattr(face_db, "recognize_track"):
+        return _resolve_face_identity(face_db, frame, bbox, class_name)
+    try:
+        crop = _crop(frame, bbox)
+        if crop is None:
+            return "", 0.0, []
+        result = face_db.recognize_track(
+            crop,
+            camera_key=camera_key or "",
+            track_id=track_id,
+        )
+        identity = str(getattr(result, "identity", "") or "")
+        score = float(getattr(result, "score", 0.0) or 0.0)
+        emb = list(getattr(result, "embedding", []) or [])
+        key = _normalize_face_key(identity)
+        if key:
+            return key, score, emb
+        return "", score, emb
+    except Exception:
+        return "", 0.0, []
+
+
 @dataclass
 class GlobalObjectState:
     global_id: str
@@ -285,6 +319,7 @@ class ObjectIdentityRegistry:
         frame: np.ndarray,
         detections: list[dict[str, Any]],
         face_db: Any = None,
+        recognize_faces: bool = True,
     ) -> list[dict[str, Any]]:
         """Add reid_embedding, face keys, object_type, global_object_id."""
         now = time.time()
@@ -318,23 +353,23 @@ class ObjectIdentityRegistry:
                 if embedding:
                     enriched["reid_embedding"] = embedding
 
+                track_id = enriched.get("track_id")
+                try:
+                    track_id_i = int(track_id) if track_id is not None else None
+                except (TypeError, ValueError):
+                    track_id_i = None
+
                 face_key = ""
                 face_score = 0.0
-                if object_type == "person":
-                    face_key, face_score, face_emb = _resolve_face_identity(
-                        face_db, frame, bbox_list, class_name
+                if object_type == "person" and recognize_faces:
+                    face_key, face_score, face_emb = _resolve_face_identity_tracked(
+                        face_db, frame, bbox_list, class_name, cam, track_id_i
                     )
                     if face_key:
                         enriched["face_identity_key"] = face_key
                         enriched["face_match_score"] = face_score
                     if face_emb:
                         enriched["face_embedding"] = face_emb
-
-                track_id = enriched.get("track_id")
-                try:
-                    track_id_i = int(track_id) if track_id is not None else None
-                except (TypeError, ValueError):
-                    track_id_i = None
 
                 state: GlobalObjectState | None = None
                 match_score = 0.0

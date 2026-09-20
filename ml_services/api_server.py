@@ -190,8 +190,11 @@ def calibrate_face_threshold(payload: ThresholdCalibrationRequest):
 
 
 @app.post("/faces/extract")
-async def extract_face_embedding_endpoint(image: UploadFile = File(...)):
-    data = await image.read()
+def extract_face_embedding_endpoint(image: UploadFile = File(...)):
+    # Plain `def`: FastAPI/Starlette runs this in its threadpool automatically, so this
+    # CPU-bound work never blocks the event loop for other concurrent requests (e.g. other
+    # cameras' MJPEG polling).
+    data = image.file.read()
     try:
         frame = decode_image(data)
         result = extract_face_embedding(frame)
@@ -201,10 +204,10 @@ async def extract_face_embedding_endpoint(image: UploadFile = File(...)):
 
 
 @app.post("/reid/extract")
-async def extract_reid_embedding_endpoint(image: UploadFile = File(...)):
+def extract_reid_embedding_endpoint(image: UploadFile = File(...)):
     from reid_extractor import extract_reid_embedding
 
-    data = await image.read()
+    data = image.file.read()
     try:
         frame = decode_image(data)
     except ValueError as exc:
@@ -216,13 +219,13 @@ async def extract_reid_embedding_endpoint(image: UploadFile = File(...)):
 
 
 @app.post("/detect/image")
-async def detect(
+def detect(
     image: UploadFile = File(...),
     conf: float = 0.25,
     iou: float = 0.45,
     recognize_faces: bool = True,
 ):
-    data = await image.read()
+    data = image.file.read()
     try:
         frame = decode_image(data)
     except ValueError as exc:
@@ -237,7 +240,7 @@ async def detect(
 
 
 @app.post("/camera-health/analyze")
-async def camera_health_analyze(
+def camera_health_analyze(
     image: UploadFile | None = File(None),
     purposes: str = Form(""),
     roi_json: str = Form(""),
@@ -256,7 +259,7 @@ async def camera_health_analyze(
 
     frame = None
     if image is not None:
-        data = await image.read()
+        data = image.file.read()
         if data:
             try:
                 frame = decode_image(data)
@@ -306,7 +309,7 @@ async def camera_health_analyze(
 
 
 @app.post("/plates/detect")
-async def detect_plates(
+def detect_plates(
     image: UploadFile = File(...),
     conf: float | None = None,
     save: bool = True,
@@ -315,7 +318,7 @@ async def detect_plates(
     """License plate YOLO + PaddleOCR PP-OCRv5. Saves accepted plates under media/licence plates/."""
     from plate_recognizer import get_plate_engine
 
-    data = await image.read()
+    data = image.file.read()
     try:
         frame = decode_image(data)
     except ValueError as exc:
@@ -343,8 +346,8 @@ async def detect_plates(
 
 
 @app.post("/recognize/face")
-async def recognize(image: UploadFile = File(...)):
-    data = await image.read()
+def recognize(image: UploadFile = File(...)):
+    data = image.file.read()
     try:
         frame = decode_image(data)
     except ValueError as exc:
@@ -353,8 +356,8 @@ async def recognize(image: UploadFile = File(...)):
 
 
 @app.post("/validate/human-face")
-async def validate_face(image: UploadFile = File(...)):
-    data = await image.read()
+def validate_face(image: UploadFile = File(...)):
+    data = image.file.read()
     try:
         frame = decode_image(data)
     except ValueError as exc:
@@ -793,7 +796,7 @@ def analyze_video_file(job_id: str):
         raise HTTPException(status_code=404, detail="Analyze job not found.")
     if str(row.get("status") or "") != "done":
         raise HTTPException(status_code=409, detail="Tagged video is not ready yet.")
-        path = get_output_path(job_id.strip())
+    path = get_output_path(job_id.strip())
     if path is None:
         raise HTTPException(status_code=404, detail="Tagged video file is missing.")
     return FileResponse(str(path), media_type="video/mp4", filename=path.name)

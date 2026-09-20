@@ -6,14 +6,18 @@ import io
 import json
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import requests
 from django.conf import settings
+from django.db import close_old_connections
+from django.db.models import Count
 from django.utils import timezone
 
 from cameras.models import Camera
+from config.db import release_db
 from ml.client import (
     MLServiceError,
     known_ml_base_urls,
@@ -354,32 +358,75 @@ def _upsert_alerts(camera: Camera, snap: CameraHealthSnapshot, alerts: list[dict
     ).exclude(alert_type="healthy").update(resolved=True, resolved_at=now)
 
 
-def scan_all_cameras(*, limit: int | None = None) -> dict[str, Any]:
+def _analyze_and_store_safe(camera_id: int):
+    """Entry point for worker-pool threads: each thread owns its own DB connection."""
+    close_old_connections()
+    try:
+        camera = Camera.objects.select_related("nvr", "nvr__site").get(pk=camera_id)
+        return analyze_and_store(camera)
+    finally:
+        release_db()
+
+
+def scan_all_cameras(*, limit: int | None = None, max_workers: int = 8) -> dict[str, Any]:
+    """Analyze every active camera concurrently (each probe is 1-2 blocking HTTP calls
+    to the ML service, so a small thread pool keeps the scan within its poll interval
+    instead of running cameras one at a time)."""
     qs = Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site")
     if limit:
         qs = qs[: int(limit)]
+    camera_ids = list(qs.values_list("id", flat=True))
     ok = 0
     failed = 0
     snapshots = []
-    for cam in qs:
-        try:
-            snap = analyze_and_store(cam)
-            snapshots.append(snap.id)
-            ok += 1
-        except Exception:
-            logger.exception("[camera-health] scan failed cam=%s", cam.pk)
-            failed += 1
+    if not camera_ids:
+        return {"ok": ok, "failed": failed, "snapshot_ids": snapshots}
+    with ThreadPoolExecutor(max_workers=max(1, max_workers), thread_name_prefix="camhealth") as pool:
+        futures = {pool.submit(_analyze_and_store_safe, cam_id): cam_id for cam_id in camera_ids}
+        for future in as_completed(futures):
+            cam_id = futures[future]
+            try:
+                snap = future.result()
+                snapshots.append(snap.id)
+                ok += 1
+            except Exception:
+                logger.exception("[camera-health] scan failed cam=%s", cam_id)
+                failed += 1
     return {"ok": ok, "failed": failed, "snapshot_ids": snapshots}
 
 
 def latest_summaries() -> list[dict[str, Any]]:
-    cameras = Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site")
+    """Build a health summary row per active camera.
+
+    Previously issued 2 queries per camera (latest snapshot + open-alert count), so a
+    dashboard poll on N cameras meant 2N+1 queries. Now it's 3 queries total regardless
+    of camera count.
+    """
+    cameras = list(Camera.objects.filter(is_active=True).select_related("nvr", "nvr__site"))
+    camera_ids = [cam.id for cam in cameras]
+
+    latest_by_camera: dict[int, CameraHealthSnapshot] = {}
+    if camera_ids:
+        for snap in (
+            CameraHealthSnapshot.objects.filter(camera_id__in=camera_ids)
+            .order_by("camera_id", "-timestamp")
+            .distinct("camera_id")
+        ):
+            latest_by_camera[snap.camera_id] = snap
+
+    open_alerts_by_camera: dict[int, int] = {}
+    if camera_ids:
+        for row in (
+            CameraHealthAlert.objects.filter(camera_id__in=camera_ids, resolved=False)
+            .values("camera_id")
+            .annotate(cnt=Count("id"))
+        ):
+            open_alerts_by_camera[row["camera_id"]] = row["cnt"]
+
     rows = []
     for cam in cameras:
-        latest = (
-            CameraHealthSnapshot.objects.filter(camera=cam).order_by("-timestamp").first()
-        )
-        open_alerts = CameraHealthAlert.objects.filter(camera=cam, resolved=False).count()
+        latest = latest_by_camera.get(cam.id)
+        open_alerts = open_alerts_by_camera.get(cam.id, 0)
         top_rec = ""
         if latest and isinstance(latest.recommendations, list) and latest.recommendations:
             first = latest.recommendations[0]

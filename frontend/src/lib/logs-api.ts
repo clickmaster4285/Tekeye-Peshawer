@@ -24,11 +24,29 @@ export async function fetchActivityLogs(params?: {
   page?: number
   page_size?: number
   username?: string
+  ip_address?: string
+  country?: string
+  city?: string
+  device?: string
+  os?: string
+  browser?: string
+  action?: string
+  date_from?: string
+  date_to?: string
 }): Promise<ActivityLogsResponse> {
   const sp = new URLSearchParams()
   if (params?.page != null) sp.set("page", String(params.page))
   if (params?.page_size != null) sp.set("page_size", String(params.page_size))
   if (params?.username) sp.set("username", params.username)
+  if (params?.ip_address) sp.set("ip_address", params.ip_address)
+  if (params?.country) sp.set("country", params.country)
+  if (params?.city) sp.set("city", params.city)
+  if (params?.device) sp.set("device", params.device)
+  if (params?.os) sp.set("os", params.os)
+  if (params?.browser) sp.set("browser", params.browser)
+  if (params?.action) sp.set("action", params.action)
+  if (params?.date_from) sp.set("date_from", params.date_from)
+  if (params?.date_to) sp.set("date_to", params.date_to)
   const qs = sp.toString()
   const base = `${API_BASE_URL}/api/activity-logs/`
   const url = qs ? `${base}?${qs}` : base

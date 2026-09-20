@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from django.conf import settings
@@ -161,8 +162,27 @@ def _poll_camera(camera_id: int) -> int:
     return save_detection_batch(camera, detections)
 
 
+def _poll_camera_safe(camera_id: int) -> int:
+    """Entry point for worker-pool threads: each thread owns its own DB connection."""
+    close_old_connections()
+    try:
+        return _poll_camera(camera_id)
+    finally:
+        release_db()
+
+
+def _worker_max_concurrency() -> int:
+    return max(1, int(getattr(settings, "DETECTION_WORKER_MAX_CONCURRENCY", 10)))
+
+
 def run_worker_forever() -> None:
-    """Poll cameras round-robin and save detections until stopped."""
+    """Poll all active cameras concurrently each cycle and save detections until stopped.
+
+    Previously this polled one camera per tick round-robin, so with N cameras each
+    camera's effective refresh interval was N * interval. Since ml_live_detections_for_camera
+    is a network call (I/O-bound), a small thread pool lets every camera get polled every
+    cycle instead.
+    """
     if not _worker_enabled():
         logger.info("[detection-worker] Disabled via DETECTION_WORKER_ENABLED")
         return
@@ -171,53 +191,59 @@ def run_worker_forever() -> None:
         logger.warning("[detection-worker] ML service not ready — retrying in loop")
 
     camera_ids: list[int] = []
-    index = 0
     last_refresh = 0.0
     interval = _poll_interval()
     refresh_sec = _camera_refresh_interval()
+    max_workers = _worker_max_concurrency()
 
     logger.info(
-        "[detection-worker] Started (pid=%s, interval=%.1fs, refresh=%ss)",
+        "[detection-worker] Started (pid=%s, interval=%.1fs, refresh=%ss, concurrency=%s)",
         os.getpid(),
         interval,
         refresh_sec,
+        max_workers,
     )
 
-    while not _stop_event.is_set():
-        close_old_connections()
-        try:
-            now = time.monotonic()
-            if not camera_ids or now - last_refresh >= refresh_sec:
-                camera_ids = _active_camera_ids()
-                last_refresh = now
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="detwrk") as pool:
+        while not _stop_event.is_set():
+            close_old_connections()
+            backoff = False
+            try:
+                now = time.monotonic()
+                if not camera_ids or now - last_refresh >= refresh_sec:
+                    camera_ids = _active_camera_ids()
+                    last_refresh = now
+                    if camera_ids:
+                        logger.info("[detection-worker] Tracking %s active camera(s)", len(camera_ids))
+                    else:
+                        logger.debug("[detection-worker] No active cameras configured")
+
                 if camera_ids:
-                    logger.info("[detection-worker] Tracking %s active camera(s)", len(camera_ids))
-                else:
-                    logger.debug("[detection-worker] No active cameras configured")
+                    futures = {pool.submit(_poll_camera_safe, cam_id): cam_id for cam_id in camera_ids}
+                    for future in as_completed(futures):
+                        cam_id = futures[future]
+                        try:
+                            saved = future.result()
+                            if saved:
+                                logger.info("[detection-worker] Saved %s detection(s) for camera %s", saved, cam_id)
+                        except OperationalError:
+                            logger.warning(
+                                "[detection-worker] Postgres has no free slots; backing off 15s"
+                            )
+                            backoff = True
+                        except Exception:
+                            logger.exception("[detection-worker] Unexpected error polling camera %s", cam_id)
+            finally:
+                release_db()
 
-            if camera_ids:
-                cam_id = camera_ids[index % len(camera_ids)]
-                index += 1
-                try:
-                    saved = _poll_camera(cam_id)
-                    if saved:
-                        logger.info("[detection-worker] Saved %s detection(s) for camera %s", saved, cam_id)
-                except OperationalError:
-                    logger.warning(
-                        "[detection-worker] Postgres has no free slots; backing off 15s"
-                    )
-                    release_db()
-                    _stop_event.wait(15)
-                    continue
-                except Exception:
-                    logger.exception("[detection-worker] Unexpected error polling camera %s", cam_id)
-        finally:
-            release_db()
+            if backoff:
+                _stop_event.wait(15)
+                continue
 
-        from config.worker_throttle import maybe_pause_for_cpu
+            from config.worker_throttle import maybe_pause_for_cpu
 
-        maybe_pause_for_cpu(logger, label="detection-worker")
-        _stop_event.wait(interval)
+            maybe_pause_for_cpu(logger, label="detection-worker")
+            _stop_event.wait(interval)
 
     logger.info("[detection-worker] Stopped")
 

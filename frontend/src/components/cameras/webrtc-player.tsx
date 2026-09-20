@@ -19,6 +19,14 @@ type WebRtcPlayerProps = {
   restartKey?: number
   /** Abort and call onError if no live media within this many ms */
   connectTimeoutMs?: number
+  /**
+   * Delay before starting the connection. When many tiles mount at once (a camera
+   * wall), each triggers a go2rtc/ffmpeg cold-start on the backend; without a
+   * stagger they all fire in the same instant and compete for CPU, which can push
+   * some past connectTimeoutMs (shows as a black tile) even though they'd connect
+   * fine individually.
+   */
+  startDelayMs?: number
 }
 
 function withToken(url: string): string {
@@ -43,6 +51,7 @@ export const WebRtcPlayer = forwardRef<WebRtcPlayerHandle, WebRtcPlayerProps>(
       onError,
       restartKey = 0,
       connectTimeoutMs = 45000,
+      startDelayMs = 0,
     },
     ref,
   ) {
@@ -64,126 +73,137 @@ export const WebRtcPlayer = forwardRef<WebRtcPlayerHandle, WebRtcPlayerProps>(
       const video = videoRef.current
       if (!video || !signalingUrl) return
 
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      })
-      pcRef.current = pc
+      let pc: RTCPeerConnection | null = null
+      let ac: AbortController | null = null
+      let timeoutId: number | null = null
 
-      pc.addTransceiver("video", { direction: "recvonly" })
-      pc.addTransceiver("audio", { direction: "recvonly" })
-
-      let gotTrack = false
-      const fail = (message: string) => {
+      const begin = () => {
         if (cancelled) return
-        setStatus("error")
-        onErrorRef.current?.(message)
-      }
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        })
+        pcRef.current = pc
 
-      const timeoutId = window.setTimeout(() => {
-        if (!cancelled && !gotTrack) {
-          fail("WebRTC connect timeout")
+        pc.addTransceiver("video", { direction: "recvonly" })
+        pc.addTransceiver("audio", { direction: "recvonly" })
+
+        let gotTrack = false
+        const fail = (message: string) => {
+          if (cancelled) return
+          setStatus("error")
+          onErrorRef.current?.(message)
         }
-      }, Math.max(3000, connectTimeoutMs))
 
-      pc.ontrack = (ev) => {
-        if (cancelled) return
-        gotTrack = true
-        const [stream] = ev.streams
-        if (stream) {
-          video.srcObject = stream
-          void video.play().catch(() => {
-            /* autoplay policies — muted should allow */
-          })
-          setStatus("live")
-          onPlayingRef.current?.()
+        timeoutId = window.setTimeout(() => {
+          if (!cancelled && !gotTrack) {
+            fail("WebRTC connect timeout")
+          }
+        }, Math.max(3000, connectTimeoutMs))
+
+        pc.ontrack = (ev) => {
+          if (cancelled) return
+          gotTrack = true
+          const [stream] = ev.streams
+          if (stream) {
+            video.srcObject = stream
+            void video.play().catch(() => {
+              /* autoplay policies — muted should allow */
+            })
+            setStatus("live")
+            onPlayingRef.current?.()
+          }
         }
-      }
 
-      pc.onconnectionstatechange = () => {
-        if (cancelled) return
-        const state = pc.connectionState
-        if (state === "failed" || state === "closed") {
-          fail(`WebRTC ${state}`)
+        pc.onconnectionstatechange = () => {
+          if (cancelled) return
+          const state = pc?.connectionState
+          if (state === "failed" || state === "closed") {
+            fail(`WebRTC ${state}`)
+          }
         }
-      }
 
-      const ac = new AbortController()
+        ac = new AbortController()
 
-      const run = async () => {
-        try {
-          setStatus("connecting")
-          const offer = await pc.createOffer()
-          await pc.setLocalDescription(offer)
+        const run = async () => {
+          if (!pc || !ac) return
+          try {
+            setStatus("connecting")
+            const offer = await pc.createOffer()
+            await pc.setLocalDescription(offer)
 
-          await new Promise<void>((resolve) => {
-            if (pc.iceGatheringState === "complete") {
-              resolve()
+            await new Promise<void>((resolve) => {
+              if (!pc || pc.iceGatheringState === "complete") {
+                resolve()
+                return
+              }
+              const t = window.setTimeout(() => resolve(), 1200)
+              pc.onicegatheringstatechange = () => {
+                if (pc?.iceGatheringState === "complete") {
+                  window.clearTimeout(t)
+                  resolve()
+                }
+              }
+            })
+
+            const sdp = pc.localDescription?.sdp
+            if (!sdp) throw new Error("No local SDP")
+
+            const res = await fetch(withToken(signalingUrl), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/sdp",
+                Accept: "application/sdp, text/plain, */*",
+              },
+              body: sdp,
+              signal: ac.signal,
+            })
+
+            if (!res.ok) {
+              let detail = `HTTP ${res.status}`
+              try {
+                const data = await res.json()
+                if (data?.detail) detail = String(data.detail)
+              } catch {
+                const text = await res.text().catch(() => "")
+                if (text) detail = text.slice(0, 200)
+              }
+              throw new Error(detail)
+            }
+
+            const answer = await res.text()
+            if (cancelled || !pc) return
+            await pc.setRemoteDescription({ type: "answer", sdp: answer })
+          } catch (err) {
+            if (cancelled) return
+            if (err instanceof DOMException && err.name === "AbortError") {
+              fail("WebRTC aborted")
               return
             }
-            const t = window.setTimeout(() => resolve(), 1200)
-            pc.onicegatheringstatechange = () => {
-              if (pc.iceGatheringState === "complete") {
-                window.clearTimeout(t)
-                resolve()
-              }
-            }
-          })
-
-          const sdp = pc.localDescription?.sdp
-          if (!sdp) throw new Error("No local SDP")
-
-          const res = await fetch(withToken(signalingUrl), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/sdp",
-              Accept: "application/sdp, text/plain, */*",
-            },
-            body: sdp,
-            signal: ac.signal,
-          })
-
-          if (!res.ok) {
-            let detail = `HTTP ${res.status}`
-            try {
-              const data = await res.json()
-              if (data?.detail) detail = String(data.detail)
-            } catch {
-              const text = await res.text().catch(() => "")
-              if (text) detail = text.slice(0, 200)
-            }
-            throw new Error(detail)
+            const message = err instanceof Error ? err.message : "WebRTC failed"
+            fail(message)
           }
-
-          const answer = await res.text()
-          if (cancelled) return
-          await pc.setRemoteDescription({ type: "answer", sdp: answer })
-        } catch (err) {
-          if (cancelled) return
-          if (err instanceof DOMException && err.name === "AbortError") {
-            fail("WebRTC aborted")
-            return
-          }
-          const message = err instanceof Error ? err.message : "WebRTC failed"
-          fail(message)
         }
+
+        void run()
       }
 
-      void run()
+      const startTimer = window.setTimeout(begin, Math.max(0, startDelayMs))
 
       return () => {
         cancelled = true
-        window.clearTimeout(timeoutId)
-        ac.abort()
+        window.clearTimeout(startTimer)
+        if (timeoutId != null) window.clearTimeout(timeoutId)
+        ac?.abort()
         try {
-          pc.getReceivers().forEach((r) => r.track?.stop())
-          pc.close()
+          pc?.getReceivers().forEach((r) => r.track?.stop())
+          pc?.close()
         } catch {
           /* ignore */
         }
         pcRef.current = null
         if (video) video.srcObject = null
       }
-    }, [signalingUrl, restartKey, connectTimeoutMs])
+    }, [signalingUrl, restartKey, connectTimeoutMs, startDelayMs])
 
     return (
       <video

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import threading
 from typing import Any
 
@@ -33,6 +34,45 @@ class JourneyManager:
         self._configs: dict[str, tuple[str, int | None]] = {}
         self._backend_ingest_url = ""
         self._ingest_token = ""
+        # Observations are posted from a small pool of sender threads so a slow/unreachable
+        # backend never stalls a camera's frame-processing loop (_run_pipeline).
+        self._post_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=500)
+        self._post_senders_started = False
+        self._start_post_senders()
+
+    def _start_post_senders(self, count: int = 2) -> None:
+        if self._post_senders_started:
+            return
+        self._post_senders_started = True
+        for i in range(count):
+            threading.Thread(
+                target=self._post_sender_loop,
+                daemon=True,
+                name=f"journey-post-sender-{i}",
+            ).start()
+
+    def _post_sender_loop(self) -> None:
+        while True:
+            payload = self._post_queue.get()
+            try:
+                self._send_observation(payload)
+            except Exception as exc:
+                logger.debug("[journey] Sender loop error: %s", exc)
+
+    def _enqueue_observation(self, payload: dict[str, Any]) -> None:
+        try:
+            self._post_queue.put_nowait(payload)
+        except queue.Full:
+            # Backpressure: drop the oldest queued observation rather than block
+            # the camera pipeline thread that's producing new ones.
+            try:
+                self._post_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._post_queue.put_nowait(payload)
+            except queue.Full:
+                pass
 
     def configure_ingest(self, backend_ingest_url: str, ingest_token: str = ""):
         self._backend_ingest_url = (backend_ingest_url or "").strip()
@@ -175,12 +215,12 @@ class JourneyManager:
             try:
                 observations = pipeline.process_once()
                 for obs in observations:
-                    self._post_observation(obs)
+                    self._enqueue_observation(obs)
             except Exception as exc:
                 logger.warning("[journey] Pipeline error %s: %s", key, exc)
             stop_event.wait(interval)
 
-    def _post_observation(self, payload: dict[str, Any]):
+    def _send_observation(self, payload: dict[str, Any]):
         url = self._backend_ingest_url
         if not url:
             return

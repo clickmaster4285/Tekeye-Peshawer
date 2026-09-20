@@ -20,6 +20,12 @@ class UserActivityLog(models.Model):
     source = models.CharField(max_length=20, default="web", db_index=True)
     time = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["-time"]),
+            models.Index(fields=["user", "-time"]),
+        ]
+
     @property
     def username(self):
         return self.user.username if self.user_id else None

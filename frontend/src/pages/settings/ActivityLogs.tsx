@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { FileText, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -74,45 +74,43 @@ export default function ActivityLogsPage() {
     setPage(1)
   }
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["activity-logs", "all"],
-    queryFn: () => fetchActivityLogs({ page: 1, page_size: 1000 }),
-  })
-
-  const logs = useMemo(() => {
-    const allLogs = data?.results ?? []
-    const contains = (value: string | null | undefined, query: string) =>
-      (value ?? "").toLowerCase().includes(query.toLowerCase())
-    return allLogs.filter((log) => {
-      if (!contains(log.username, filters.username)) return false
-      if (!contains(log.ip_address, filters.ipAddress)) return false
-      if (!contains(log.country, filters.country)) return false
-      if (!contains(log.city, filters.city)) return false
-      if (!contains(log.device, filters.device)) return false
-      if (!contains(log.os, filters.os)) return false
-      if (!contains(log.browser, filters.browser)) return false
-      if (!contains(log.action, filters.action)) return false
-      const logDate = new Date(log.time)
-      if (filters.dateFrom) {
-        const fromDate = new Date(`${filters.dateFrom}T00:00:00`)
-        if (!Number.isNaN(logDate.getTime()) && logDate < fromDate) return false
-      }
-      if (filters.dateTo) {
-        const toDate = new Date(`${filters.dateTo}T23:59:59`)
-        if (!Number.isNaN(logDate.getTime()) && logDate > toDate) return false
-      }
-      return true
-    })
-  }, [data?.results, filters])
+  // Debounce text filters so each keystroke doesn't trigger a new request — the query
+  // fires ~300ms after typing stops instead of on every character.
+  const [debouncedFilters, setDebouncedFilters] = useState(filters)
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedFilters(filters), 300)
+    return () => window.clearTimeout(id)
+  }, [filters])
 
   useEffect(() => {
     setPage(1)
-  }, [filters])
+  }, [debouncedFilters])
 
-  const count = logs.length
-  const pagedLogs = logs.slice((page - 1) * pageSize, page * pageSize)
-  const hasNext = page * pageSize < count
-  const hasPrev = page > 1
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["activity-logs", page, pageSize, debouncedFilters],
+    queryFn: () =>
+      fetchActivityLogs({
+        page,
+        page_size: pageSize,
+        username: debouncedFilters.username || undefined,
+        ip_address: debouncedFilters.ipAddress || undefined,
+        country: debouncedFilters.country || undefined,
+        city: debouncedFilters.city || undefined,
+        device: debouncedFilters.device || undefined,
+        os: debouncedFilters.os || undefined,
+        browser: debouncedFilters.browser || undefined,
+        action: debouncedFilters.action || undefined,
+        date_from: debouncedFilters.dateFrom || undefined,
+        date_to: debouncedFilters.dateTo || undefined,
+      }),
+    // Keep showing the previous page's rows while the next page loads instead of a flash.
+    placeholderData: keepPreviousData,
+  })
+
+  const pagedLogs = data?.results ?? []
+  const count = data?.count ?? 0
+  const hasNext = Boolean(data?.next)
+  const hasPrev = Boolean(data?.previous)
   const from = count === 0 ? 0 : (page - 1) * pageSize + 1
   const to = Math.min(page * pageSize, count)
 

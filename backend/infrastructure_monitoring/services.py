@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.utils import timezone
+
+from config.db import release_db
 
 from .models import (
     AlertSeverity,
@@ -277,33 +280,57 @@ def apply_probe_result(device: InfraDevice, result: dict[str, Any]) -> InfraDevi
     return device
 
 
-def poll_all_devices(*, limit: int | None = None) -> dict[str, int]:
+def _poll_device_safe(device: InfraDevice) -> dict[str, Any]:
+    """Entry point for worker-pool threads: each thread owns its own DB connection."""
     from .poller import probe_device
 
+    close_old_connections()
+    try:
+        result = probe_device(device)
+        apply_probe_result(device, result)
+        return result
+    finally:
+        release_db()
+
+
+def poll_all_devices(*, limit: int | None = None, max_workers: int = 12) -> dict[str, int]:
+    """Probe every active device concurrently (ping/TCP/HTTP are blocking I/O calls, so a
+    small thread pool keeps a poll cycle from running longer than the configured
+    interval as the device count grows)."""
     qs = InfraDevice.objects.filter(is_active=True).order_by("id")
     if limit:
         qs = qs[:limit]
+    devices = list(qs)
     online = offline = degraded = fault = errors = 0
-    for device in qs:
-        try:
-            result = probe_device(device)
-            apply_probe_result(device, result)
-            st = result["status"]
-            if st == DeviceStatus.ONLINE:
-                online += 1
-            elif st == DeviceStatus.OFFLINE:
-                offline += 1
-            elif st == DeviceStatus.DEGRADED:
-                degraded += 1
-            elif st == DeviceStatus.FAULT:
-                fault += 1
-        except Exception as exc:
-            errors += 1
-            logger.exception("probe failed for device %s: %s", device.id, exc)
-            device.status = DeviceStatus.UNKNOWN
-            device.last_error = str(exc)[:512]
-            device.last_polled_at = timezone.now()
-            device.save(update_fields=["status", "last_error", "last_polled_at", "updated_at"])
+    if not devices:
+        return {"polled": 0, "online": 0, "offline": 0, "degraded": 0, "fault": 0, "errors": 0}
+
+    with ThreadPoolExecutor(max_workers=max(1, max_workers), thread_name_prefix="infrapoll") as pool:
+        futures = {pool.submit(_poll_device_safe, device): device for device in devices}
+        for future in as_completed(futures):
+            device = futures[future]
+            try:
+                result = future.result()
+                st = result["status"]
+                if st == DeviceStatus.ONLINE:
+                    online += 1
+                elif st == DeviceStatus.OFFLINE:
+                    offline += 1
+                elif st == DeviceStatus.DEGRADED:
+                    degraded += 1
+                elif st == DeviceStatus.FAULT:
+                    fault += 1
+            except Exception as exc:
+                errors += 1
+                logger.exception("probe failed for device %s: %s", device.id, exc)
+                close_old_connections()
+                try:
+                    device.status = DeviceStatus.UNKNOWN
+                    device.last_error = str(exc)[:512]
+                    device.last_polled_at = timezone.now()
+                    device.save(update_fields=["status", "last_error", "last_polled_at", "updated_at"])
+                finally:
+                    release_db()
     return {
         "polled": online + offline + degraded + fault + errors,
         "online": online,
