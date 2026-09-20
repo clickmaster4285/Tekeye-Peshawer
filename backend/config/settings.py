@@ -262,6 +262,31 @@ ML_VIDEO_ANALYZE_MAX_BYTES = int(
 )  # 1GB — Video AI Test uploads
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/")
 
+# -----------------------------
+# go2rtc — All Cities viewing path (RTSP → WebRTC, separate from ML MJPEG)
+# -----------------------------
+GO2RTC_URL = os.getenv("GO2RTC_URL", "").strip().rstrip("/")
+# h264 = ffmpeg transcode for Chrome/Edge WebRTC; copy = try native HEVC (limited browser support)
+GO2RTC_VIDEO_MODE = os.getenv("GO2RTC_VIDEO_MODE", "h264").strip().lower()
+GO2RTC_ENABLED = bool(GO2RTC_URL) and os.getenv("GO2RTC_ENABLED", "true").strip().lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# All Cities viewing path (direct NVR via ffmpeg) — 0 = native 4K; 1920 = sharp wall default
+try:
+    VIEW_STREAM_MAX_WIDTH = max(0, int(os.getenv("VIEW_STREAM_MAX_WIDTH", "1920")))
+except (TypeError, ValueError):
+    VIEW_STREAM_MAX_WIDTH = 1920
+try:
+    VIEW_STREAM_FPS = max(5, min(int(os.getenv("VIEW_STREAM_FPS", "15")), 30))
+except (TypeError, ValueError):
+    VIEW_STREAM_FPS = 15
+try:
+    VIEW_STREAM_JPEG_QUALITY = max(2, min(int(os.getenv("VIEW_STREAM_JPEG_QUALITY", "3")), 12))
+except (TypeError, ValueError):
+    VIEW_STREAM_JPEG_QUALITY = 3
+
 # Video recovery — GPU acceleration (PyTorch CUDA + FFmpeg NVENC)
 VIDEO_RECOVERY_USE_GPU = os.getenv("VIDEO_RECOVERY_USE_GPU", "True").lower() in ("true", "1", "yes")
 VIDEO_RECOVERY_GPU_BATCH_SIZE = int(os.getenv("VIDEO_RECOVERY_GPU_BATCH_SIZE", "32"))

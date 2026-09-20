@@ -35,6 +35,13 @@ from .client import (
 from .models import ConnectionMode, RemoteServer, AllCitiesCameraPreference
 from .permissions import IsITSuperAdminOnly, IsOpsViewer
 from .serializers import QuickConnectSerializer, RemoteServerSerializer
+from .go2rtc import (
+    ensure_stream as _go2rtc_ensure_stream,
+    exchange_webrtc_sdp as _go2rtc_exchange_sdp,
+    go2rtc_configured as _go2rtc_configured,
+    stream_name_for as _go2rtc_stream_name,
+    warm_stream as _go2rtc_warm_stream,
+)
 from .utils import (
     ensure_default_remote_server,
     resolve_remote_token,
@@ -80,7 +87,7 @@ def _cache_is_fresh(server: RemoteServer, *, refresh: bool) -> bool:
 
 
 def _resolve_stream_rtsp_url(server: RemoteServer, stream_key: str) -> str:
-    """Resolve RTSP URL for ops MJPEG proxy (server-side only — not sent to browser)."""
+    """Resolve RTSP URL for ops stream proxy / go2rtc (server-side only — not sent to browser)."""
     key = (stream_key or "").strip()
     if not key:
         return ""
@@ -95,21 +102,21 @@ def _resolve_stream_rtsp_url(server: RemoteServer, stream_key: str) -> str:
         url = (cam.get("rtsp_url") or cam.get("stream_url") or "").strip()
         if url:
             return url
-    if _is_local_hub_server(server):
-        try:
-            from cameras.models import Camera
+    # Hub DB knows NVR credentials for local cameras (and often for distributed cams).
+    try:
+        from cameras.models import Camera
 
-            cam_id = int(key[4:]) if key.startswith("cam-") and key[4:].isdigit() else None
-            if cam_id:
-                camera = (
-                    Camera.objects.filter(pk=cam_id, is_active=True)
-                    .select_related("nvr", "nvr__site")
-                    .first()
-                )
-                if camera:
-                    return (camera.effective_stream_url() or "").strip()
-        except Exception:
-            pass
+        cam_id = int(key[4:]) if key.startswith("cam-") and key[4:].isdigit() else None
+        if cam_id:
+            camera = (
+                Camera.objects.filter(pk=cam_id, is_active=True)
+                .select_related("nvr", "nvr__site")
+                .first()
+            )
+            if camera:
+                return (camera.effective_stream_url() or "").strip()
+    except Exception:
+        pass
     return ""
 
 
@@ -160,6 +167,9 @@ def _ml_mjpeg_upstream_candidates(
 
 def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]:
     """Rewrite stream URLs to hub proxy endpoints."""
+    from django.conf import settings
+
+    webrtc_on = bool(getattr(settings, "GO2RTC_ENABLED", False)) and _go2rtc_configured()
     out = []
     for cam in cameras:
         row = dict(cam)
@@ -173,10 +183,25 @@ def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]
                 row["raw_stream_url"] = (
                     f"/api/ops/servers/{server_id}/mjpeg/?stream_key={key}&kind=raw"
                 )
+                # Direct NVR viewing (1080p/4K) — not the ML 720p AI buffer
+                row["view_stream_url"] = (
+                    f"/api/ops/servers/{server_id}/view/?stream_key={key}"
+                )
+                if webrtc_on:
+                    row["webrtc_stream_url"] = (
+                        f"/api/ops/servers/{server_id}/webrtc/?stream_key={key}"
+                    )
             elif cam_id is not None:
                 row["ml_live_stream_url"] = (
                     f"/api/ops/servers/{server_id}/mjpeg/?camera_id={cam_id}&kind=live"
                 )
+                row["view_stream_url"] = (
+                    f"/api/ops/servers/{server_id}/view/?camera_id={cam_id}"
+                )
+                if webrtc_on:
+                    row["webrtc_stream_url"] = (
+                        f"/api/ops/servers/{server_id}/webrtc/?camera_id={cam_id}"
+                    )
         out.append(row)
     return out
 
@@ -539,6 +564,8 @@ class AllCitiesStreamsAPIView(APIView):
                         raw_cameras = list(server.cached_cameras or [])
                         entry["source"] = "cache_fallback"
                         entry["ok"] = True
+                        # Cameras are shown from cache — don't alarm the wall UI
+                        entry["error"] = ""
 
             cameras = _attach_proxy_urls(server.pk, raw_cameras)
             for cam in cameras:
@@ -824,6 +851,200 @@ class RemoteMjpegProxyView(APIView):
                 upstream.close()
 
         response = StreamingHttpResponse(generate(), content_type=content_type)
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response["Pragma"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+
+class RemoteWebRtcProxyView(APIView):
+    """
+    Viewing path: RTSP (via go2rtc) → WebRTC SDP answer for the browser.
+    POST body = SDP offer (application/sdp or text/plain). Auth via session or ?token=.
+    Falls back with 503 when GO2RTC_URL is unset — UI should use MJPEG.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk: int):
+        """Capability probe for All Cities UI."""
+        if _ops_user_from_request(request) is None:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        from django.conf import settings
+
+        enabled = bool(getattr(settings, "GO2RTC_ENABLED", False)) and _go2rtc_configured()
+        return Response(
+            {
+                "webrtc_enabled": enabled,
+                "video_mode": getattr(settings, "GO2RTC_VIDEO_MODE", "h264"),
+            }
+        )
+
+    def post(self, request, pk: int):
+        if _ops_user_from_request(request) is None:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        from django.conf import settings
+
+        if not (getattr(settings, "GO2RTC_ENABLED", False) and _go2rtc_configured()):
+            return Response(
+                {
+                    "detail": "WebRTC viewing path is not configured. Set GO2RTC_URL and start go2rtc.",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            server = RemoteServer.objects.get(pk=pk, is_active=True)
+        except RemoteServer.DoesNotExist:
+            return Response({"detail": "Server not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        stream_key = (request.query_params.get("stream_key") or "").strip()
+        camera_id = (request.query_params.get("camera_id") or "").strip()
+        if not stream_key and camera_id:
+            stream_key = f"cam-{camera_id}"
+        if not stream_key:
+            return Response(
+                {"detail": "stream_key or camera_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
+        if not rtsp_url:
+            return Response(
+                {
+                    "detail": (
+                        f"No RTSP URL for {stream_key}. "
+                        "Ensure the camera is synced and NVR credentials are set."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        name = _go2rtc_stream_name(pk, stream_key)
+        if not _go2rtc_ensure_stream(name, rtsp_url):
+            return Response(
+                {"detail": "Could not register stream with go2rtc. Is go2rtc running?"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # Start ffmpeg/RTSP before SDP so the browser does not abort mid-handshake
+        if not _go2rtc_warm_stream(name):
+            return Response(
+                {
+                    "detail": (
+                        f"go2rtc could not decode {stream_key}. "
+                        "Check NVR RTSP / ffmpeg on the go2rtc host."
+                    ),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # Body may be raw SDP or JSON {"sdp": "..."}
+        offer = ""
+        content_type = (request.content_type or "").lower()
+        if "application/json" in content_type:
+            offer = (request.data.get("sdp") or request.data.get("offer") or "").strip()
+        else:
+            raw = request.body
+            if isinstance(raw, (bytes, bytearray)):
+                offer = raw.decode("utf-8", errors="replace").strip()
+            else:
+                offer = str(raw or "").strip()
+        if not offer:
+            return Response({"detail": "SDP offer required in body."}, status=status.HTTP_400_BAD_REQUEST)
+
+        answer, err = _go2rtc_exchange_sdp(name, offer)
+        if not answer:
+            return Response(
+                {"detail": err or "WebRTC negotiation failed."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return HttpResponse(answer, content_type="application/sdp")
+
+
+class RemoteViewStreamView(APIView):
+    """
+    High-quality viewing path: NVR main RTSP → ffmpeg MJPEG (not ML 720p).
+    GET ?stream_key=cam-N&kind=mjpeg|jpeg&max_width=1920 (0 = native 4K)
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk: int):
+        if _ops_user_from_request(request) is None:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            server = RemoteServer.objects.get(pk=pk, is_active=True)
+        except RemoteServer.DoesNotExist:
+            return Response({"detail": "Server not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        stream_key = (request.query_params.get("stream_key") or "").strip()
+        camera_id = (request.query_params.get("camera_id") or "").strip()
+        if not stream_key and camera_id:
+            stream_key = f"cam-{camera_id}"
+        if not stream_key:
+            return Response(
+                {"detail": "stream_key or camera_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
+        if not rtsp_url:
+            return Response(
+                {"detail": f"No RTSP URL for {stream_key}."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from django.conf import settings
+        from cameras.stream_utils import (
+            capture_view_jpeg_frame,
+            ffmpeg_available,
+            generate_view_mjpeg_frames,
+        )
+
+        if not ffmpeg_available():
+            return Response(
+                {"detail": "ffmpeg is not available on the hub."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        kind = (request.query_params.get("kind") or "mjpeg").strip().lower()
+        try:
+            max_width = int(
+                request.query_params.get("max_width")
+                or getattr(settings, "VIEW_STREAM_MAX_WIDTH", 1920)
+            )
+        except (TypeError, ValueError):
+            max_width = 1920
+        max_width = max(0, max_width)
+        fps = int(getattr(settings, "VIEW_STREAM_FPS", 15))
+        q = int(getattr(settings, "VIEW_STREAM_JPEG_QUALITY", 3))
+
+        if kind in ("jpeg", "snapshot", "frame"):
+            body = capture_view_jpeg_frame(rtsp_url, max_width=max_width)
+            if not body:
+                return Response(
+                    {"detail": "Could not capture frame from NVR."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            response = HttpResponse(body, content_type="image/jpeg")
+            response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return response
+
+        response = StreamingHttpResponse(
+            generate_view_mjpeg_frames(
+                rtsp_url,
+                max_width=max_width,
+                fps=fps,
+                jpeg_quality=q,
+            ),
+            content_type="multipart/x-mixed-replace; boundary=frame",
+        )
         response["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response["Pragma"] = "no-cache"
         response["X-Accel-Buffering"] = "no"

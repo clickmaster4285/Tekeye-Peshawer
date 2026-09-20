@@ -14,6 +14,8 @@ from .views import (
     QuickConnectView,
     RemoteMjpegProxyView,
     RemoteServerViewSet,
+    RemoteViewStreamView,
+    RemoteWebRtcProxyView,
 )
 
 router = DefaultRouter()
@@ -55,6 +57,16 @@ urlpatterns = [
         "ops/servers/<int:pk>/mjpeg/",
         RemoteMjpegProxyView.as_view(),
         name="ops-remote-mjpeg",
+    ),
+    path(
+        "ops/servers/<int:pk>/webrtc/",
+        RemoteWebRtcProxyView.as_view(),
+        name="ops-remote-webrtc",
+    ),
+    path(
+        "ops/servers/<int:pk>/view/",
+        RemoteViewStreamView.as_view(),
+        name="ops-remote-view",
     ),
     path(
         "ops/ephemeral-mjpeg/",

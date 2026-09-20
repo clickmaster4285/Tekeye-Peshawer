@@ -1,0 +1,26 @@
+# TekEye — go2rtc viewing path (All Cities Cameras WebRTC)
+# Run: start-go2rtc.bat  (go2rtc.exe in this folder)
+#
+# Streams are registered dynamically by Django (ops_central/go2rtc.py).
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  # Include BOTH loopback (browser on this PC) and LAN IP (other PCs)
+  candidates:
+    - 127.0.0.1:8555
+    - 192.168.190.132:8555
+  listen: ":8555"
+
+ffmpeg:
+  # Must resolve on PATH, or set absolute path to ffmpeg.exe
+  bin: ffmpeg
+
+streams: {}
+
+log:
+  level: info

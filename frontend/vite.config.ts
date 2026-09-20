@@ -137,7 +137,27 @@ export default defineConfig(({ mode }) => {
       ...(useDevProxy
         ? {
             proxy: {
-              "/api": { target: proxyTarget, changeOrigin: true, secure: false },
+              "/api": {
+                target: proxyTarget,
+                changeOrigin: true,
+                secure: false,
+                // All Cities HD view MJPEG is long-lived multipart
+                timeout: 0,
+                proxyTimeout: 0,
+                configure: (proxy) => {
+                  proxy.on("proxyReq", (proxyReq) => {
+                    proxyReq.setHeader("Accept-Encoding", "identity")
+                  })
+                  proxy.on("proxyRes", (proxyRes) => {
+                    const ct = String(proxyRes.headers["content-type"] || "")
+                    if (ct.includes("multipart") || ct.includes("mjpeg")) {
+                      proxyRes.headers["cache-control"] = "no-cache, no-store, must-revalidate"
+                      proxyRes.headers["pragma"] = "no-cache"
+                      proxyRes.headers["x-accel-buffering"] = "no"
+                    }
+                  })
+                },
+              },
               "/media": { target: proxyTarget, changeOrigin: true, secure: false },
               "/socket.io": {
                 // Long-polling only (Django runserver cannot upgrade WebSocket).

@@ -65,6 +65,7 @@ import { ROUTES } from "@/routes/config"
 import {
   setAllCitiesCamerasPreference,
 } from "@/lib/all-cities-cameras"
+import { WebRtcPlayer, type WebRtcPlayerHandle } from "@/components/cameras/webrtc-player"
 import {
   fetchAllCitiesSelection,
   fetchAllCitiesStreams,
@@ -129,12 +130,19 @@ function gridPageSize(layout: GridLayout): number {
 }
 
 function camerasFingerprint(
-  list: Array<{ server_id?: number; id: number; code: string; ml_live_stream_url?: string }>
+  list: Array<{
+    server_id?: number
+    id: number
+    code: string
+    ml_live_stream_url?: string
+    view_stream_url?: string
+    webrtc_stream_url?: string
+  }>
 ): string {
   return list
     .map(
       (c) =>
-        `${c.server_id ?? 0}:${c.id}:${c.code}:${(c.ml_live_stream_url || "").trim()}`
+        `${c.server_id ?? 0}:${c.id}:${c.code}:${(c.view_stream_url || "").trim()}:${(c.ml_live_stream_url || "").trim()}`
     )
     .join("|")
 }
@@ -151,7 +159,11 @@ function isCameraOnline(camera: CityCamera): boolean {
   if (["online", "active", "live", "running", "ok"].includes(status)) return true
   if (typeof camera.connected === "boolean" && camera.connected) return true
   if (typeof camera.is_active === "boolean") return camera.is_active
-  return Boolean((camera.ml_live_stream_url || "").trim())
+  return Boolean(
+    (camera.view_stream_url || "").trim() ||
+    (camera.webrtc_stream_url || "").trim() ||
+    (camera.ml_live_stream_url || "").trim()
+  )
 }
 
 /** Balanced column count for Auto wall — avoids one skinny row of N cameras. */
@@ -584,18 +596,30 @@ const StreamTile = memo(function StreamTile({
   const [now, setNow] = useState(() => new Date())
   const [jpegSrc, setJpegSrc] = useState<string | null>(null)
   const [hasFrame, setHasFrame] = useState(false)
+  const [webrtcFailed, setWebrtcFailed] = useState(false)
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const webrtcRef = useRef<WebRtcPlayerHandle | null>(null)
   const retryTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const hasFrameRef = useRef(false)
-  const raw = (camera.ml_live_stream_url || "").trim()
+
+  // High-quality viewing: NVR via Django ffmpeg (1080p/4K) — NOT ML 720p AI buffer.
+  // WebRTC stays optional; H.265 go2rtc path is unstable, so wall uses view MJPEG.
+  const viewRaw = (camera.view_stream_url || "").trim()
+  const webrtcRaw = ""
+  const useWebrtc = false
+
+  const raw =
+    viewRaw ||
+    (camera.raw_stream_url || "").trim() ||
+    (camera.ml_live_stream_url || "").trim()
   const tokenizedMjpeg = raw ? withOpsStreamToken(raw) : null
   const tokenizedJpeg = raw ? withOpsStreamToken(opsMjpegUrlToJpeg(raw)) : null
-  // Fullscreen: continuous MJPEG. Grid: JPEG snapshots (browser ~6 MJPEG conn limit).
-  const useMjpeg = isFullscreen
+  // Continuous MJPEG for All Cities viewing (sharp live motion).
+  const useMjpeg = Boolean(tokenizedMjpeg) && (liveEnabled || isFullscreen)
   const mjpegSrc =
-    useMjpeg && (liveEnabled || isFullscreen) && tokenizedMjpeg
-      ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}`
+    useMjpeg && tokenizedMjpeg
+      ? `${tokenizedMjpeg}${tokenizedMjpeg.includes("?") ? "&" : "?"}r=${retry}${isFullscreen ? "&max_width=0" : ""}`
       : null
   const src = useMjpeg ? mjpegSrc : jpegSrc
 
@@ -605,6 +629,10 @@ const StreamTile = memo(function StreamTile({
       if (pollTimerRef.current != null) window.clearTimeout(pollTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    setWebrtcFailed(false)
+  }, [camera.webrtc_stream_url, camera.id, camera.server_id])
 
   useEffect(() => {
     if (liveEnabled) return
@@ -623,8 +651,8 @@ const StreamTile = memo(function StreamTile({
   }, [liveEnabled])
 
   useEffect(() => {
-    if (useMjpeg || !liveEnabled || !tokenizedJpeg) {
-      if (!useMjpeg) setJpegSrc(null)
+    if (useWebrtc || useMjpeg || !liveEnabled || !tokenizedJpeg) {
+      if (!useMjpeg && !useWebrtc) setJpegSrc(null)
       return
     }
     let cancelled = false
@@ -663,7 +691,7 @@ const StreamTile = memo(function StreamTile({
     }
     // hasFrame intentionally omitted — avoid resetting the poll loop every frame
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useMjpeg, liveEnabled, tokenizedJpeg, retry, camera.server_id, camera.id, camera.code])
+  }, [useWebrtc, useMjpeg, liveEnabled, tokenizedJpeg, retry, camera.server_id, camera.id, camera.code])
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
 
@@ -690,22 +718,34 @@ const StreamTile = memo(function StreamTile({
     setError(false)
     setHasFrame(false)
     hasFrameRef.current = false
+    setWebrtcFailed(false)
     setRetry((n) => n + 1)
   }
 
   const takeSnapshot = () => {
-    const img = imgRef.current
-    if (!img || !img.naturalWidth) return
     try {
       const canvas = document.createElement("canvas")
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-      ctx.drawImage(img, 0, 0)
       const link = document.createElement("a")
       const stamp = new Date().toISOString().replace(/[:.]/g, "-")
       link.download = `${(camera.code || camera.name || "camera").replace(/\s+/g, "_")}_${stamp}.png`
+
+      if (useWebrtc) {
+        const video = webrtcRef.current?.videoElement()
+        if (!video || !video.videoWidth) return
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        ctx.drawImage(video, 0, 0)
+      } else {
+        const img = imgRef.current
+        if (!img || !img.naturalWidth) return
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0)
+      }
       link.href = canvas.toDataURL("image/png")
       link.click()
     } catch {
@@ -713,15 +753,16 @@ const StreamTile = memo(function StreamTile({
     }
   }
 
+  const showImg = !useWebrtc && Boolean(src && !error)
+
   return (
     <div
       className={cn(
         "overflow-hidden rounded-lg border border-border bg-black",
         wallMode && "flex h-full min-h-0 min-w-0 flex-col rounded-md",
         wallMode && wallLayout === "1x1" && "rounded-none border-0",
-        // True viewport cover — no white page gutters around the feed.
         isFullscreen &&
-          "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col rounded-none border-0 bg-black",
+        "fixed inset-0 z-[250] flex h-[100dvh] max-h-[100dvh] w-full flex-col rounded-none border-0 bg-black",
       )}
     >
       <div
@@ -731,10 +772,32 @@ const StreamTile = memo(function StreamTile({
           isFullscreen && "min-h-0 max-h-none max-w-none flex-1 aspect-auto",
         )}
       >
-        {src && !error ? (
+        {useWebrtc && webrtcRaw ? (
+          <WebRtcPlayer
+            ref={webrtcRef}
+            key={`${camera.server_id}-${camera.id}-${retry}`}
+            signalingUrl={webrtcRaw}
+            className={cn(
+              "h-full w-full",
+              wallMode || isFullscreen ? "object-cover" : "object-contain",
+            )}
+            restartKey={retry}
+            onPlaying={() => {
+              setError(false)
+              hasFrameRef.current = true
+              setHasFrame(true)
+            }}
+            onError={() => {
+              setWebrtcFailed(true)
+              setError(false)
+              hasFrameRef.current = false
+              setHasFrame(false)
+            }}
+          />
+        ) : showImg ? (
           <img
             ref={imgRef}
-            src={src}
+            src={src!}
             alt={camera.name}
             className={cn(
               "h-full w-full object-center",
@@ -773,9 +836,14 @@ const StreamTile = memo(function StreamTile({
           <Badge className="max-w-full truncate bg-sky-700/90 text-white">
             {camera.server_name || "Server"}
           </Badge>
-          {hasFrame || (useMjpeg && src && !error) ? (
+          {useWebrtc && hasFrame ? (
+            <Badge className="bg-violet-600/90 text-white">WebRTC</Badge>
+          ) : viewRaw && hasFrame ? (
+            <Badge className="bg-violet-600/90 text-white">HD</Badge>
+          ) : null}
+          {hasFrame || (useWebrtc && !error) || (useMjpeg && src && !error) ? (
             <Badge className="bg-emerald-600/90 text-white">Live</Badge>
-          ) : src && !error ? (
+          ) : (useWebrtc || src) && !error ? (
             <Badge className="bg-amber-600/90 text-white">Loading</Badge>
           ) : null}
         </div>
@@ -818,7 +886,7 @@ const StreamTile = memo(function StreamTile({
             onClick={takeSnapshot}
             title="Take snapshot"
             aria-label="Take snapshot"
-            disabled={!src || error}
+            disabled={!hasFrame && !src}
           >
             <Camera className="h-4 w-4" />
           </Button>
@@ -843,7 +911,6 @@ const StreamTile = memo(function StreamTile({
           <span
             className={cn(
               "absolute z-20 rounded bg-black/80 px-2 py-1 text-xs font-semibold tabular-nums text-white shadow-md",
-              // Fullscreen: top-left under badges so it cannot sit under the exit bar.
               isFullscreen ? "left-2 top-12" : "bottom-12 right-2 sm:bottom-14",
             )}
           >
@@ -877,6 +944,7 @@ const StreamTile = memo(function StreamTile({
           <span>
             {camera.name}
             {camera.server_name ? ` · ${camera.server_name}` : ""}
+            {useWebrtc ? " · WebRTC" : ""}
             {" · Press Esc or tap minimize to exit"}
           </span>
           <Button

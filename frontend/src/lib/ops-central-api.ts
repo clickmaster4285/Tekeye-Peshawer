@@ -124,6 +124,10 @@ export type OpsCamera = {
   ml_stream_key?: string
   ml_live_stream_url?: string
   raw_stream_url?: string
+  /** High-quality NVR viewing (ffmpeg), not ML 720p */
+  view_stream_url?: string
+  /** Hub WebRTC signaling (go2rtc viewing path). Prefer over MJPEG on All Cities wall. */
+  webrtc_stream_url?: string
   status?: string
   is_active?: boolean
   connected?: boolean
@@ -210,6 +214,11 @@ export function opsMjpegUrlToJpeg(url: string): string {
   if (!url) return url
   try {
     const u = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://local")
+    // High-quality view endpoint
+    if (u.pathname.includes("/view/")) {
+      u.searchParams.set("kind", "jpeg")
+      return `${u.pathname}${u.search}`
+    }
     const kind = (u.searchParams.get("kind") || "live").toLowerCase()
     if (kind === "raw" || kind === "jpeg_raw" || kind === "raw_jpeg") {
       u.searchParams.set("kind", "jpeg_raw")
@@ -218,6 +227,9 @@ export function opsMjpegUrlToJpeg(url: string): string {
     }
     return `${u.pathname}${u.search}`
   } catch {
+    if (url.includes("/view/")) {
+      return `${url}${url.includes("?") ? "&" : "?"}kind=jpeg`
+    }
     if (/([?&])kind=raw\b/i.test(url)) {
       return url.replace(/([?&])kind=raw\b/i, "$1kind=jpeg_raw")
     }
