@@ -104,6 +104,7 @@ export function CameraManagementView({
               <MlCameraFeed
                 camera={camera}
                 pollMl
+                showOverlay
                 pollIntervalMs={2500}
                 className="rounded-lg border"
                 showBrandLogo

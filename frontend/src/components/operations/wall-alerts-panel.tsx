@@ -445,7 +445,7 @@ export function WallAlertsPanel({ className }: { className?: string }) {
               return (
                 <li key={ev.id}>
                   <Link
-                    to={`${ROUTES.OBJECT_DETECTION}?q=${encodeURIComponent(cls)}${ev.is_alert ? "&alert=1" : ""}`}
+                    to={`${ROUTES.OBJECT_DETECTION}?event=${ev.id}&q=${encodeURIComponent(cls)}${ev.is_alert ? "&alert=1" : ""}`}
                     className={cn(
                       "group relative flex gap-2.5 border-l-2 px-3 py-2 transition-colors",
                       critical

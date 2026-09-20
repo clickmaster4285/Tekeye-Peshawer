@@ -201,7 +201,7 @@ export function LiveAlerts() {
               alerts.map((alert) => (
                 <Link
                   key={alert.id}
-                  to={`${ROUTES.OBJECT_DETECTION}?alert=1&q=${encodeURIComponent(alert.className || "")}`}
+                  to={`${ROUTES.OBJECT_DETECTION}?event=${alert.id}&alert=1&q=${encodeURIComponent(alert.className || "")}`}
                   className={`flex gap-3 border-l-4 pl-4 py-3 transition-colors hover:bg-gray-50 ${getAlertBorderColor(alert.type)}`}
                 >
                   <div

@@ -662,6 +662,7 @@ export default function MemoDistributionPage() {
                       <MlCameraFeed
                         camera={cam}
                         pollMl={recording}
+                        showOverlay
                         pollIntervalMs={recording ? 500 : 800}
                         showBrandLogo={selectedCameras.length === 1}
                         showFullscreenButton

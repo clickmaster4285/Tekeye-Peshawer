@@ -7,6 +7,7 @@ import { MlSystemStatus } from "@/components/cameras/ml-system-status"
 import type { CameraRecord } from "@/lib/cameras-api"
 import { cameraSourceLabel } from "@/lib/cameras-api"
 import { useCameras } from "@/hooks/use-cameras"
+import { useCameraAlertBadges } from "@/hooks/use-camera-alert-badges"
 import { LOCATION_OPTIONS } from "@/lib/locations"
 import { ROUTES } from "@/routes/config"
 import {
@@ -88,7 +89,9 @@ export default function LiveCameraGridPage() {
   const [videoWallMode, setVideoWallMode] = useState(false)
   const [layoutName, setLayoutName] = useState("")
   const [cameraSearch, setCameraSearch] = useState("")
-  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true)
+  // Off by default: tiles play the box-free view stream so the wall stays smooth.
+  // Detection keeps running server-side and surfaces here as an alert badge.
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState(false)
   const [showObjectLabels, setShowObjectLabels] = useState(true)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showTempOverlay, setShowTempOverlay] = useState(false)
@@ -146,6 +149,8 @@ export default function LiveCameraGridPage() {
   }, [allCameras, cameraSearch])
 
   const gridCameras = useMemo(() => cameras.slice(0, gridCount(layout)), [cameras, layout])
+  const gridCameraIds = useMemo(() => gridCameras.map((c) => c.id), [gridCameras])
+  const alertBadges = useCameraAlertBadges(gridCameraIds)
 
   return (
     <ModulePageLayout
@@ -279,6 +284,10 @@ export default function LiveCameraGridPage() {
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2 space-y-3 pl-1">
                 <p className="text-xs font-medium text-muted-foreground">Overlays</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Boxes off keeps the wall at full frame rate. AI keeps running in the
+                  background and raises the red alert badge either way.
+                </p>
                 {([
                   [showBoundingBoxes, setShowBoundingBoxes, "Show bounding boxes"],
                   [showObjectLabels, setShowObjectLabels, "Show object labels"],
@@ -431,6 +440,8 @@ export default function LiveCameraGridPage() {
                           camera={cam}
                           pollMl={false}
                           showOverlay={showBoundingBoxes}
+                          alertCount={alertBadges[cam.id]?.count || 0}
+                          alertLabel={alertBadges[cam.id]?.label}
                           showBrandLogo
                           showFullscreenButton
                         />

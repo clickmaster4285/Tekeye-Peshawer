@@ -142,6 +142,16 @@ WSGI_APPLICATION = "config.wsgi.application"
 # -----------------------------
 # Database
 # -----------------------------
+_CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "0"))
+
+# `runserver` starts a fresh thread per request. A persistent connection lives in
+# thread-local storage, so when the thread ends its Postgres session is left behind
+# as `idle` until the server exits — which exhausts max_connections ("sorry, too many
+# clients already"). Persistent connections are only safe behind a server with a
+# bounded, long-lived thread/worker pool, so force 0 under runserver.
+if "runserver" in sys.argv:
+    _CONN_MAX_AGE = 0
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -150,7 +160,7 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5432"),
-        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "0")),
+        "CONN_MAX_AGE": _CONN_MAX_AGE,
     }
 }
 
@@ -320,6 +330,14 @@ DETECTION_CLIP_ENABLED = os.getenv("DETECTION_CLIP_ENABLED", "true").strip().low
 DETECTION_CLIP_SECONDS = int(os.getenv("DETECTION_CLIP_SECONDS", "7"))
 # Min seconds before the same label/class on one camera is saved again (0 = save every poll)
 DETECTION_DEDUP_SECONDS = int(os.getenv("DETECTION_DEDUP_SECONDS", "5"))
+# Classes that are worth tracking as global objects / DetectionEvents. Static scenery
+# (chair, bench, laptop, bottle…) otherwise generates an event per poll on every camera,
+# each costing a ReID embedding compare, a DB insert and a full-size JPEG snapshot fetch.
+# Set to "*" (or empty) to persist every detected class again.
+DETECTION_TRACKED_CLASSES = os.getenv(
+    "DETECTION_TRACKED_CLASSES",
+    "person,face,car,truck,bus,motorcycle,bicycle,vehicle",
+)
 # Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
 CROWD_ALERT_ENABLED = os.getenv("CROWD_ALERT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
 CROWD_ALERT_THRESHOLD = int(os.getenv("CROWD_ALERT_THRESHOLD", "10"))

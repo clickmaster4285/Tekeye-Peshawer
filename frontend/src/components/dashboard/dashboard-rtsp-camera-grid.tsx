@@ -14,6 +14,7 @@ import { ROUTES } from "@/routes/config"
 import { CameraSelectItems } from "@/components/cameras/camera-select-items"
 import { MlCameraFeed } from "@/components/cameras/ml-camera-feed"
 import { MlSystemStatus } from "@/components/cameras/ml-system-status"
+import { useCameraAlertBadges } from "@/hooks/use-camera-alert-badges"
 import { LOCATION_OPTIONS } from "@/lib/locations"
 import { zoneLabel } from "@/lib/warehouse-zones"
 import { fetchCameras, isCameraAllocated, type CameraRecord } from "@/lib/cameras-api"
@@ -116,6 +117,9 @@ export function DashboardRtspCameraGrid() {
     }
     return list.slice(0, MAX_FEEDS)
   }, [allocatedCameras, location, zone, cameraId])
+
+  const feedIds = useMemo(() => feeds.map((c) => c.id), [feeds])
+  const alertBadges = useCameraAlertBadges(feedIds)
 
   const locationLabel =
     location === ALL_LOCATIONS
@@ -239,6 +243,8 @@ export function DashboardRtspCameraGrid() {
                 key={cam.id}
                 camera={cam}
                 pollMl={false}
+                alertCount={alertBadges[cam.id]?.count || 0}
+                alertLabel={alertBadges[cam.id]?.label}
                 showBrandLogo
                 showFullscreenButton
               />

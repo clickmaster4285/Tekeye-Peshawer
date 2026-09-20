@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import timedelta
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -71,6 +72,26 @@ def _same_identity_class(stored_class: str, new_class: str) -> bool:
         "vehicle": "car",
     }
     return aliases.get(a, a) == aliases.get(b, b)
+
+
+@lru_cache(maxsize=1)
+def _tracked_classes() -> frozenset[str] | None:
+    """Allowlist of classes worth persisting. None means "track everything"."""
+    from django.conf import settings
+
+    raw = str(getattr(settings, "DETECTION_TRACKED_CLASSES", "") or "").strip()
+    if not raw or raw == "*":
+        return None
+    names = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    return frozenset(names) or None
+
+
+def is_tracked_class(class_name: str) -> bool:
+    """False for scenery we do not want a global object, event or snapshot for."""
+    allowed = _tracked_classes()
+    if allowed is None:
+        return True
+    return _normalize_class(class_name) in allowed
 
 
 def is_excluded_detection(det: dict[str, Any]) -> bool:

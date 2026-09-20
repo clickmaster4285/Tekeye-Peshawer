@@ -17,5 +17,13 @@ try:
 
     application = wrap_wsgi(django_app)
 except Exception:
-    # Fallback if realtime deps missing — API still works without sockets.
+    # Fallback if realtime deps missing — API still works without sockets, but every
+    # browser then retries /socket.io once a second and loses cache invalidation, so
+    # make the cause loud rather than silently degrading.
+    import logging
+
+    logging.getLogger(__name__).exception(
+        "Socket.IO could not be mounted; realtime updates are disabled. "
+        "Install the realtime deps (pip install -r requirements.txt)."
+    )
     application = django_app

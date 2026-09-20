@@ -514,6 +514,7 @@ def save_detection_batch(
         finalize_missing_tracks,
         finalize_stale_visits_globally,
         is_excluded_detection,
+        is_tracked_class,
         mark_detection_captured,
         upsert_global_object,
     )
@@ -580,6 +581,9 @@ def save_detection_batch(
         global_obj = None
         visit = None
         should_capture = False
+        if not is_tracked_class(class_name):
+            # Scenery (chair/bench/laptop…): skip ReID, the event row and its snapshot.
+            continue
         try:
             global_obj, visit, should_capture = upsert_global_object(camera, det)
         except Exception:

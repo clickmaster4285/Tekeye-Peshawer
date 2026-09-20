@@ -125,6 +125,29 @@ def gpu_aware_vf(cpu_filter: str | None) -> str | None:
     return f"{download},{cpu_filter}" if cpu_filter else download
 
 
+def downscale_vf(max_width: int, fps: int = 0) -> str | None:
+    """
+    Filter chain that drops framerate and downscales *before* the frame reaches the CPU.
+
+    With NVDEC active, scaling must happen via scale_cuda ahead of hwdownload — otherwise
+    ffmpeg pulls every native (4K) frame across the bus and rescales it on the CPU, which
+    costs an entire core per stream. max_width=0 keeps native resolution.
+    """
+    max_w = max(0, int(max_width))
+    rate = f"fps={int(fps)}" if fps else ""
+    if max_w <= 0:
+        return gpu_aware_vf(rate or None)
+    if use_nvdec():
+        # 16:9 bounding box; force_original_aspect_ratio keeps the source ratio.
+        box_h = max(2, int(round(max_w * 9 / 16)) // 2 * 2)
+        gpu = f"scale_cuda=w={max_w}:h={box_h}:force_original_aspect_ratio=decrease"
+        parts = [p for p in (rate, gpu, "hwdownload", "format=nv12") if p]
+        return ",".join(parts)
+    # CPU decode fallback: 'area' is the cheap, correct scaler for downscaling.
+    cpu = f"scale='min(iw,{max_w})':-2:flags=area"
+    return ",".join(p for p in (rate, cpu) if p)
+
+
 def video_encoder_flags(*, crf: int = 23, preset: str = "veryfast") -> list[str]:
     """Prefer NVENC H.264 encode; CPU libx264 fallback. NVENC accepts CPU or CUDA frames."""
     if use_nvenc():
@@ -289,11 +312,7 @@ def generate_view_mjpeg_frames(
     exe = ffmpeg_path()
     fps = max(5, min(int(fps), 30))
     q = max(2, min(int(jpeg_quality), 12))
-    max_w = max(0, int(max_width))
-    if max_w <= 0:
-        vf_cpu = f"fps={fps}"
-    else:
-        vf_cpu = f"fps={fps},scale='min(iw,{max_w})':-2:flags=lanczos"
+    vf = downscale_vf(max_width, fps=fps)
     cmd = [
         exe,
         "-nostdin",
@@ -312,8 +331,7 @@ def generate_view_mjpeg_frames(
         "-i",
         rtsp_url,
         "-an",
-        "-vf",
-        gpu_aware_vf(vf_cpu),
+        *(["-vf", vf] if vf else []),
         "-f",
         "mjpeg",
         "-q:v",
@@ -369,8 +387,6 @@ def capture_view_jpeg_frame(
     if not url:
         return None
     exe = ffmpeg_path()
-    max_w = max(0, int(max_width))
-    vf_cpu = None if max_w <= 0 else f"scale='min(iw,{max_w})':-2:flags=lanczos"
     cmd = [
         exe,
         "-nostdin",
@@ -389,7 +405,7 @@ def capture_view_jpeg_frame(
         "-frames:v",
         "1",
     ]
-    vf = gpu_aware_vf(vf_cpu)
+    vf = downscale_vf(max_width)
     if vf:
         cmd += ["-vf", vf]
     cmd += ["-f", "image2", "-q:v", "2", "pipe:1"]

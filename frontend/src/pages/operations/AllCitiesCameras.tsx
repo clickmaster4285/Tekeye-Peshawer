@@ -47,6 +47,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { usePageVisible } from "@/hooks/use-page-visible"
 import { getStoredUser } from "@/lib/auth"
 import { canViewAllCitiesCameras, getCamerasWallLabel } from "@/lib/all-cities-cameras"
 import {
@@ -602,6 +603,7 @@ const StreamTile = memo(function StreamTile({
   const retryTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const hasFrameRef = useRef(false)
+  const pageVisible = usePageVisible()
 
   // High-quality viewing: NVR via Django ffmpeg (1080p/4K) — NOT ML 720p AI buffer.
   // WebRTC stays optional; H.265 go2rtc path is unstable, so wall uses view MJPEG.
@@ -655,6 +657,8 @@ const StreamTile = memo(function StreamTile({
       if (!useMjpeg && !useWebrtc) setJpegSrc(null)
       return
     }
+    // Each tick spawns a server-side FFmpeg snapshot, so never poll a hidden tab.
+    if (!pageVisible) return
     let cancelled = false
     const key = `${camera.server_id ?? 0}:${camera.id}:${camera.code}`
     let stagger = 0
@@ -691,7 +695,7 @@ const StreamTile = memo(function StreamTile({
     }
     // hasFrame intentionally omitted — avoid resetting the poll loop every frame
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useWebrtc, useMjpeg, liveEnabled, tokenizedJpeg, retry, camera.server_id, camera.id, camera.code])
+  }, [useWebrtc, useMjpeg, liveEnabled, tokenizedJpeg, retry, pageVisible, camera.server_id, camera.id, camera.code])
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
 

@@ -324,6 +324,14 @@ class DetectionEvent(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # Default ordering is -created_at, so without these every read sorts the whole
+        # table. The composites cover the camera / alert / class filters the API exposes.
+        indexes = [
+            models.Index(fields=["-created_at"], name="detev_created_idx"),
+            models.Index(fields=["camera", "-created_at"], name="detev_cam_created_idx"),
+            models.Index(fields=["is_alert", "-created_at"], name="detev_alert_created_idx"),
+            models.Index(fields=["class_name", "-created_at"], name="detev_class_created_idx"),
+        ]
 
     def __str__(self):
         return f"{self.camera.code} {self.label} @ {self.created_at:%Y-%m-%d %H:%M}"

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { MlCameraFeed } from "@/components/cameras/ml-camera-feed"
 import { useCameras } from "@/hooks/use-cameras"
+import { useCameraAlertBadges } from "@/hooks/use-camera-alert-badges"
 import { ROUTES } from "@/routes/config"
 
 const LAYOUTS = ["1x1", "2x2", "3x3", "4x4"] as const
@@ -23,7 +24,8 @@ function layoutCount(layout: string): number {
 
 export function DashboardLiveCameraGrid() {
   const [layout, setLayout] = useState<string>("2x2")
-  const [showOverlays, setShowOverlays] = useState(true)
+  // Off by default: plain view stream for a smooth wall, AI still runs server-side.
+  const [showOverlays, setShowOverlays] = useState(false)
   const { cameras, loading } = useCameras({
     activeOnly: true,
     onlineOnly: true,
@@ -31,6 +33,8 @@ export function DashboardLiveCameraGrid() {
   })
 
   const feeds = useMemo(() => cameras.slice(0, layoutCount(layout)), [cameras, layout])
+  const feedIds = useMemo(() => feeds.map((c) => c.id), [feeds])
+  const alertBadges = useCameraAlertBadges(feedIds)
 
   return (
     <Card>
@@ -55,7 +59,9 @@ export function DashboardLiveCameraGrid() {
           </div>
           <div className="flex items-center gap-2">
             <Switch id="ai-overlays" checked={showOverlays} onCheckedChange={setShowOverlays} />
-            <Label htmlFor="ai-overlays" className="text-xs">ML overlays</Label>
+            <Label htmlFor="ai-overlays" className="text-xs" title="Off = smoothest playback; detection still runs in the background">
+              ML overlays
+            </Label>
           </div>
           <Button variant="outline" size="sm" asChild>
             <Link to={ROUTES.CAMERA_MANAGEMENT}>Manage cameras</Link>
@@ -85,7 +91,9 @@ export function DashboardLiveCameraGrid() {
                 key={cam.id}
                 camera={cam}
                 pollMl={false}
-                pollIntervalMs={800}
+                showOverlay={showOverlays}
+                alertCount={alertBadges[cam.id]?.count || 0}
+                alertLabel={alertBadges[cam.id]?.label}
                 showBrandLogo
                 showFullscreenButton
               />

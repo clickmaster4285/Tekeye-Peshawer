@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
   Scan,
@@ -60,6 +61,38 @@ const emptyFilters: AppliedFilters = {
   class_name: "",
 }
 
+/**
+ * Alerts, notifications and the video wall deep link into this page. Without this the
+ * query string was ignored entirely, so a click on a specific log opened an unfiltered
+ * list instead of that event.
+ */
+function filtersFromSearch(params: URLSearchParams): AppliedFilters {
+  const alertRaw = (params.get("alert") || "").trim().toLowerCase()
+  const alert: AppliedFilters["alert"] =
+    alertRaw === "1" || alertRaw === "true" || alertRaw === "alerts"
+      ? "alerts"
+      : alertRaw === "0" || alertRaw === "false" || alertRaw === "normal"
+        ? "normal"
+        : "all"
+  return {
+    ...emptyFilters,
+    q: params.get("q")?.trim() || "",
+    site: params.get("site")?.trim() || "all",
+    camera: params.get("camera")?.trim() || "all",
+    date_from: params.get("date_from")?.trim() || "",
+    date_to: params.get("date_to")?.trim() || "",
+    class_name: params.get("class_name")?.trim() || "",
+    alert,
+  }
+}
+
+function eventIdFromSearch(params: URLSearchParams): number | null {
+  const raw = (params.get("event") || params.get("event_id") || "").trim()
+  if (!raw) return null
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
 function formatDateTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString("en-GB", {
@@ -81,11 +114,18 @@ function confidenceTone(confidence: number): string {
   return "bg-orange-500"
 }
 
-function buildQuery(page: number, pageSize: number, filters: AppliedFilters): DetectionEventsQuery {
+function buildQuery(
+  page: number,
+  pageSize: number,
+  filters: AppliedFilters,
+  eventId: number | null
+): DetectionEventsQuery {
   const query: DetectionEventsQuery = {
     page,
     page_size: pageSize,
   }
+  // Pinning one event supersedes the list filters — the caller asked for that row.
+  if (eventId != null) return { ...query, page: 1, event_id: eventId }
   if (filters.q.trim()) query.q = filters.q.trim()
   if (filters.site !== "all") query.site = filters.site
   if (filters.camera !== "all") query.camera = Number(filters.camera)
@@ -98,11 +138,29 @@ function buildQuery(page: number, pageSize: number, filters: AppliedFilters): De
 }
 
 export default function ObjectDetectionPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [pageInput, setPageInput] = useState("1")
-  const [draft, setDraft] = useState<AppliedFilters>(emptyFilters)
-  const [applied, setApplied] = useState<AppliedFilters>(emptyFilters)
+  const [draft, setDraft] = useState<AppliedFilters>(() => filtersFromSearch(searchParams))
+  const [applied, setApplied] = useState<AppliedFilters>(() => filtersFromSearch(searchParams))
+  const pinnedEventId = eventIdFromSearch(searchParams)
+
+  // Re-seed when the URL changes under us (clicking a second alert while already here).
+  const searchKey = searchParams.toString()
+  useEffect(() => {
+    const next = filtersFromSearch(new URLSearchParams(searchKey))
+    setDraft(next)
+    setApplied(next)
+    setPage(1)
+  }, [searchKey])
+
+  const clearPinnedEvent = () => {
+    const next = new URLSearchParams(searchKey)
+    next.delete("event")
+    next.delete("event_id")
+    setSearchParams(next, { replace: true })
+  }
 
   const { data: summary } = useQuery({
     queryKey: ["detection-summary"],
@@ -119,7 +177,10 @@ export default function ObjectDetectionPage() {
     queryFn: () => fetchCameras(),
   })
 
-  const queryParams = useMemo(() => buildQuery(page, pageSize, applied), [page, pageSize, applied])
+  const queryParams = useMemo(
+    () => buildQuery(page, pageSize, applied, pinnedEventId),
+    [page, pageSize, applied, pinnedEventId]
+  )
 
   const {
     data: eventsPage,
@@ -155,12 +216,24 @@ export default function ObjectDetectionPage() {
     [applied]
   )
 
+  // The URL is the source of truth: write filters into it and let the effect above
+  // seed state from it. Applying also drops any pinned event — the user has moved on.
   const applyFilters = () => {
+    const next = new URLSearchParams()
+    if (draft.q.trim()) next.set("q", draft.q.trim())
+    if (draft.site !== "all") next.set("site", draft.site)
+    if (draft.camera !== "all") next.set("camera", draft.camera)
+    if (draft.date_from) next.set("date_from", draft.date_from)
+    if (draft.date_to) next.set("date_to", draft.date_to)
+    if (draft.class_name.trim()) next.set("class_name", draft.class_name.trim())
+    if (draft.alert !== "all") next.set("alert", draft.alert)
+    setSearchParams(next, { replace: true })
     setApplied(draft)
     setPage(1)
   }
 
   const clearFilters = () => {
+    if (searchKey) setSearchParams(new URLSearchParams(), { replace: true })
     setDraft(emptyFilters)
     setApplied(emptyFilters)
     setPage(1)
@@ -198,6 +271,24 @@ export default function ObjectDetectionPage() {
     >
       <div className="grid gap-6">
         <MlSystemStatus />
+
+        {pinnedEventId != null && (
+          <Card className="border-l-4 border-l-sky-500 shadow-sm">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div className="flex items-center gap-2 text-sm">
+                <Camera className="h-4 w-4 text-sky-600" />
+                <span>
+                  Showing detection <span className="font-semibold">#{pinnedEventId}</span> only
+                  {isLoading ? "" : totalCount === 0 ? " — this event no longer exists" : ""}
+                </span>
+              </div>
+              <Button variant="outline" size="sm" onClick={clearPinnedEvent}>
+                <X className="h-4 w-4 mr-1.5" />
+                Show all detections
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-l-4 border-l-primary shadow-sm">

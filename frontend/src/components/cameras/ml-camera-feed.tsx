@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import {
   fetchMlLiveDetections,
   getMlLiveMultipartUrl,
-  getRawMjpegUrl,
+  getViewMjpegUrl,
   cameraSourceLabel,
   type CameraRecord,
 } from "@/lib/cameras-api"
@@ -24,11 +24,18 @@ type MlCameraFeedProps = {
   camera: CameraRecord
   /** Extra detection JSON polling — off by default; overlays are already on the MJPEG. */
   pollMl?: boolean
+  /**
+   * Draw AI boxes on the video. Off by default: the tile then plays the box-free
+   * view stream, which never waits on inference. Detection still runs server-side.
+   */
   showOverlay?: boolean
   pollIntervalMs?: number
   className?: string
   showBrandLogo?: boolean
   showFullscreenButton?: boolean
+  /** Recent alert count for this camera — shown as a badge, never as boxes. */
+  alertCount?: number
+  alertLabel?: string
   onDetections?: (boxes: DetectionBox[]) => void
   onMlError?: (message: string) => void
   onScanStart?: () => void
@@ -64,10 +71,13 @@ function StreamBrandMarks() {
 export function MlCameraFeed({
   camera,
   pollMl = false,
+  showOverlay = false,
   pollIntervalMs = 5000,
   className = "",
   showBrandLogo = true,
   showFullscreenButton = false,
+  alertCount = 0,
+  alertLabel,
   onDetections,
   onMlError,
   onScanStart,
@@ -87,14 +97,23 @@ export function MlCameraFeed({
     return () => document.removeEventListener("visibilitychange", onVis)
   }, [])
 
-  const mlLiveSrc = getMlLiveMultipartUrl(camera)
-  const rawMjpegSrc = !mlLiveSrc && camera.is_rtsp ? getRawMjpegUrl(camera) : null
-  const streamSrcBase = mlLiveSrc || rawMjpegSrc
+  const annotatedSrc = getMlLiveMultipartUrl(camera)
+  const viewSrc = getViewMjpegUrl(camera)
+  // Overlays off (the live wall) → box-free stream. Overlays on → annotated stream.
+  const streamSrcBase = showOverlay ? annotatedSrc || viewSrc : viewSrc || annotatedSrc
   const streamSrc = streamSrcBase && pageVisible
     ? `${streamSrcBase}${streamSrcBase.includes("?") ? "&" : "?"}r=${streamRetry}`
     : null
 
   const exitFullscreen = useCallback(() => setIsFullscreen(false), [])
+
+  // Callers commonly pass inline closures. Keeping them in refs stops the poll effect
+  // from tearing down on every parent render (which re-fired the request immediately
+  // and turned pollIntervalMs into a tight request loop).
+  const cbRef = useRef({ onDetections, onMlError, onScanStart })
+  useEffect(() => {
+    cbRef.current = { onDetections, onMlError, onScanStart }
+  }, [onDetections, onMlError, onScanStart])
 
   useEffect(() => {
     return () => {
@@ -103,12 +122,12 @@ export function MlCameraFeed({
   }, [])
 
   useEffect(() => {
-    // Detection JSON is optional — the live MJPEG already includes overlays.
-    if (!pollMl || !mlLiveSrc || !pageVisible) return
+    // Detection JSON is optional — the annotated MJPEG already includes overlays.
+    if (!pollMl || !annotatedSrc || !pageVisible) return
     let cancelled = false
 
     const run = async () => {
-      onScanStart?.()
+      cbRef.current.onScanStart?.()
       try {
         const result = await fetchMlLiveDetections(camera.id)
         if (cancelled) return
@@ -120,12 +139,12 @@ export function MlCameraFeed({
           alert: d.alert,
         }))
         setMlError(null)
-        onDetections?.(next)
+        cbRef.current.onDetections?.(next)
       } catch (err) {
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : "ML detection failed"
           setMlError(msg)
-          onMlError?.(msg)
+          cbRef.current.onMlError?.(msg)
         }
       }
     }
@@ -136,7 +155,7 @@ export function MlCameraFeed({
       cancelled = true
       window.clearInterval(id)
     }
-  }, [camera.id, mlLiveSrc, pollMl, pollIntervalMs, onDetections, onMlError, onScanStart, pageVisible])
+  }, [camera.id, annotatedSrc, pollMl, pollIntervalMs, pageVisible])
 
   useEffect(() => {
     if (!isFullscreen) return
@@ -176,17 +195,13 @@ export function MlCameraFeed({
             onLoad={() => setStreamError(null)}
             onError={() => {
               if (retryTimer.current != null) window.clearTimeout(retryTimer.current)
-              if (mlLiveSrc && streamRetry < 12) {
+              if (streamRetry < 12) {
                 retryTimer.current = window.setTimeout(() => {
                   setStreamRetry((n) => n + 1)
                 }, 4000)
                 return
               }
-              setStreamError(
-                mlLiveSrc
-                  ? "ML stream failed — ensure ML service is running."
-                  : "Cannot load stream — verify camera / ML service."
-              )
+              setStreamError("Stream failed — ensure the ML service is running.")
             }}
           />
         ) : (
@@ -199,7 +214,12 @@ export function MlCameraFeed({
           <Badge variant="secondary" className="text-xs">
             {camera.name}
           </Badge>
-          {mlLiveSrc && <Badge className="bg-[#3b82f6] text-xs">Live</Badge>}
+          {streamSrcBase && <Badge className="bg-[#3b82f6] text-xs">Live</Badge>}
+          {alertCount > 0 && (
+            <Badge className="bg-red-600 text-xs text-white" title={alertLabel}>
+              {alertLabel ? `${alertLabel} · ${alertCount}` : `${alertCount} alert${alertCount > 1 ? "s" : ""}`}
+            </Badge>
+          )}
         </div>
 
         {showFullscreenButton && (

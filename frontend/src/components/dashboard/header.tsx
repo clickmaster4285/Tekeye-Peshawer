@@ -432,7 +432,10 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
       writeSeenAiAlertIds(seen)
       setNotifOpen(false)
       loadNotifications()
-      navigate(`${ROUTES.OBJECT_DETECTION}?alert=1&q=${encodeURIComponent(n.className || "")}`)
+      // event pins the exact row + snapshot; q/alert keep the list sensible after unpinning.
+      navigate(
+        `${ROUTES.OBJECT_DETECTION}?event=${n.detectionId}&alert=1&q=${encodeURIComponent(n.className || "")}`
+      )
       return
     }
 

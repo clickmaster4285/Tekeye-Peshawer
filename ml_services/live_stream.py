@@ -136,6 +136,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
 def _resolve_ffmpeg_path() -> str | None:
     custom = os.getenv("FFMPEG_PATH", "").strip()
     if custom and os.path.isfile(custom):
@@ -994,18 +1001,55 @@ class _CameraSession:
         self.lock = threading.Lock()
         # Result Buffer + browser JPEG (written by render / infer)
         self.latest_jpeg: bytes | None = None
+        # Box-free JPEG for the live wall — shared by every plain viewer of this camera.
+        self.latest_view_jpeg: bytes | None = None
+        self.view_seq = 0
         self.latest_detections: list[dict[str, Any]] = []
         # Infer scheduling (newest-frame-only; never queue stale work)
         self.infer_lock = threading.Lock()
         self.infer_busy = False
         self.infer_seq_done = 0
         self.last_infer_at = 0.0
+        # Last time each flavour of viewer asked for this camera.
+        self.last_annotated_at = 0.0
+        self.last_view_at = 0.0
 
     def set_frame(self, jpeg: bytes | None, detections: list[dict[str, Any]]):
         with self.lock:
             if jpeg is not None:
                 self.latest_jpeg = jpeg
             self.latest_detections = detections
+
+    def set_view_frame(self, jpeg: bytes | None):
+        if jpeg is None:
+            return
+        with self.lock:
+            self.latest_view_jpeg = jpeg
+            self.view_seq += 1
+
+    def get_view_frame(self) -> tuple[bytes | None, int]:
+        with self.lock:
+            return self.latest_view_jpeg, self.view_seq
+
+    def mark_annotated_view(self):
+        self.last_annotated_at = time.monotonic()
+
+    def mark_plain_view(self):
+        self.last_view_at = time.monotonic()
+
+    def wants_annotated(self, grace_sec: float) -> bool:
+        return (time.monotonic() - self.last_annotated_at) <= max(0.5, grace_sec)
+
+    def wants_view(self, grace_sec: float) -> bool:
+        return (time.monotonic() - self.last_view_at) <= max(0.5, grace_sec)
+
+    def drop_frame(self):
+        with self.lock:
+            self.latest_jpeg = None
+
+    def drop_view_frame(self):
+        with self.lock:
+            self.latest_view_jpeg = None
 
     def set_results(self, detections: list[dict[str, Any]]):
         with self.lock:
@@ -1067,6 +1111,10 @@ class LiveStreamManager:
         self._max_height = 0
         self._stream_fps = max(5, min(_env_int("ML_LIVE_STREAM_FPS", 12), 30))
         self._frame_interval = 1.0 / self._stream_fps
+        # The live wall plays the raw view stream, so drawing + encoding annotated
+        # frames for every session is wasted CPU. Render only while a viewer is attached.
+        self._render_only_when_watched = _env_bool("ML_LIVE_RENDER_ONLY_WHEN_WATCHED", True)
+        self._render_viewer_grace = max(1.0, _env_float("ML_LIVE_RENDER_VIEWER_GRACE", 5.0))
         self._detections: dict[str, list[dict[str, Any]]] = {}
         # Same-frame evidence JPEG (raw infer frame) keyed with detections — for Django snapshots
         self._evidence_jpeg: dict[str, bytes] = {}
@@ -1128,6 +1176,12 @@ class LiveStreamManager:
         self._jpeg_quality = max(40, min(100, _env_int("ML_LIVE_JPEG_QUALITY", self._jpeg_quality)))
         self._stream_fps = max(5, min(_env_int("ML_LIVE_STREAM_FPS", self._stream_fps), 30))
         self._frame_interval = 1.0 / self._stream_fps
+        self._render_only_when_watched = _env_bool(
+            "ML_LIVE_RENDER_ONLY_WHEN_WATCHED", self._render_only_when_watched
+        )
+        self._render_viewer_grace = max(
+            1.0, _env_float("ML_LIVE_RENDER_VIEWER_GRACE", self._render_viewer_grace)
+        )
         try:
             self._infer_interval = max(0.05, float(os.getenv("ML_LIVE_INFER_INTERVAL", str(self._infer_interval))))
         except (TypeError, ValueError):
@@ -1530,6 +1584,8 @@ class LiveStreamManager:
         session = self._sessions.get(ip)
         if not session:
             return None
+        # Asking for the annotated frame is what keeps the render thread drawing it.
+        session.mark_annotated_view()
         with session.lock:
             return session.latest_jpeg
 
@@ -1605,22 +1661,40 @@ class LiveStreamManager:
                 time.sleep(0.02)
 
     def iter_mjpeg_raw(self, key: str) -> Iterator[bytes]:
+        """
+        Box-free view stream for the live wall. Never waits on inference.
+
+        Frames come from the render thread's shared view cache so N viewers of one
+        camera cost one encode; it falls back to encoding here when that thread is
+        not running (no YOLO weights loaded).
+        """
         session = self._sessions.get(key)
         if session is None:
             return
         boundary = b"--frame\r\n"
         quality = max(70, min(self._jpeg_quality, 98))
+        last_seq = -1
         while True:
-            raw = session.stream.get_frame()
-            if raw is not None:
-                jpeg = encode_jpeg(self._limit_size(raw), quality)
-                if jpeg:
-                    yield boundary
-                    yield b"Content-Type: image/jpeg\r\n"
-                    yield f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
-                    yield jpeg
-                    yield b"\r\n"
-            time.sleep(self._frame_interval)
+            session.mark_plain_view()
+            jpeg: bytes | None = None
+            if self._running:
+                cached, seq = session.get_view_frame()
+                if cached is not None and seq != last_seq:
+                    last_seq = seq
+                    jpeg = cached
+            else:
+                raw = session.stream.get_frame()
+                if raw is not None:
+                    jpeg = encode_jpeg(self._limit_size(raw), quality)
+            if jpeg:
+                yield boundary
+                yield b"Content-Type: image/jpeg\r\n"
+                yield f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                yield jpeg
+                yield b"\r\n"
+                time.sleep(self._frame_interval)
+            else:
+                time.sleep(0.02)
 
     def _prepare_frame(self, frame: np.ndarray):
         """
@@ -2103,18 +2177,42 @@ class LiveStreamManager:
             loop_start = time.time()
             with self._lock:
                 sessions = list(self._sessions.values())
+            grace = self._render_viewer_grace
+            gated = self._render_only_when_watched
             for session in sessions:
-                live = session.stream.get_frame()
-                if live is None:
-                    continue
                 with self._det_lock:
                     boxes = list(self._detections.get(session.ip, []))
                 if self._osd_enrolled_staff_only:
                     boxes = filter_enrolled_staff_detections(boxes)
-                # draw_detections copies when there are boxes; otherwise just resize+encode.
-                framed = draw_detections(live, boxes) if boxes else live
-                jpeg = encode_jpeg(self._limit_size(framed), self._jpeg_quality)
-                session.set_frame(jpeg, boxes)
+                want_annotated = not gated or session.wants_annotated(grace)
+                want_view = not gated or session.wants_view(grace)
+                if not want_annotated and not want_view:
+                    # Nobody is watching this camera: keep detections fresh for the JSON /
+                    # evidence endpoints, but skip draw + JPEG encode entirely. Dropping the
+                    # caches keeps a stale frame from being served on reconnect.
+                    session.set_results(boxes)
+                    session.drop_frame()
+                    session.drop_view_frame()
+                    continue
+                live = session.stream.get_frame()
+                if live is None:
+                    continue
+                plain: bytes | None = None
+                if want_view or not boxes:
+                    # One box-free encode feeds every live-wall viewer of this camera,
+                    # and doubles as the annotated frame when there is nothing to draw.
+                    plain = encode_jpeg(self._limit_size(live), self._jpeg_quality)
+                if want_view:
+                    session.set_view_frame(plain)
+                if want_annotated:
+                    if boxes:
+                        # draw_detections copies the frame; plain stays untouched.
+                        framed = draw_detections(live, boxes)
+                        plain = encode_jpeg(self._limit_size(framed), self._jpeg_quality)
+                    session.set_frame(plain, boxes)
+                else:
+                    session.set_results(boxes)
+                    session.drop_frame()
             elapsed = time.time() - loop_start
             wait = self._frame_interval - elapsed
             if wait > 0:

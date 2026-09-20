@@ -180,6 +180,8 @@ export type DetectionEventsPage = {
 export type DetectionEventsQuery = {
   page?: number;
   page_size?: number;
+  /** Deep link to one exact event (from an alert/notification click). */
+  event_id?: number;
   camera?: number;
   site?: string;
   site_id?: number;
@@ -221,7 +223,10 @@ export type StreamCameraMeta = {
 const API = `${API_BASE_URL}/api`;
 
 export function getMlLiveMjpegUrl(
-  camera: Pick<CameraRecord, "id" | "ml_stream_key" | "ml_live_stream_url" | "ml_live_stream_path">
+  camera: Pick<
+    CameraRecord,
+    "id" | "ml_stream_key" | "ml_live_stream_url" | "ml_live_stream_path" | "purpose" | "purposes" | "ml_server"
+  > & { ml_server_id?: number | null }
 ): string | null {
   return getMlLiveMultipartUrl(camera)
 }
@@ -290,6 +295,21 @@ export function getRawMjpegUrl(
     }
   }
   return url;
+}
+
+/**
+ * Box-free stream for the live wall. AI keeps running on the camera in the
+ * background; this path never waits on inference and draws nothing.
+ */
+export function getViewMjpegUrl(
+  camera: Pick<CameraRecord, "id" | "ml_stream_key" | "raw_stream_url">
+): string | null {
+  const assigned = getRawMjpegUrl(camera);
+  if (assigned) return assigned;
+  const streamKey = (camera.ml_stream_key || "").trim();
+  if (!streamKey) return null;
+  // Legacy same-origin /ml proxy (single local ML node)
+  return `/ml/live/cam/${encodeURIComponent(streamKey)}/mjpeg/raw`;
 }
 
 /** @deprecated Django MJPEG proxy removed — use getMlLiveMjpegUrl or getRawMjpegUrl */
@@ -567,6 +587,7 @@ export async function fetchDetectionEventsPage(
   const params = new URLSearchParams();
   if (query.page != null) params.set("page", String(query.page));
   if (query.page_size != null) params.set("page_size", String(query.page_size));
+  if (query.event_id != null) params.set("event_id", String(query.event_id));
   if (query.camera != null) params.set("camera", String(query.camera));
   if (query.site) params.set("site", query.site);
   if (query.site_id != null) params.set("site_id", String(query.site_id));

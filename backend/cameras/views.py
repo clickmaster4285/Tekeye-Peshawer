@@ -183,6 +183,13 @@ class CameraViewSet(viewsets.ModelViewSet):
             DetectionEvent.objects.select_related("camera", "camera__nvr", "camera__nvr__site")
             .order_by("-created_at", "-id")
         )
+        # Deep link from an alert/notification targets one exact event.
+        event_id = request.query_params.get("event_id") or request.query_params.get("id")
+        if event_id:
+            try:
+                qs = qs.filter(pk=int(event_id))
+            except (TypeError, ValueError):
+                qs = qs.none()
         camera_id = request.query_params.get("camera")
         if camera_id:
             qs = qs.filter(camera_id=camera_id)
