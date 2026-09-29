@@ -1,0 +1,28 @@
+# YOLO26 training and deployment (500-camera surveillance)
+ultralytics>=8.0.0
+PyYAML>=6.0
+opencv-python>=4.8.0
+numpy>=1.24.0,<2
+tqdm>=4.65.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# Optional: enable FAISS gallery search when enrolled vectors >= ML_FACE_FAISS_MIN_EMBEDDINGS
+# faiss-cpu>=1.7.4
+
+# License plate OCR (ANPR) — PaddleOCR PP-OCRv5 (GPU)
+# Install GPU PaddlePaddle first (CUDA 11.8 wheel matches this project's PyTorch).
+# Direct Windows cp311 wheel (official index is often slow):
+#   python -m pip install https://paddle-whl.bj.bcebos.com/stable/cu118/paddlepaddle-gpu/paddlepaddle_gpu-3.2.2-cp311-cp311-win_amd64.whl
+# Then:
+paddleocr>=3.0.0
+
+# Optional: for deployment / inference
+# onnx>=1.14.0
+# onnxruntime-gpu>=1.15.0
+
+# TekEye voice agent — on-prem speech-to-text
+faster-whisper>=1.1.0

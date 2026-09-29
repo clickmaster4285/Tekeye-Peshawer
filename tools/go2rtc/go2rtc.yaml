@@ -1,0 +1,111 @@
+streams:
+  s10_cam-79:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1901#video=h264#audio=copy
+  s10_cam-53:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/2001#video=h264#hardware#audio=copy
+  s6_cam-12:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/701#video=h264#audio=copy
+  s4_cam-60:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/2701#video=h264#audio=copy
+  s4_cam-27:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2201#video=h264#audio=copy
+  s4_cam-5:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2401#video=h264#audio=copy
+  s10_cam-37:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/401#video=h264#audio=copy
+  s4_cam-76:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1601#video=h264#audio=copy
+  s10_cam-73:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1301#video=h264#audio=copy
+  s6_cam-18:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/1301#video=h264#audio=copy
+  s9_cam-30:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2501#video=h264#audio=copy
+  s9_cam-66:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/601#video=h264#audio=copy
+  s8_cam-75:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1501#video=h264#audio=copy
+  s6_cam-6:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/101#video=h264#audio=copy
+  s6_cam-28:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2301#video=h264#audio=copy
+  s6_cam-51:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/1801#video=h264#audio=copy
+  s6_cam-77:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1701#video=h264#audio=copy
+  s6_cam-61:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/101#video=h264#audio=copy
+  s9_cam-52:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/1901#video=h264#audio=copy
+  s10_cam-83:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/2301#video=h264#audio=copy
+  s10_cam-14:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/901#video=h264#audio=copy
+  s6_cam-35:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/201#video=h264#audio=copy
+  s8_cam-8:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/301#video=h264#audio=copy
+  s9_cam-23:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/1801#video=h264#audio=copy
+  s6_cam-39:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/601#video=h264#audio=copy
+  s9_cam-40:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/701#video=h264#audio=copy
+  s6_cam-81:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/2101#video=h264#audio=copy
+  s4_cam-54:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/2101#video=h264#audio=copy
+  s4_cam-80:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/2001#video=h264#audio=copy
+  s8_cam-69:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/901#video=h264#audio=copy
+  s9_cam-36:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/301#video=h264#audio=copy
+  s6_cam-22:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/1701#video=h264#audio=copy
+  s10_cam-10:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/501#video=h264#audio=copy
+  s6_cam-71:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1101#video=h264#hardware#audio=copy
+  s7_cam-42:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/901#video=h264#audio=copy
+  s7_cam-15:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/1001#video=h264#audio=copy
+  s7_cam-25:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2001#video=h264#audio=copy
+  s7_cam-32:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2601#video=h264#audio=copy
+  s8_cam-49:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/1601#video=h264#hardware#audio=copy
+  s7_cam-48:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/1501#video=h264#audio=copy
+  s7_cam-58:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/2501#video=h264#hardware#audio=copy
+  s7_cam-68:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/801#video=h264#audio=copy
+  s7_cam-7:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/201#video=h264#audio=copy
+  s8_cam-26:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2101#video=h264#audio=copy
+  s7_cam-84:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/2401#video=h264#audio=copy
+  s8_cam-59:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/2601#video=h264#audio=copy
+  s8_cam-16:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/1101#video=h264#audio=copy
+  s8_cam-33:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2701#video=h264#audio=copy
+  s8_cam-43:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.250:554/Streaming/Channels/1001#video=h264#hardware#audio=copy
+  s7_cam-74:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/1401#video=h264#audio=copy
+  s1_cam-48:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2801#video=h264#audio=copy
+  s1_cam-47:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2401#video=h264#audio=copy
+  s1_cam-49:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.249:554/Streaming/Channels/2901#video=h264#audio=copy
+  s1_cam-46:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/501#video=h264#audio=copy
+  s1_cam-29:
+    - ffmpeg:rtsp://admin:Pak%4000721@192.168.190.248:554/Streaming/Channels/101#video=h264#audio=copy
