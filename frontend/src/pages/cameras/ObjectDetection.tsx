@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Scan,
@@ -16,6 +16,9 @@ import {
   Loader2,
   Pencil,
   Film,
+  FileDown,
+  FileText,
+  CalendarDays,
 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,6 +46,17 @@ import {
 import { MlSystemStatus } from "@/components/cameras/ml-system-status"
 import { DetectionSnapshotThumb } from "@/components/cameras/detection-snapshot-thumb"
 import {
+  buildDetectionPdfPages,
+  DETECTION_PDF_MAX_EVENTS,
+  DetectionPdfReport,
+  downloadDetectionPdf,
+  MONTH_NAMES,
+  monthYearLabel,
+  monthYearRange,
+  reportYearOptions,
+  type DetectionPdfPage,
+} from "@/components/cameras/detection-pdf-report"
+import {
   fetchDetectionEventsPage,
   fetchDetectionSummary,
   fetchCameras,
@@ -55,6 +69,7 @@ import {
 } from "@/lib/cameras-api"
 import { getStoredUser } from "@/lib/auth"
 import { normalizeRole } from "@/lib/role-access"
+import { useToast } from "@/hooks/use-toast"
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 25
@@ -134,8 +149,60 @@ function buildQuery(page: number, pageSize: number, filters: AppliedFilters): De
   return query
 }
 
+function filterSummaryLabel(filters: AppliedFilters): string {
+  const parts: string[] = []
+  if (filters.site !== "all") parts.push(`Site ${filters.site}`)
+  if (filters.camera !== "all") parts.push(`Camera #${filters.camera}`)
+  if (filters.class_name.trim()) parts.push(`Class ${filters.class_name.trim()}`)
+  if (filters.alert === "alerts") parts.push("Alerts only")
+  if (filters.alert === "normal") parts.push("Normal only")
+  if (filters.q.trim()) parts.push(`Search “${filters.q.trim()}”`)
+  return parts.length ? parts.join(" · ") : "All cameras / classes"
+}
+
+async function fetchDetectionEventsForPdf(
+  filters: AppliedFilters,
+  range: { date_from: string; date_to: string }
+): Promise<DetectionEvent[]> {
+  const base: DetectionEventsQuery = {
+    ...buildQuery(1, 5000, {
+      ...filters,
+      date_from: range.date_from,
+      date_to: range.date_to,
+    }),
+    page: 1,
+    page_size: 5000,
+  }
+
+  const all: DetectionEvent[] = []
+  let page = 1
+  let totalPages = 1
+  let asOf: string | undefined
+  let asOfId: number | undefined
+
+  while (page <= totalPages && all.length < DETECTION_PDF_MAX_EVENTS) {
+    const res = await fetchDetectionEventsPage({
+      ...base,
+      page,
+      as_of: asOf,
+      as_of_id: asOfId,
+    })
+    if (page === 1) {
+      asOf = res.as_of ?? undefined
+      asOfId = res.as_of_id ?? undefined
+      totalPages = Math.max(1, res.total_pages || 1)
+    }
+    all.push(...(res.results || []))
+    if (!res.results?.length) break
+    page += 1
+  }
+
+  return all.slice(0, DETECTION_PDF_MAX_EVENTS)
+}
+
 export default function ObjectDetectionPage() {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const user = getStoredUser()
   const isAdmin = normalizeRole(user?.role) === "ADMIN"
   const [page, setPage] = useState(1)
@@ -168,6 +235,15 @@ export default function ObjectDetectionPage() {
   const [editVideoFile, setEditVideoFile] = useState<File | null>(null)
   const [editVideoPreview, setEditVideoPreview] = useState<string | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  const now = new Date()
+  const [pdfMonth, setPdfMonth] = useState(now.getMonth() + 1)
+  const [pdfYear, setPdfYear] = useState(now.getFullYear())
+  const [pdfExporting, setPdfExporting] = useState(false)
+  const [pdfPages, setPdfPages] = useState<DetectionPdfPage[]>([])
+  const [pdfPeriodLabel, setPdfPeriodLabel] = useState("")
+  const [pdfFilterSummary, setPdfFilterSummary] = useState("")
+  const pdfReportRef = useRef<HTMLDivElement | null>(null)
+  const pdfYearChoices = useMemo(() => reportYearOptions(8), [])
 
   const { data: summary } = useQuery({
     queryKey: ["detection-summary"],
@@ -375,6 +451,59 @@ export default function ObjectDetectionPage() {
     setPage(1)
   }
 
+  const handleExportPdf = async () => {
+    setPdfExporting(true)
+    setActionError(null)
+    try {
+      const range = monthYearRange(pdfYear, pdfMonth)
+      const events = await fetchDetectionEventsForPdf(applied, range)
+      if (!events.length) {
+        toast({
+          title: "Nothing to export",
+          description: `No detections in ${MONTH_NAMES[pdfMonth - 1]} ${pdfYear} for the current filters.`,
+          variant: "destructive",
+        })
+        return
+      }
+      const label = monthYearLabel(pdfYear, pdfMonth)
+      const pages = buildDetectionPdfPages(events, {
+        classFilter: applied.class_name.trim() || undefined,
+      })
+      if (!pages.length) {
+        toast({
+          title: "Nothing to export",
+          description: "No class groups to render.",
+          variant: "destructive",
+        })
+        return
+      }
+      setPdfPeriodLabel(label)
+      setPdfFilterSummary(filterSummaryLabel(applied))
+      setPdfPages(pages)
+      await new Promise((r) => setTimeout(r, 400))
+      const el = pdfReportRef.current
+      if (!el) throw new Error("PDF report not ready")
+      const safeClass = (applied.class_name.trim() || "all-classes").replace(/[^a-zA-Z0-9-_]+/g, "_")
+      const monthSlug = MONTH_NAMES[pdfMonth - 1].toLowerCase()
+      await downloadDetectionPdf(
+        el,
+        `detection-report-${safeClass}-${monthSlug}-${pdfYear}.pdf`
+      )
+      toast({
+        title: "PDF downloaded",
+        description: `${pages.length} page(s) · ${label}`,
+      })
+    } catch (err) {
+      toast({
+        title: "PDF export failed",
+        description: err instanceof Error ? err.message : "Could not generate PDF",
+        variant: "destructive",
+      })
+    } finally {
+      setPdfExporting(false)
+    }
+  }
+
   useEffect(() => {
     if (totalPages > 0 && page > totalPages) {
       setPage(totalPages)
@@ -441,19 +570,22 @@ export default function ObjectDetectionPage() {
           </Card>
         </div>
 
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Filter className="h-5 w-5 text-muted-foreground" />
-                  Filters
+        <Card className="overflow-hidden border-border/80 shadow-sm">
+          <CardHeader className="border-b bg-muted/30 pb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Filter className="h-4 w-4" />
+                  </span>
+                  Search filters
                 </CardTitle>
-                <CardDescription>
-                  Filters query the full detection database on the server, not just the current page.
+                <CardDescription className="max-w-2xl">
+                  Narrow the detection log by site, camera, class, or date. Applied filters also
+                  scope the monthly PDF report below.
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
                   <RefreshCw className={`h-4 w-4 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
                   Refresh
@@ -461,7 +593,7 @@ export default function ObjectDetectionPage() {
                 {hasActiveFilters && (
                   <Button variant="ghost" size="sm" onClick={clearFilters}>
                     <X className="h-4 w-4 mr-1.5" />
-                    Clear filters
+                    Clear
                   </Button>
                 )}
                 <Button size="sm" onClick={applyFilters}>
@@ -470,105 +602,200 @@ export default function ObjectDetectionPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <div className="space-y-2">
-              <Label htmlFor="det-search">Search (class, synonyms)</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <CardContent className="pt-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="space-y-2 sm:col-span-2 lg:col-span-1 xl:col-span-2">
+                <Label htmlFor="det-search">Search</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="det-search"
+                    className="w-full pl-9"
+                    placeholder="Class, synonym, employee, QR…"
+                    value={draft.q}
+                    onChange={(e) => setDraft((f) => ({ ...f, q: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Site</Label>
+                <Select
+                  value={draft.site}
+                  onValueChange={(v) => setDraft((f) => ({ ...f, site: v, camera: "all" }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="All sites" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All sites</SelectItem>
+                    {sites.map((s) => (
+                      <SelectItem key={s.id} value={s.code}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Camera</Label>
+                <Select
+                  value={draft.camera}
+                  onValueChange={(v) => setDraft((f) => ({ ...f, camera: v }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="All cameras" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All cameras</SelectItem>
+                    {siteCameras.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.code} · {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="det-from">Date from</Label>
                 <Input
-                  id="det-search"
-                  className="w-full pl-9"
-                  placeholder="e.g. smoke, person, vehicle, fire…"
-                  value={draft.q}
-                  onChange={(e) => setDraft((f) => ({ ...f, q: e.target.value }))}
+                  id="det-from"
+                  type="date"
+                  className="w-full"
+                  value={draft.date_from}
+                  onChange={(e) => setDraft((f) => ({ ...f, date_from: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="det-to">Date to</Label>
+                <Input
+                  id="det-to"
+                  type="date"
+                  className="w-full"
+                  value={draft.date_to}
+                  onChange={(e) => setDraft((f) => ({ ...f, date_to: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Alert status</Label>
+                <Select
+                  value={draft.alert}
+                  onValueChange={(v) =>
+                    setDraft((f) => ({ ...f, alert: v as AppliedFilters["alert"] }))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All events</SelectItem>
+                    <SelectItem value="alerts">Alerts only</SelectItem>
+                    <SelectItem value="normal">Normal only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="det-class">Class</Label>
+                <Input
+                  id="det-class"
+                  className="w-full"
+                  placeholder="e.g. person, car, smoke"
+                  value={draft.class_name}
+                  onChange={(e) => setDraft((f) => ({ ...f, class_name: e.target.value }))}
                   onKeyDown={(e) => e.key === "Enter" && applyFilters()}
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Site</Label>
-              <Select
-                value={draft.site}
-                onValueChange={(v) => setDraft((f) => ({ ...f, site: v, camera: "all" }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All sites" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All sites</SelectItem>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={s.code}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {hasActiveFilters ? (
+              <p className="mt-4 text-xs text-muted-foreground">
+                Active filters are applied to the log and to PDF export scope (site, camera, class,
+                alert, search). Report month is chosen separately below.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden border-border/80 shadow-sm">
+          <CardHeader className="border-b bg-gradient-to-r from-slate-900/[0.04] to-amber-900/[0.04] pb-4 dark:from-slate-100/[0.04] dark:to-amber-100/[0.04]">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                    <FileText className="h-4 w-4" />
+                  </span>
+                  Detection Report
+                </CardTitle>
+                <CardDescription className="max-w-2xl">
+                  Export one month at a time — class-wise and date-wise statistics PDF (counts,
+                  share, alerts, confidence). No images.
+                </CardDescription>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Camera</Label>
-              <Select
-                value={draft.camera}
-                onValueChange={(v) => setDraft((f) => ({ ...f, camera: v }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All cameras" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All cameras</SelectItem>
-                  {siteCameras.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.code} · {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="det-from">Date from</Label>
-              <Input
-                id="det-from"
-                type="date"
-                className="w-full"
-                value={draft.date_from}
-                onChange={(e) => setDraft((f) => ({ ...f, date_from: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="det-to">Date to</Label>
-              <Input
-                id="det-to"
-                type="date"
-                className="w-full"
-                value={draft.date_to}
-                onChange={(e) => setDraft((f) => ({ ...f, date_to: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Alert status</Label>
-              <Select
-                value={draft.alert}
-                onValueChange={(v) => setDraft((f) => ({ ...f, alert: v as AppliedFilters["alert"] }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All events</SelectItem>
-                  <SelectItem value="alerts">Alerts only</SelectItem>
-                  <SelectItem value="normal">Normal only</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="det-class">Class</Label>
-              <Input
-                id="det-class"
-                className="w-full"
-                placeholder="e.g. person, car"
-                value={draft.class_name}
-                onChange={(e) => setDraft((f) => ({ ...f, class_name: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && applyFilters()}
-              />
+          </CardHeader>
+          <CardContent className="pt-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:max-w-xl">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+                    Report month
+                  </Label>
+                  <Select
+                    value={String(pdfMonth)}
+                    onValueChange={(v) => setPdfMonth(Number(v))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTH_NAMES.map((name, idx) => (
+                        <SelectItem key={name} value={String(idx + 1)}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Report year</Label>
+                  <Select
+                    value={String(pdfYear)}
+                    onValueChange={(v) => setPdfYear(Number(v))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pdfYearChoices.map((y) => (
+                        <SelectItem key={y} value={String(y)}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {MONTH_NAMES[pdfMonth - 1]} {pdfYear}
+                  </span>
+                  <span className="mx-2 text-border">·</span>
+                  Stats by class
+                </div>
+                <Button
+                  onClick={() => void handleExportPdf()}
+                  disabled={pdfExporting}
+                  className="min-w-[160px]"
+                >
+                  {pdfExporting ? (
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <FileDown className="h-4 w-4 mr-1.5" />
+                  )}
+                  {pdfExporting ? "Preparing PDF…" : "Download PDF"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1145,6 +1372,15 @@ export default function ObjectDetectionPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {pdfPages.length > 0 ? (
+        <DetectionPdfReport
+          pages={pdfPages}
+          periodLabel={pdfPeriodLabel}
+          filterSummary={pdfFilterSummary}
+          reportRef={pdfReportRef}
+        />
+      ) : null}
     </ModulePageLayout>
   )
 }

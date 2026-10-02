@@ -386,6 +386,29 @@ ATTENDANCE_CCTV_AUTOSTART = os.getenv("ATTENDANCE_CCTV_AUTOSTART", "False").lowe
 )
 # shared = pull JPEG from ML Camera Session; rtsp = legacy independent OpenCV decode
 ATTENDANCE_CCTV_FRAME_SOURCE = os.getenv("ATTENDANCE_CCTV_FRAME_SOURCE", "shared").strip().lower()
+# Cameras not assigned to an ML server fall back to a direct OpenCV RTSP reader
+# (otherwise they never receive frames in shared mode).
+ATTENDANCE_CCTV_RTSP_FALLBACK = os.getenv("ATTENDANCE_CCTV_RTSP_FALLBACK", "True").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# Max frame width used for CCTV face inference (independent of ATTENDANCE_VIDEO_WIDTH clips).
+ATTENDANCE_CCTV_INFER_WIDTH = int(os.getenv("ATTENDANCE_CCTV_INFER_WIDTH", "1920"))
+# Run the face detector on native-resolution 640px tiles instead of shrinking the
+# whole frame to 640x640, so small, distant CCTV faces stay detectable.
+ATTENDANCE_CCTV_FULLRES_DETECT = os.getenv("ATTENDANCE_CCTV_FULLRES_DETECT", "True").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+# Smallest face (px, both sides) considered for CCTV matching.
+ATTENDANCE_CCTV_MIN_FACE_PX = int(os.getenv("ATTENDANCE_CCTV_MIN_FACE_PX", "24"))
+# Faces smaller than this must match the same staff in N scans before marking.
+ATTENDANCE_CCTV_SMALL_FACE_PX = int(os.getenv("ATTENDANCE_CCTV_SMALL_FACE_PX", "40"))
+ATTENDANCE_CCTV_SMALL_FACE_CONFIRMATIONS = int(
+    os.getenv("ATTENDANCE_CCTV_SMALL_FACE_CONFIRMATIONS", "2")
+)
 ATTENDANCE_INSIGHTFACE_MODEL = os.getenv("ATTENDANCE_INSIGHTFACE_MODEL", "buffalo_l")
 # Comma-separated ONNX providers override, e.g. "CUDAExecutionProvider,TensorrtExecutionProvider,CPUExecutionProvider"
 ATTENDANCE_ONNX_PROVIDERS = os.getenv("ATTENDANCE_ONNX_PROVIDERS", "")

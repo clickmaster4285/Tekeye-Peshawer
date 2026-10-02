@@ -21,10 +21,26 @@ from recognition.services.snapshot_saver import save_detection_snapshot, snapsho
 
 logger = logging.getLogger(__name__)
 
-MIN_FACE_PX = 40
 MIN_DET_SCORE = 0.55
 UPSCALE_BELOW_PX = 110
 UPSCALE_FACTOR = 2.5
+SMALL_FACE_CONFIRM_WINDOW_SEC = 20.0
+
+
+def _min_face_px() -> int:
+    return max(16, int(getattr(settings, "ATTENDANCE_CCTV_MIN_FACE_PX", 24)))
+
+
+def _small_face_px() -> int:
+    return max(0, int(getattr(settings, "ATTENDANCE_CCTV_SMALL_FACE_PX", 40)))
+
+
+def _small_face_confirmations() -> int:
+    return max(1, int(getattr(settings, "ATTENDANCE_CCTV_SMALL_FACE_CONFIRMATIONS", 2)))
+
+
+def _fullres_detect() -> bool:
+    return bool(getattr(settings, "ATTENDANCE_CCTV_FULLRES_DETECT", True))
 
 
 def _match_cooldown() -> int:
@@ -32,7 +48,23 @@ def _match_cooldown() -> int:
 
 
 def _cctv_infer_max_width() -> int:
-    return max(0, int(getattr(settings, "ATTENDANCE_VIDEO_WIDTH", 3840)))
+    return max(0, int(getattr(settings, "ATTENDANCE_CCTV_INFER_WIDTH", 1920)))
+
+
+def _camera_has_ml_server(camera_id: int) -> bool:
+    """True when the shared ML Camera Session can serve frames for this camera."""
+    from cameras.models import Camera
+    from ml.client import camera_ml_base_url, ml_service_enabled
+
+    if not ml_service_enabled():
+        return False
+    camera = Camera.objects.filter(pk=camera_id).select_related("nvr", "ml_server").first()
+    if camera is None:
+        return False
+    try:
+        return bool(camera_ml_base_url(camera))
+    except Exception:
+        return False
 
 
 def _cctv_use_shared_session() -> bool:
@@ -356,7 +388,20 @@ class CCTVWorkerManager:
         cooldown = _match_cooldown()
         last_infer_at = 0.0
         use_shared = _cctv_use_shared_session()
+        if use_shared and getattr(settings, "ATTENDANCE_CCTV_RTSP_FALLBACK", True):
+            close_old_connections()
+            try:
+                if not _camera_has_ml_server(state.camera_id):
+                    # No ML node assigned → shared session can never serve frames.
+                    use_shared = False
+            finally:
+                release_db()
         key = (stream_key or f"cam-{state.camera_id}").strip()
+        small_face_hits: dict[str, deque] = {}
+        min_face_px = _min_face_px()
+        small_face_px = _small_face_px()
+        small_face_needed = _small_face_confirmations()
+        fullres = _fullres_detect()
 
         logger.info(
             "Starting CCTV attendance worker for camera %s (%s) frame_source=%s",
@@ -394,6 +439,17 @@ class CCTVWorkerManager:
                         state.last_error = ""
                         logger.info("Camera %s connected (%s)", state.camera_id, info)
 
+                    # Between scans only grab (keeps the RTSP buffer drained
+                    # without colour-converting every frame).
+                    if time.time() - last_infer_at < self._scan_interval:
+                        if not cap.grab():
+                            state.connected = False
+                            state.last_error = "Frame grab failed — reconnecting"
+                            cap.release()
+                            cap = None
+                            time.sleep(reconnect_delay)
+                        continue
+
                     ok, frame = cap.read()
                     if not ok or frame is None:
                         state.connected = False
@@ -408,7 +464,7 @@ class CCTVWorkerManager:
                 state.last_frame_at = datetime.now().isoformat(timespec="seconds")
                 frame_index += 1
 
-                if frame_index % 3 == 0:
+                if not use_shared or frame_index % 3 == 0:
                     small = cv2.resize(frame, (640, 360))
                     ok_jpg, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok_jpg:
@@ -455,7 +511,10 @@ class CCTVWorkerManager:
                     scale = max_w / w
                     frame_infer = cv2.resize(frame, (max_w, int(h * scale)))
 
-                faces = engine.detect_faces(frame_infer)
+                if fullres:
+                    faces = engine.detect_faces_tiled(frame_infer)
+                else:
+                    faces = engine.detect_faces(frame_infer)
                 state.frames_processed += 1
 
                 for face in faces:
@@ -464,7 +523,7 @@ class CCTVWorkerManager:
                         continue
 
                     face_w, face_h = self._face_bbox_size(face)
-                    if face_w < MIN_FACE_PX or face_h < MIN_FACE_PX:
+                    if face_w < min_face_px or face_h < min_face_px:
                         continue
 
                     embedding, (face_w, face_h) = self._refine_embedding(
@@ -505,6 +564,21 @@ class CCTVWorkerManager:
                             }
                             state.last_events.appendleft(event)
                             continue
+
+                        # Small/distant faces give noisier embeddings: require the
+                        # same match on repeated scans before marking attendance.
+                        if small_face_needed > 1 and min(face_w, face_h) < small_face_px:
+                            hits = small_face_hits.setdefault(gallery_key, deque(maxlen=10))
+                            hits.append(now)
+                            while hits and now - hits[0] > SMALL_FACE_CONFIRM_WINDOW_SEC:
+                                hits.popleft()
+                            if len(hits) < small_face_needed:
+                                event["message"] = (
+                                    f"Recognized (small face — confirming {len(hits)}/{small_face_needed})"
+                                )
+                                state.last_events.appendleft(event)
+                                continue
+                            hits.clear()
 
                         state.match_cooldown[gallery_key] = now
                         close_old_connections()

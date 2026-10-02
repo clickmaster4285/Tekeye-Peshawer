@@ -303,7 +303,7 @@ class CameraViewSet(viewsets.ModelViewSet):
                 page_size = int(request.query_params.get("limit", page_size))
             except (TypeError, ValueError):
                 pass
-        page_size = min(max(page_size, 1), 100)
+        page_size = min(max(page_size, 1), 5000)
 
         is_alert = request.query_params.get("is_alert")
         if is_alert is not None and str(is_alert).strip().lower() in ("true", "1", "yes"):

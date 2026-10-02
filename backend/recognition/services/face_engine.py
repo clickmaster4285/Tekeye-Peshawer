@@ -249,6 +249,59 @@ class FaceEngine:
             return self.app.get(image)
 
     @staticmethod
+    def _tile_starts(length: int, tile: int, overlap: int) -> list[int]:
+        if length <= tile:
+            return [0]
+        count = int(np.ceil((length - overlap) / float(tile - overlap)))
+        last = length - tile
+        return sorted({int(round(i * last / max(count - 1, 1))) for i in range(count)})
+
+    @staticmethod
+    def _bbox_iou(a, b) -> float:
+        ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+        ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+        if inter <= 0:
+            return 0.0
+        area_a = (a[2] - a[0]) * (a[3] - a[1])
+        area_b = (b[2] - b[0]) * (b[3] - b[1])
+        return inter / max(area_a + area_b - inter, 1e-6)
+
+    def detect_faces_tiled(self, image: np.ndarray, tile: int = 640, overlap: int = 128):
+        """Detect small CCTV faces at native resolution.
+
+        The detector runs at a fixed 640x640 input (DirectML cannot change it), so
+        a whole 1280-1920px frame is shrunk 2-3x and 30px faces become ~12px.
+        Running it on overlapping native-resolution tiles (plus one full-frame
+        pass for large faces) keeps distant faces at their real pixel size.
+        """
+        h, w = image.shape[:2]
+        faces = list(self.detect_faces(image))
+        if h <= tile and w <= tile:
+            return faces
+
+        for y in self._tile_starts(h, tile, overlap):
+            for x in self._tile_starts(w, tile, overlap):
+                crop = image[y : y + tile, x : x + tile]
+                for face in self.detect_faces(crop):
+                    offset = np.array([x, y], dtype=np.float32)
+                    face.bbox = face.bbox + np.tile(offset, 2)
+                    for key in ("kps", "landmark_2d_106", "landmark_3d_68"):
+                        pts = face.get(key)
+                        if pts is not None:
+                            pts = np.array(pts, dtype=np.float32, copy=True)
+                            pts[..., :2] += offset
+                            face[key] = pts
+                    faces.append(face)
+
+        faces.sort(key=lambda f: float(getattr(f, "det_score", 0.0)), reverse=True)
+        kept = []
+        for face in faces:
+            if all(self._bbox_iou(face.bbox, k.bbox) < 0.4 for k in kept):
+                kept.append(face)
+        return kept
+
+    @staticmethod
     def resize_max(image: np.ndarray, max_side: int = 640) -> np.ndarray:
         h, w = image.shape[:2]
         side = max(h, w)
