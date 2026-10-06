@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   Calendar,
@@ -39,7 +39,14 @@ import {
   fetchSupportTickets,
   type SupportTicket,
 } from "@/lib/support-api"
+import { getStoredUser } from "@/lib/auth"
+import { TicketRowActions } from "@/pages/support/ticket-row-actions"
 import { cn } from "@/lib/utils"
+
+function isRequesterRole(role?: string | null) {
+  const r = (role || "").trim().replace(/[\s-]+/g, "_").toUpperCase()
+  return r === "ADMIN" || r === "LOCATION_ADMIN"
+}
 
 type QueueKey =
   | ""
@@ -123,6 +130,7 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
 
 export default function SupportRequestList() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
   const queue = (params.get("queue") || "") as QueueKey
   const search = params.get("search") || ""
@@ -141,7 +149,19 @@ export default function SupportRequestList() {
     queryKey: ["support", "meta"],
     queryFn: fetchSupportMeta,
   })
-  const requesterOnly = Boolean(metaQ.data?.capabilities?.is_requester_only)
+  const caps = metaQ.data?.capabilities
+  // Prefer API caps; until loaded, use stored login role so staff filters don't flash.
+  const requesterOnly =
+    caps != null
+      ? Boolean(caps.is_requester_only)
+      : isRequesterRole(getStoredUser()?.role)
+
+  const actionMut = useMutation({
+    mutationFn: (fn: () => Promise<unknown>) => fn(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["support"] })
+    },
+  })
 
   const dashQ = useQuery({
     queryKey: ["support", "dashboard"],
@@ -151,18 +171,17 @@ export default function SupportRequestList() {
 
   useEffect(() => {
     if (!requesterOnly) return
-    if (!REQUESTER_QUEUES.has(queue) || queue === "") {
+    if (!queue || !REQUESTER_QUEUES.has(queue)) {
       const next = new URLSearchParams(params)
       next.set("queue", "my_requests")
       setParams(next, { replace: true })
     }
   }, [requesterOnly, queue, params, setParams])
 
-  const effectiveQueue = requesterOnly
-    ? queue && REQUESTER_QUEUES.has(queue) && queue !== ""
-      ? queue
-      : "my_requests"
-    : queue
+  const effectiveQueue: QueueKey =
+    requesterOnly && (!queue || !REQUESTER_QUEUES.has(queue))
+      ? "my_requests"
+      : queue
 
   const queryParams = useMemo(
     () => ({
@@ -395,22 +414,12 @@ export default function SupportRequestList() {
                         className="pr-4"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex items-center justify-end gap-0.5">
-                          <Button
-                            asChild
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-[#155DFC] hover:bg-[#EBF2FF] hover:text-[#155DFC]"
-                          >
-                            <Link
-                              to={getSupportTicketPath(t.id)}
-                              title="View details"
-                              aria-label="View details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
+                        <TicketRowActions
+                          ticket={t}
+                          caps={caps}
+                          busy={actionMut.isPending}
+                          onAction={(fn) => actionMut.mutate(fn)}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
