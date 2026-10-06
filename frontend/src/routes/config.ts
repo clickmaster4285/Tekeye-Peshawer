@@ -739,11 +739,10 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
   },
   {
     // Grantable module for Super Admin / Location Admin / officers:
-    // create + track own requests only. Support Agent role sees full queues.
+    // track own requests; create via + New Request on the list page.
     label: "Requests & Support",
-    overviewHref: ROUTES.SUPPORT_CREATE,
+    overviewHref: `${ROUTES.SUPPORT_ALL}?queue=my_requests`,
     children: [
-      { label: "Create Request", href: ROUTES.SUPPORT_CREATE },
       { label: "My Requests", href: `${ROUTES.SUPPORT_ALL}?queue=my_requests` },
     ],
   },
@@ -935,12 +934,11 @@ export const PRAL_NAV_SECTIONS: NavSection[] = [
   { title: "System", items: [{ label: "Logs", href: ROUTES.LOGS }] },
 ]
 
-/** Super Admin / Location Admin / module grants — create & track own tickets only. */
+/** Super Admin / Location Admin / module grants — track own tickets; create via list page button. */
 const REQUESTER_SUPPORT_NAV: NavGroup = {
   label: "Requests & Support",
-  overviewHref: ROUTES.SUPPORT_CREATE,
+  overviewHref: `${ROUTES.SUPPORT_ALL}?queue=my_requests`,
   children: [
-    { label: "Create Request", href: ROUTES.SUPPORT_CREATE },
     { label: "My Requests", href: `${ROUTES.SUPPORT_ALL}?queue=my_requests` },
   ],
 }

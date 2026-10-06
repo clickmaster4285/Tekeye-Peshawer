@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   Calendar,
   CheckCircle2,
@@ -8,7 +8,6 @@ import {
   Eye,
   Filter,
   Monitor,
-  MoreVertical,
   Plus,
   RefreshCw,
   Search,
@@ -22,12 +21,6 @@ import {
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -129,6 +122,7 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
 }
 
 export default function SupportRequestList() {
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const queue = (params.get("queue") || "") as QueueKey
   const search = params.get("search") || ""
@@ -332,7 +326,9 @@ export default function SupportRequestList() {
                     <TableHead className="font-semibold text-slate-700">Site / Asset</TableHead>
                     <TableHead className="font-semibold text-slate-700">Requester</TableHead>
                     <TableHead className="font-semibold text-slate-700">Created</TableHead>
-                    <TableHead className="w-12 pr-4" />
+                    <TableHead className="pr-4 text-right font-semibold text-slate-700">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -344,15 +340,16 @@ export default function SupportRequestList() {
                     </TableRow>
                   )}
                   {pageRows.map((t: SupportTicket) => (
-                    <TableRow key={t.id} className="border-slate-100 hover:bg-slate-50/70">
+                    <TableRow
+                      key={t.id}
+                      className="cursor-pointer border-slate-100 hover:bg-[#EBF2FF]/50"
+                      onClick={() => navigate(getSupportTicketPath(t.id))}
+                    >
                       <TableCell className="pl-4">
-                        <Link
-                          to={getSupportTicketPath(t.id)}
-                          className="inline-flex items-center gap-1.5 font-medium text-[#155DFC] hover:underline"
-                        >
+                        <span className="inline-flex items-center gap-1.5 font-medium text-[#155DFC]">
                           <Ticket className="h-3.5 w-3.5 shrink-0" />
                           {t.ticket_number}
-                        </Link>
+                        </span>
                         {t.sla_breached && (
                           <Badge className="ml-2 bg-red-100 text-red-800" variant="secondary">
                             SLA
@@ -394,23 +391,26 @@ export default function SupportRequestList() {
                           {formatWhen(t.created_at)}
                         </span>
                       </TableCell>
-                      <TableCell className="pr-4">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8 text-slate-400 hover:text-slate-700"
+                      <TableCell
+                        className="pr-4"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Button
+                            asChild
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-[#155DFC] hover:bg-[#EBF2FF] hover:text-[#155DFC]"
+                          >
+                            <Link
+                              to={getSupportTicketPath(t.id)}
+                              title="View details"
+                              aria-label="View details"
                             >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
-                              <Link to={getSupportTicketPath(t.id)}>View details</Link>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

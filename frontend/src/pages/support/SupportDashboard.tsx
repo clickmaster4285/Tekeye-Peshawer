@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import {
   AlertTriangle,
   Boxes,
   CheckCircle2,
   Clock3,
   Code2,
+  Eye,
   FileText,
   Hourglass,
   Inbox,
   Mail,
-  MoreVertical,
   Plus,
   UserCheck,
   UserRound,
@@ -233,11 +233,12 @@ function formatCreated(iso: string) {
 }
 
 function RecentTable({ tickets }: { tickets: SupportTicket[] }) {
+  const navigate = useNavigate()
   return (
     <div className="overflow-hidden rounded-xl border border-border/80 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
         <h2 className="text-base font-semibold text-foreground">Recent Support Requests</h2>
-        <Button asChild variant="link" className="h-auto p-0 text-sky-600">
+        <Button asChild variant="link" className="h-auto p-0 text-[#155DFC]">
           <Link to={ROUTES.SUPPORT_ALL}>
             View All <span className="ml-0.5">›</span>
           </Link>
@@ -270,8 +271,12 @@ function RecentTable({ tickets }: { tickets: SupportTicket[] }) {
                 .filter(Boolean)
                 .join(" • ")
               return (
-                <TableRow key={t.id} className="hover:bg-slate-50/60">
-                  <TableCell className="pl-5 font-medium text-sky-700 whitespace-nowrap">
+                <TableRow
+                  key={t.id}
+                  className="cursor-pointer hover:bg-[#EBF2FF]/50"
+                  onClick={() => navigate(getSupportTicketPath(t.id))}
+                >
+                  <TableCell className="pl-5 font-medium text-[#155DFC] whitespace-nowrap">
                     {t.ticket_number.startsWith("#") ? t.ticket_number : `#${t.ticket_number}`}
                   </TableCell>
                   <TableCell className="max-w-[280px]">
@@ -297,19 +302,23 @@ function RecentTable({ tickets }: { tickets: SupportTicket[] }) {
                     <div className="text-foreground">{created.date}</div>
                     <div className="text-xs text-muted-foreground">{created.time}</div>
                   </TableCell>
-                  <TableCell className="pr-5">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button asChild size="sm" variant="outline" className="h-8 px-3">
-                        <Link to={getSupportTicketPath(t.id)}>View</Link>
-                      </Button>
+                  <TableCell
+                    className="pr-5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-end gap-0.5">
                       <Button
+                        asChild
                         size="icon"
                         variant="ghost"
-                        className="h-8 w-8 text-muted-foreground"
-                        asChild
+                        className="h-8 w-8 text-[#155DFC] hover:bg-[#EBF2FF] hover:text-[#155DFC]"
                       >
-                        <Link to={getSupportTicketPath(t.id)} aria-label="More">
-                          <MoreVertical className="h-4 w-4" />
+                        <Link
+                          to={getSupportTicketPath(t.id)}
+                          title="View details"
+                          aria-label="View details"
+                        >
+                          <Eye className="h-4 w-4" />
                         </Link>
                       </Button>
                     </div>
