@@ -235,4 +235,9 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: toChildPath(ROUTES.INFRASTRUCTURE_ALERTS), page: "InfrastructureAlerts" },
   { path: toChildPath(ROUTES.INFRASTRUCTURE_EVENTS), page: "InfrastructureEvents" },
   { path: toChildPath(ROUTES.INFRASTRUCTURE_REPORTS), page: "InfrastructureReports" },
+  // Requests & Support
+  { path: toChildPath(ROUTES.SUPPORT_DASHBOARD), page: "SupportDashboard" },
+  { path: toChildPath(ROUTES.SUPPORT_ALL), page: "SupportRequestList" },
+  { path: toChildPath(ROUTES.SUPPORT_CREATE), page: "SupportCreateRequest" },
+  { path: toChildPath(ROUTES.SUPPORT_TICKET), page: "SupportRequestDetail" },
 ]

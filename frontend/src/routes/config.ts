@@ -254,6 +254,12 @@ export const ROUTES = {
   INFRASTRUCTURE_EVENTS: "/infrastructure/events",
   INFRASTRUCTURE_REPORTS: "/infrastructure/reports",
 
+  // Requests & Support (in-app module)
+  SUPPORT_DASHBOARD: "/requests-support",
+  SUPPORT_ALL: "/requests-support/requests",
+  SUPPORT_CREATE: "/requests-support/create",
+  SUPPORT_TICKET: "/requests-support/requests/:id",
+
   // Fallback
   NOT_FOUND: "/404",
 } as const
@@ -279,6 +285,10 @@ export function getInfrastructureCameraDetailPath(id: number): string {
 
 export function getInfrastructureServerDetailPath(id: number): string {
   return `/infrastructure/servers/${id}`
+}
+
+export function getSupportTicketPath(id: number | string): string {
+  return `/requests-support/requests/${id}`
 }
 
 /** Person journey lookup by PQR code */
@@ -728,6 +738,16 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
     ],
   },
   {
+    // Grantable module for Super Admin / Location Admin / officers:
+    // create + track own requests only. Support Agent role sees full queues.
+    label: "Requests & Support",
+    overviewHref: ROUTES.SUPPORT_CREATE,
+    children: [
+      { label: "Create Request", href: ROUTES.SUPPORT_CREATE },
+      { label: "My Requests", href: `${ROUTES.SUPPORT_ALL}?queue=my_requests` },
+    ],
+  },
+  {
     label: "System Configuration",
     children: [
       { label: "General Settings", href: ROUTES.GENERAL_SETTINGS },
@@ -745,7 +765,8 @@ export const NAV_SECTIONS: { title: string; items: (NavItem | NavGroup)[] }[] = 
   { title: "Main Menu", items: ALL_NAV_ITEMS.slice(0, 1) },
   { title: "Management System", items: ALL_NAV_ITEMS.slice(1, 8) },
   { title: "Reports and Monitoring", items: ALL_NAV_ITEMS.slice(8, 9) },
-  { title: "System", items: ALL_NAV_ITEMS.slice(9, 10) },
+  { title: "Support", items: ALL_NAV_ITEMS.slice(9, 10) },
+  { title: "System", items: ALL_NAV_ITEMS.slice(10, 11) },
 ]
 
 export type NavSection = { title: string; items: (NavItem | NavGroup)[] }
@@ -914,7 +935,58 @@ export const PRAL_NAV_SECTIONS: NavSection[] = [
   { title: "System", items: [{ label: "Logs", href: ROUTES.LOGS }] },
 ]
 
+/** Super Admin / Location Admin / module grants — create & track own tickets only. */
+const REQUESTER_SUPPORT_NAV: NavGroup = {
+  label: "Requests & Support",
+  overviewHref: ROUTES.SUPPORT_CREATE,
+  children: [
+    { label: "Create Request", href: ROUTES.SUPPORT_CREATE },
+    { label: "My Requests", href: `${ROUTES.SUPPORT_ALL}?queue=my_requests` },
+  ],
+}
+
+/** Support Agent — receives requests and performs all operational work. */
+const SUPPORT_AGENT_NAV: NavGroup = {
+  label: "Requests & Support",
+  overviewHref: ROUTES.SUPPORT_DASHBOARD,
+  children: [
+    { label: "Support Dashboard", href: ROUTES.SUPPORT_DASHBOARD },
+    { label: "All Requests", href: ROUTES.SUPPORT_ALL },
+    { label: "New / Review", href: `${ROUTES.SUPPORT_ALL}?queue=review` },
+    { label: "Waiting Client", href: `${ROUTES.SUPPORT_ALL}?queue=waiting_client` },
+  ],
+}
+
+const IT_SUPPORT_NAV: NavGroup = {
+  label: "Requests & Support",
+  overviewHref: ROUTES.SUPPORT_DASHBOARD,
+  children: [
+    { label: "Support Dashboard", href: ROUTES.SUPPORT_DASHBOARD },
+    { label: "My IT Queue", href: `${ROUTES.SUPPORT_ALL}?queue=it` },
+    { label: "Assigned to Me", href: `${ROUTES.SUPPORT_ALL}?queue=assigned_to_me` },
+  ],
+}
+
+const DEVELOPER_SUPPORT_NAV: NavGroup = {
+  label: "Requests & Support",
+  overviewHref: ROUTES.SUPPORT_DASHBOARD,
+  children: [
+    { label: "Support Dashboard", href: ROUTES.SUPPORT_DASHBOARD },
+    { label: "Developer Queue", href: `${ROUTES.SUPPORT_ALL}?queue=developer` },
+    { label: "Assigned to Me", href: `${ROUTES.SUPPORT_ALL}?queue=assigned_to_me` },
+  ],
+}
+
+export const SUPPORT_NAV_SECTIONS: NavSection[] = [
+  { title: "Requests & Support", items: [SUPPORT_AGENT_NAV] },
+]
+
+export const DEVELOPER_NAV_SECTIONS: NavSection[] = [
+  { title: "Requests & Support", items: [DEVELOPER_SUPPORT_NAV] },
+]
+
 export const IT_ADMIN_NAV_SECTIONS: NavSection[] = [
+  { title: "Requests & Support", items: [IT_SUPPORT_NAV] },
   {
     title: "System Configuration",
     items: [
@@ -957,8 +1029,36 @@ export function getNavSectionsForRole(
     .replace(/[\s-]+/g, "_")
     .toUpperCase()
 
-  // Super Admin — full sidebar, no Central Ops.
-  if (normalized === "ADMIN") return NAV_SECTIONS
+  // Super Admin — full sidebar, but Requests & Support is create-only (Support operates the rest).
+  if (normalized === "ADMIN") {
+    return NAV_SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.map((item) =>
+        "label" in item && item.label === "Requests & Support" ? REQUESTER_SUPPORT_NAV : item
+      ),
+    }))
+  }
+
+  // Location Admin — always can create/track own support requests; other modules via grants.
+  if (normalized === "LOCATION_ADMIN") {
+    const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
+    const base =
+      modules.length > 0
+        ? filterNavSectionsByModules(NAV_SECTIONS, modules).map((section) => ({
+            ...section,
+            items: section.items.map((item) =>
+              "label" in item && item.label === "Requests & Support"
+                ? REQUESTER_SUPPORT_NAV
+                : item
+            ),
+          }))
+        : []
+    const hasSupport = base.some((s) =>
+      s.items.some((item) => "label" in item && item.label === "Requests & Support")
+    )
+    if (hasSupport) return base.length ? base : [{ title: "Support", items: [REQUESTER_SUPPORT_NAV] }]
+    return [...base, { title: "Support", items: [REQUESTER_SUPPORT_NAV] }]
+  }
 
   // IT Super Admin — Central Ops + Infrastructure Monitoring.
   if (normalized === "IT_SUPERADMIN") {
@@ -976,8 +1076,13 @@ export function getNavSectionsForRole(
         title: "Infrastructure Monitoring",
         items: [INFRASTRUCTURE_MONITORING_NAV],
       },
+      { title: "Requests & Support", items: [IT_SUPPORT_NAV] },
     ]
   }
+
+  if (normalized === "SUPPORT") return SUPPORT_NAV_SECTIONS
+  if (normalized === "DEVELOPER") return DEVELOPER_NAV_SECTIONS
+  if (normalized === "IT_ADMIN") return IT_ADMIN_NAV_SECTIONS
 
   // Custom grants: only show modules Super Admin explicitly allowed.
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
@@ -1030,6 +1135,7 @@ export function getModuleLabelForPath(
     ["/settings/logs", "System Configuration"],
     ["/employees", "Human Resource"],
     ["/recruitment", "Human Resource"],
+    ["/requests-support", "Requests & Support"],
   ]
   for (const [prefix, label] of PREFIX_MODULES) {
     if (path === prefix || path.startsWith(`${prefix}/`)) return label

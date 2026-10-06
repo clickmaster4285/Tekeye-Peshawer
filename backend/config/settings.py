@@ -83,6 +83,7 @@ INSTALLED_APPS = [
     "realtime.apps.RealtimeConfig",
     "infrastructure_monitoring.apps.InfrastructureMonitoringConfig",
     "voice_agent.apps.VoiceAgentConfig",
+    "requests_support.apps.RequestsSupportConfig",
 ]
 
 # -----------------------------

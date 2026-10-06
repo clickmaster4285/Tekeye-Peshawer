@@ -59,6 +59,7 @@ export const DOMAIN_QUERY_PREFIXES: Record<string, (string | number)[][]> = {
   warehouse: [["warehouse"], ["stock"], ["memo-distribution"]],
   video_recovery: [["video-recovery"], ["video-recovery-jobs"], ["video-recovery-job"]],
   recognition: [["recognition"], ["staff"]],
+  support: [["support"]],
 }
 
 const DEFAULT_ROOMS = Object.keys(DOMAIN_QUERY_PREFIXES)

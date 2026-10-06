@@ -159,6 +159,8 @@ export const ROLE_OPTIONS = [
   { value: "EXAMINATION_OFFICER", label: "Examination Officer" },
   { value: "STOCK_CONTROLLER", label: "Stock Controller" },
   { value: "IT_ADMIN", label: "IT Administrator" },
+  { value: "SUPPORT", label: "Support Agent" },
+  { value: "DEVELOPER", label: "Developer" },
   { value: "AUDITOR", label: "Auditor" },
   { value: "PRAL", label: "PRAL" },
   { value: "DETECTION_OFFICER", label: "Detection Officer" },

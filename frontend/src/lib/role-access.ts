@@ -385,10 +385,14 @@ const ROLE_PATH_RULES: Record<RestrictedRole, PathRule> = {
       ROUTES.ATTENDANCE_MONITOR,
       ROUTES.ATTENDANCE_DASHBOARD,
       ROUTES.ATTENDANCE_REPORTS,
+      ROUTES.SUPPORT_DASHBOARD,
+      ROUTES.SUPPORT_ALL,
+      ROUTES.SUPPORT_CREATE,
     ],
     patterns: [
       /^\/settings\/users\/[^/]+$/,
       /^\/settings\/users\/[^/]+\/edit$/,
+      /^\/requests-support(\/.*)?$/,
     ],
   },
   AUDITOR: {
@@ -517,8 +521,25 @@ export function isPathAllowedForRole(
       path === ROUTES.ALL_CITIES_CAMERAS ||
       path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`) ||
       path === ROUTES.INFRASTRUCTURE_OVERVIEW ||
-      path.startsWith(`${ROUTES.INFRASTRUCTURE_OVERVIEW}/`)
+      path.startsWith(`${ROUTES.INFRASTRUCTURE_OVERVIEW}/`) ||
+      path === ROUTES.SUPPORT_DASHBOARD ||
+      path.startsWith(`${ROUTES.SUPPORT_DASHBOARD}/`)
     )
+  }
+  if (normalized === "SUPPORT" || normalized === "DEVELOPER") {
+    const path = normalizePathname(pathname)
+    return path === ROUTES.SUPPORT_DASHBOARD || path.startsWith(`${ROUTES.SUPPORT_DASHBOARD}/`)
+  }
+  if (normalized === "IT_ADMIN") {
+    const path = normalizePathname(pathname)
+    if (path === ROUTES.SUPPORT_DASHBOARD || path.startsWith(`${ROUTES.SUPPORT_DASHBOARD}/`)) {
+      return true
+    }
+    // Default IT Admin routes when no custom module grants are set
+    const modulesForIt = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
+    if (modulesForIt.length === 0) {
+      return isPathAllowedForRestrictedRole(pathname, "IT_ADMIN")
+    }
   }
   // Collectorate officers and location admins may open the live camera wall
   if (
@@ -532,6 +553,13 @@ export function isPathAllowedForRole(
       path === ROUTES.ALL_CITIES_CAMERAS ||
       path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`)
     ) {
+      return true
+    }
+  }
+  // Location Admin may always create/track their own support requests
+  if (normalized === "LOCATION_ADMIN") {
+    const path = normalizePathname(pathname)
+    if (path === ROUTES.SUPPORT_DASHBOARD || path.startsWith(`${ROUTES.SUPPORT_DASHBOARD}/`)) {
       return true
     }
   }
@@ -568,6 +596,7 @@ const MODULE_HOME_BY_LABEL: Record<string, string> = {
   "Litigation Management": ROUTES.FIR_REGISTRATION,
   "Auction Management": ROUTES.ASO_PORTAL_SYNC,
   "AI Monitoring & Analytics": ROUTES.ANALYTICS_DASHBOARD,
+  "Requests & Support": ROUTES.SUPPORT_CREATE,
   "System Configuration": ROUTES.USER_ROLE_MANAGEMENT,
 }
 
@@ -579,6 +608,9 @@ export function getHomeRouteForRole(
   const normalized = normalizeRole(role)
   if (normalized === "ADMIN") return ROUTES.DASHBOARD
   if (normalized === "IT_SUPERADMIN") return ROUTES.OPS_CENTRAL
+  if (normalized === "SUPPORT") return ROUTES.SUPPORT_DASHBOARD
+  if (normalized === "DEVELOPER") return ROUTES.SUPPORT_DASHBOARD
+  if (normalized === "IT_ADMIN") return ROUTES.SUPPORT_DASHBOARD
 
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   if (modules.length > 0) {
@@ -610,6 +642,8 @@ export function getRoleDisplayLabel(role: string | undefined | null): string {
   if (normalized === "ADMIN") return "Super Admin"
   if (normalized === "IT_SUPERADMIN") return "IT Super Admin"
   if (normalized === "IT_ADMIN") return "IT Administrator"
+  if (normalized === "SUPPORT") return "Support Agent"
+  if (normalized === "DEVELOPER") return "Developer"
   if (normalized === "LOCATION_ADMIN") return "Location Administrator"
   if (normalized === "HR") return "Human Resource"
   if (normalized === "AUDITOR") return "Auditor"

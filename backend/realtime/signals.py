@@ -142,3 +142,11 @@ try:
     _connect(DetectionSnapshot, "recognition", "detections", "attendance", throttle_sec=1.0)
 except Exception:
     logger.debug("[realtime] recognition signals not wired", exc_info=True)
+
+try:
+    from requests_support.models import SupportTicket, TicketComment
+
+    _connect(SupportTicket, "support")
+    _connect(TicketComment, "support")
+except Exception:
+    logger.debug("[realtime] support signals not wired", exc_info=True)

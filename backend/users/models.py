@@ -25,6 +25,8 @@ class User(AbstractUser):
         ("EXAMINATION_OFFICER", "Examination Officer"),
         ("STOCK_CONTROLLER", "Stock Controller"),
         ("IT_ADMIN", "IT Administrator"),
+        ("SUPPORT", "Support Agent"),
+        ("DEVELOPER", "Developer"),
         ("AUDITOR", "Auditor"),
         ("PRAL", "PRAL"),
         ("DETECTION_OFFICER", "Detection Officer"),

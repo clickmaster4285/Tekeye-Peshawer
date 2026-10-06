@@ -10,6 +10,7 @@ SIDEBAR_MODULES: list[dict[str, str]] = [
     {"key": "Litigation Management", "label": "Litigation Management"},
     {"key": "Auction Management", "label": "Auction Management"},
     {"key": "AI Monitoring & Analytics", "label": "AI Monitoring & Analytics"},
+    {"key": "Requests & Support", "label": "Requests & Support"},
     {"key": "System Configuration", "label": "System Configuration"},
     {"key": "Video Recovery", "label": "Video Recovery"},
 ]

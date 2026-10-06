@@ -252,6 +252,14 @@ export const PAGE_LOADERS = {
     import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureEvents })),
   InfrastructureReports: () =>
     import("@/pages/infrastructure/InfrastructurePages").then((m) => ({ default: m.InfrastructureReports })),
+  SupportDashboard: () =>
+    import("@/pages/support/SupportDashboard").then((m) => ({ default: m.default })),
+  SupportRequestList: () =>
+    import("@/pages/support/SupportRequestList").then((m) => ({ default: m.default })),
+  SupportCreateRequest: () =>
+    import("@/pages/support/SupportCreateRequest").then((m) => ({ default: m.default })),
+  SupportRequestDetail: () =>
+    import("@/pages/support/SupportRequestDetail").then((m) => ({ default: m.default })),
 } as const satisfies Record<string, PageLoader>
 
 function toLazyPages<T extends Record<string, PageLoader>>(loaders: T) {
