@@ -6,6 +6,10 @@ export const LOCATION_OPTIONS = [
   { value: "MARDAN", label: "Mardan" },
   { value: "DI_KHAN", label: "DI Khan" },
   { value: "SWH_RATTA_KULACHI", label: "SWH Ratta Kulachi" },
+  { value: "ABBOTTABAD", label: "Abbottabad" },
+  { value: "DDK", label: "DDK" },
+  { value: "THAKOT", label: "Thakot" },
+  { value: "HAYATABAD", label: "Hayatabad" },
 ] as const;
 
 export type LocationCode = (typeof LOCATION_OPTIONS)[number]["value"];

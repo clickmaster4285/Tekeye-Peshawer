@@ -179,6 +179,9 @@ export const COLLECTORATE_OPTIONS = [
   { value: "SWH Ratta Kulachi", label: "SWH Ratta Kulachi" },
   { value: "Swat", label: "Swat" },
   { value: "Abbottabad", label: "Abbottabad" },
+  { value: "DDK", label: "DDK" },
+  { value: "Thakot", label: "Thakot" },
+  { value: "Hayatabad", label: "Hayatabad" },
   { value: "Mansehra", label: "Mansehra" },
   { value: "Other", label: "Other" },
 ] as const;

@@ -60,6 +60,38 @@ export const STATION_GEOFENCES: GpsGeofence[] = [
     longitude: 70.726,
     radiusM: 500,
   },
+  {
+    id: "abbottabad-office",
+    name: "Abbottabad Customs",
+    location: "ABBOTTABAD",
+    latitude: 34.1688,
+    longitude: 73.2215,
+    radiusM: 450,
+  },
+  {
+    id: "ddk-location",
+    name: "DDK",
+    location: "DDK",
+    latitude: 31.862,
+    longitude: 70.898,
+    radiusM: 450,
+  },
+  {
+    id: "thakot-office",
+    name: "Thakot Customs",
+    location: "THAKOT",
+    latitude: 34.75,
+    longitude: 72.93,
+    radiusM: 450,
+  },
+  {
+    id: "hayatabad-office",
+    name: "Hayatabad",
+    location: "HAYATABAD",
+    latitude: 33.989,
+    longitude: 71.451,
+    radiusM: 500,
+  },
 ]
 
 export function stationCenter(station: string | "all"): [number, number] {

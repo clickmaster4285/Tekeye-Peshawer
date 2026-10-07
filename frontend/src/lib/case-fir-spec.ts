@@ -151,4 +151,8 @@ export const CUSTOMS_STATIONS = [
   "Peshawar",
   // "Customs Quetta",
   "Nowshera",
+  "Abbottabad",
+  "DDK",
+  "Thakot",
+  "Hayatabad",
 ] as const

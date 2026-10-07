@@ -42,6 +42,10 @@ class User(AbstractUser):
         ("MARDAN", "Mardan"),
         ("DI_KHAN", "DI Khan"),
         ("SWH_RATTA_KULACHI", "SWH Ratta Kulachi"),
+        ("ABBOTTABAD", "Abbottabad"),
+        ("DDK", "DDK"),
+        ("THAKOT", "Thakot"),
+        ("HAYATABAD", "Hayatabad"),
     ]
 
     role = models.CharField(max_length=30, choices=ROLE_CHOICES)
