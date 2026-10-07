@@ -29,6 +29,7 @@ import {
   getSeizureMgmtNoteSheetEditPath,
 } from "@/routes/config"
 import {
+  canUserApproveNoteSheet,
   canUserDeleteNoteSheet,
   canUserEditNoteSheet,
   deleteNoteSheet,
@@ -72,27 +73,6 @@ function Field({ label, value, className }: { label: string; value?: string | nu
       <dd className="font-medium text-sm whitespace-pre-wrap">{value?.trim() ? value : "—"}</dd>
     </div>
   )
-}
-
-function canUserApproveNoteSheet(
-  row: NoteSheetRecord,
-  user: Pick<AuthUser, "id" | "username" | "full_name" | "role" | "location"> | null
-): boolean {
-  if (row.status !== "Submitted" || !user) return false
-  const role = (user.role || "").trim().toUpperCase()
-  const approverRoles = new Set([
-    "ADMIN",
-    "LOCATION_ADMIN",
-    "DEPUTY_COLLECTOR",
-    "ASSISTANT_COLLECTOR",
-  ])
-  if (!approverRoles.has(role)) return false
-  if (role === "ADMIN") return true
-  // Location-scoped officials: same location as sheet office when known
-  const userLoc = (user.location || "").trim().toUpperCase()
-  const office = (row.office || "").trim().toUpperCase()
-  if (!userLoc || !office) return true
-  return office.includes(userLoc) || userLoc.includes(office.split("(")[0].trim())
 }
 
 export default function NoteSheetDetailPage() {

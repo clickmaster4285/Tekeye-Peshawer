@@ -230,9 +230,11 @@ export const Sidebar = memo(function Sidebar({ mobileOpen = false, onMobileOpenC
       />
       <aside
         className={cn(
-          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-20 md:w-[240px] md:translate-x-0 lg:w-[280px] xl:w-[333px]",
+          "sidebar-font fixed inset-y-0 left-0 z-40 h-screen w-[280px] border-r border-[#E5E7EB] bg-[#FFFFFF] flex flex-col shrink-0 pt-[12px] pr-[3px] pl-[15px] transition-transform md:z-20 md:w-[240px] lg:w-[280px] xl:w-[333px] md:flex",
+          // Mobile drawer: hide off-canvas until opened. Desktop must stay visible
+          // (md:translate-x-0 after the hide class so it always wins at md+).
           mobileOpen ? "translate-x-0" : "-translate-x-full",
-          "md:flex"
+          "md:translate-x-0"
         )}
       >
       <div className="relative z-10 shrink-0 border-b border-[#E5E7EB] bg-white pb-2">

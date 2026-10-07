@@ -44,7 +44,6 @@ import {
   canUserFullyEditSeizureDocs,
   createNoteSheet,
   fetchNoteSheetById,
-  noteSheetApproval,
   updateNoteSheet,
   type NoteSheetCreateMedia,
   type NoteSheetItem,
@@ -415,7 +414,7 @@ export default function NoteSheetCreatePage() {
       office,
       caseNo,
       priority,
-      status: "Draft",
+      status: "Draft" as const,
       subject,
       preparedBy: officerName,
       badgeId,
@@ -500,11 +499,16 @@ export default function NoteSheetCreatePage() {
       const hasDocMedia = Object.values(media).some((arr) => Array.isArray(arr) && arr.length > 0)
       const hasGoodsImages = (payload.items ?? []).some((it) => (it.imageFiles?.length ?? 0) > 0)
       const mediaToSend = hasDocMedia || hasGoodsImages ? media : undefined
+      // Atomic submit: save + move to Submitted in one request so staff don't leave a draft
+      // that an admin must re-send for approval.
+      const writePayload: NoteSheetWritePayload = {
+        ...payload,
+        ...(submit ? { sendForApproval: true } : {}),
+      }
       const saved = isEdit && editId
-        ? await updateNoteSheet(editId, payload, mediaToSend)
-        : await createNoteSheet(payload, mediaToSend)
+        ? await updateNoteSheet(editId, writePayload, mediaToSend)
+        : await createNoteSheet(writePayload, mediaToSend)
       if (submit) {
-        await noteSheetApproval(saved.id, "submit")
         toast({ title: "Note sheet sent for approval" })
       } else {
         toast({ title: isEdit ? "Note sheet updated" : "Note sheet saved as draft" })

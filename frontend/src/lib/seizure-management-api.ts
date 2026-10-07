@@ -50,6 +50,35 @@ export function normalizeAppRole(role?: string | null): string {
   return (role ?? "").trim().replace(/[\s-]+/g, "_").toUpperCase()
 }
 
+/**
+ * Whether the logged-in user may Approve/Reject a submitted note sheet.
+ * Prefer server `canApprove` when present; otherwise match backend location rules
+ * (submitter user location code — not the free-text office field).
+ */
+export function canUserApproveNoteSheet(
+  row: {
+    status: NoteSheetStatus
+    canApprove?: boolean
+    submitterLocation?: string
+    office?: string
+    createdBy?: string
+  },
+  user: { role?: string; location?: string } | null
+): boolean {
+  if (row.status !== "Submitted" || !user) return false
+  if (typeof row.canApprove === "boolean") return row.canApprove
+
+  const role = normalizeAppRole(user.role)
+  if (!NOTE_SHEET_HIGHER_OFFICIAL_ROLES.has(role)) return false
+  if (role === "ADMIN") return true
+
+  const userLoc = (user.location || "").trim().toUpperCase()
+  const submitterLoc = (row.submitterLocation || "").trim().toUpperCase()
+  if (!submitterLoc) return true
+  if (!userLoc) return false
+  return userLoc === submitterLoc
+}
+
 export function canUserFullyEditSeizureDocs(role?: string | null): boolean {
   return FULL_EDIT_ROLES.has(normalizeAppRole(role))
 }
@@ -206,11 +235,17 @@ export type NoteSheetRecord = {
   timeline: NoteSheetTimelineStep[]
   createdAt: string
   updatedAt: string
+  /** Location code of preparing officer (PESHAWAR, KOHAT, …). */
+  submitterLocation?: string
+  /** Server-side: current user may Approve/Reject this submitted sheet. */
+  canApprove?: boolean
 }
 
-export type NoteSheetWritePayload = Partial<Omit<NoteSheetRecord, "id" | "attachments" | "timeline" | "createdAt" | "updatedAt" | "detentionMemoId" | "approvedAt" | "submittedAt" | "viewedAt">> & {
+export type NoteSheetWritePayload = Partial<Omit<NoteSheetRecord, "id" | "attachments" | "timeline" | "createdAt" | "updatedAt" | "detentionMemoId" | "approvedAt" | "submittedAt" | "viewedAt" | "canApprove" | "submitterLocation">> & {
   items?: NoteSheetItem[]
   evidenceCollected?: string[]
+  /** When true, create/update also moves the sheet to Submitted in one request. */
+  sendForApproval?: boolean
 }
 
 export type NoteSheetCreateMedia = {

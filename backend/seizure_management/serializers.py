@@ -179,9 +179,12 @@ def _note_sheet_timeline(obj: NoteSheet) -> list[dict]:
 
 
 def note_sheet_to_dict(obj: NoteSheet, request=None) -> dict:
+    from .notifications import note_sheet_submitter_location, user_can_approve_note_sheet
+
     items = list(obj.items.all())
     attachments = list(obj.attachments.all())
     evidence = obj.evidence_collected if isinstance(obj.evidence_collected, list) else []
+    user = getattr(request, "user", None) if request is not None else None
     return {
         "id": str(obj.id),
         # Basic
@@ -233,6 +236,13 @@ def note_sheet_to_dict(obj: NoteSheet, request=None) -> dict:
         "rejectionReason": obj.rejection_reason or "",
         "submittedAt": _iso(obj.submitted_at),
         "viewedAt": _iso(obj.viewed_at),
+        # Server-side gate for Approve/Reject UI (role + submitter location).
+        "submitterLocation": note_sheet_submitter_location(obj),
+        "canApprove": bool(
+            obj.status == NoteSheet.STATUS_SUBMITTED
+            and user is not None
+            and user_can_approve_note_sheet(user, obj)
+        ),
         # Links / audit
         "detentionMemoId": str(obj.detention_memo_id) if obj.detention_memo_id else "",
         "createdBy": obj.created_by or "",

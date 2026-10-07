@@ -46,7 +46,10 @@ LOCATION_SCOPED_APPROVER_ROLES = frozenset(
 
 
 def _normalize_role(role: str | None) -> str:
-    return (role or "").strip().upper()
+    """Normalize role codes: 'Deputy Collector' / 'DEPUTY-COLLECTOR' → DEPUTY_COLLECTOR."""
+    import re
+
+    return re.sub(r"[\s-]+", "_", (role or "").strip()).upper()
 
 
 def note_sheet_submitter_location(obj: NoteSheet) -> str:

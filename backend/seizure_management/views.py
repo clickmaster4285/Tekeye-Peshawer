@@ -339,18 +339,62 @@ class NoteSheetCreatedReportAPIView(APIView):
         )
 
 
+def _mark_note_sheet_submitted(obj: NoteSheet, *, submitted_by_user_id: int | None) -> NoteSheet:
+    """Move draft/rejected sheet into the approval queue and notify AC/DC/Location Admin."""
+    from .notifications import NOTE_SHEET_FORWARD_TO_LABEL, notify_note_sheet_submitted
+
+    if obj.status not in (NoteSheet.STATUS_DRAFT, NoteSheet.STATUS_REJECTED):
+        return obj
+    obj.forward_to = NOTE_SHEET_FORWARD_TO_LABEL
+    obj.forward_to_user_id = None
+    obj.status = NoteSheet.STATUS_SUBMITTED
+    obj.submitted_at = timezone.now()
+    obj.rejection_reason = ""
+    obj.approval_remarks = ""
+    obj.viewed_at = None
+    obj.save(
+        update_fields=[
+            "forward_to",
+            "forward_to_user_id",
+            "status",
+            "submitted_at",
+            "rejection_reason",
+            "approval_remarks",
+            "viewed_at",
+            "updated_at",
+        ]
+    )
+    notify_note_sheet_submitted(obj, submitted_by_user_id=submitted_by_user_id)
+    return obj
+
+
+def _wants_send_for_approval(body: dict) -> bool:
+    raw = body.get("sendForApproval", body.get("submitForApproval"))
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes")
+    return False
+
+
 class NoteSheetCreateAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         try:
             body = body_from_request(request)
+            send_for_approval = _wants_send_for_approval(body)
             ser = NoteSheetWriteSerializer(data=body)
             ser.is_valid(raise_exception=True)
             obj = NoteSheet()
             apply_note_sheet(obj, ser.validated_data, username=_username(request))
             save_note_sheet_uploads(request, obj)
             save_note_sheet_goods_images(request, obj, ser.validated_data.get("items"))
+            if send_for_approval:
+                _mark_note_sheet_submitted(
+                    obj,
+                    submitted_by_user_id=getattr(request.user, "id", None),
+                )
             obj = NoteSheet.objects.prefetch_related("items__images", "items__located_camera__nvr__site", "items__located_camera__ml_server", "items__detection_event", "attachments").get(pk=obj.pk)
             return Response(note_sheet_to_dict(obj, request), status=status.HTTP_201_CREATED)
         except Exception as exc:
@@ -386,11 +430,18 @@ class NoteSheetUpdateAPIView(APIView):
         try:
             obj = get_object_or_404(NoteSheet, pk=pk)
             body = body_from_request(request)
+            send_for_approval = _wants_send_for_approval(body)
             ser = NoteSheetWriteSerializer(data=body, partial=True)
             ser.is_valid(raise_exception=True)
             apply_note_sheet(obj, ser.validated_data, username=_username(request))
             save_note_sheet_uploads(request, obj)
             save_note_sheet_goods_images(request, obj, ser.validated_data.get("items"))
+            if send_for_approval:
+                obj.refresh_from_db()
+                _mark_note_sheet_submitted(
+                    obj,
+                    submitted_by_user_id=getattr(request.user, "id", None),
+                )
             obj = NoteSheet.objects.prefetch_related("items__images", "items__located_camera__nvr__site", "items__located_camera__ml_server", "items__detection_event", "attachments").get(pk=obj.pk)
             return Response(note_sheet_to_dict(obj, request))
         except Exception as exc:
@@ -448,26 +499,7 @@ class NoteSheetApprovalAPIView(APIView):
                     status=400,
                 )
             # Auto-route to Assistant Collector, Deputy Collector, Location Admin, Super Admin
-            obj.forward_to = NOTE_SHEET_FORWARD_TO_LABEL
-            obj.forward_to_user_id = None
-            obj.status = NoteSheet.STATUS_SUBMITTED
-            obj.submitted_at = timezone.now()
-            obj.rejection_reason = ""
-            obj.approval_remarks = ""
-            obj.viewed_at = None
-            obj.save(
-                update_fields=[
-                    "forward_to",
-                    "forward_to_user_id",
-                    "status",
-                    "submitted_at",
-                    "rejection_reason",
-                    "approval_remarks",
-                    "viewed_at",
-                    "updated_at",
-                ]
-            )
-            notify_note_sheet_submitted(
+            _mark_note_sheet_submitted(
                 obj,
                 submitted_by_user_id=getattr(request.user, "id", None),
             )

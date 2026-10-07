@@ -1018,6 +1018,40 @@ export const GUARD_NAV_SECTIONS: NavSection[] = [
 /** Shown when a non-admin has no custom grants and no role-default template. */
 const EMPTY_NAV_SECTIONS: NavSection[] = []
 
+/** Built-in sidebar for roles that do not rely on Super Admin module grants. */
+const ROLE_DEFAULT_NAV: Record<string, NavSection[]> = {
+  GUARD: GUARD_NAV_SECTIONS,
+  RECEPTIONIST: RECEPTIONIST_NAV_SECTIONS,
+  HR: HR_NAV_SECTIONS,
+  WAREHOUSE_OFFICER: WAREHOUSE_OFFICER_NAV_SECTIONS,
+  WAREHOUSE_SUPERINTENDENT: WAREHOUSE_SUPERINTENDENT_NAV_SECTIONS,
+  WAREHOUSE_IN_CHARGE: WAREHOUSE_IN_CHARGE_NAV_SECTIONS,
+  EXAMINATION_OFFICER: EXAMINATION_OFFICER_NAV_SECTIONS,
+  STOCK_CONTROLLER: STOCK_CONTROLLER_NAV_SECTIONS,
+  AUDITOR: AUDITOR_NAV_SECTIONS,
+  PRAL: PRAL_NAV_SECTIONS,
+  SUPPORT: SUPPORT_NAV_SECTIONS,
+  DEVELOPER: DEVELOPER_NAV_SECTIONS,
+  IT_ADMIN: IT_ADMIN_NAV_SECTIONS,
+}
+
+/** Collectorate / ops officers — full app nav when no custom grants are set. */
+const SITE_FULL_NAV_ROLES = new Set([
+  "OPERATION_MANAGER",
+  "COLLECTOR",
+  "DEPUTY_COLLECTOR",
+  "ASSISTANT_COLLECTOR",
+])
+
+function requesterSupportNavSections(sections: NavSection[]): NavSection[] {
+  return sections.map((section) => ({
+    ...section,
+    items: section.items.map((item) =>
+      "label" in item && item.label === "Requests & Support" ? REQUESTER_SUPPORT_NAV : item
+    ),
+  }))
+}
+
 export function getNavSectionsForRole(
   role: string | undefined | null,
   allowedModules?: string[] | null
@@ -1029,12 +1063,7 @@ export function getNavSectionsForRole(
 
   // Super Admin — full sidebar, but Requests & Support is create-only (Support operates the rest).
   if (normalized === "ADMIN") {
-    return NAV_SECTIONS.map((section) => ({
-      ...section,
-      items: section.items.map((item) =>
-        "label" in item && item.label === "Requests & Support" ? REQUESTER_SUPPORT_NAV : item
-      ),
-    }))
+    return requesterSupportNavSections(NAV_SECTIONS)
   }
 
   // Location Admin — always can create/track own support requests; other modules via grants.
@@ -1042,14 +1071,7 @@ export function getNavSectionsForRole(
     const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
     const base =
       modules.length > 0
-        ? filterNavSectionsByModules(NAV_SECTIONS, modules).map((section) => ({
-            ...section,
-            items: section.items.map((item) =>
-              "label" in item && item.label === "Requests & Support"
-                ? REQUESTER_SUPPORT_NAV
-                : item
-            ),
-          }))
+        ? requesterSupportNavSections(filterNavSectionsByModules(NAV_SECTIONS, modules))
         : []
     const hasSupport = base.some((s) =>
       s.items.some((item) => "label" in item && item.label === "Requests & Support")
@@ -1078,17 +1100,35 @@ export function getNavSectionsForRole(
     ]
   }
 
-  if (normalized === "SUPPORT") return SUPPORT_NAV_SECTIONS
-  if (normalized === "DEVELOPER") return DEVELOPER_NAV_SECTIONS
-  if (normalized === "IT_ADMIN") return IT_ADMIN_NAV_SECTIONS
-
-  // Custom grants: only show modules Super Admin explicitly allowed.
+  // Custom grants win over role defaults (Super Admin assigned modules).
   const modules = (allowedModules ?? []).map((m) => m.trim()).filter(Boolean)
   if (modules.length > 0) {
+    // IT Admin keeps support/attendance defaults merged with grants.
+    if (normalized === "IT_ADMIN") {
+      const granted = filterNavSectionsByModules(NAV_SECTIONS, modules)
+      const defaults = IT_ADMIN_NAV_SECTIONS
+      const seen = new Set(granted.flatMap((s) => s.items.map((i) => ("label" in i ? i.label : ""))))
+      const extra = defaults
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => "label" in item && !seen.has(item.label)),
+        }))
+        .filter((section) => section.items.length > 0)
+      return [...granted, ...extra]
+    }
     return filterNavSectionsByModules(NAV_SECTIONS, modules)
   }
 
-  // No custom grants means no module sidebar until permissions are assigned.
+  // Role-built-in menus (Guard, HR, warehouse roles, Support queues, …).
+  const roleDefault = ROLE_DEFAULT_NAV[normalized]
+  if (roleDefault) return roleDefault
+
+  // Collectorate officers with no grants — full operational nav (location-scoped in APIs).
+  if (SITE_FULL_NAV_ROLES.has(normalized)) {
+    return requesterSupportNavSections(NAV_SECTIONS)
+  }
+
+  // No custom grants and no role template — empty until Super Admin assigns modules.
   return EMPTY_NAV_SECTIONS
 }
 

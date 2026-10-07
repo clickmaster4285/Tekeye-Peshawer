@@ -577,7 +577,18 @@ export function isPathAllowedForRole(
     return modules.includes(moduleLabel)
   }
 
-  // No custom grants means no module routes are available.
+  // No custom grants — use the role's built-in path allowlist (Guard, HR, warehouse, …).
+  const restricted = getRestrictedRole(normalized)
+  if (restricted) {
+    return isPathAllowedForRestrictedRole(pathname, restricted)
+  }
+
+  // Collectorate / ops officers with no grants keep full app access (APIs stay location-scoped).
+  if (isSiteFullAccessRole(normalized) && normalized !== "LOCATION_ADMIN") {
+    return true
+  }
+
+  // Location Admin / unconfigured users: dashboard only until modules are assigned.
   return false
 }
 
@@ -618,6 +629,30 @@ export function getHomeRouteForRole(
       const home = MODULE_HOME_BY_LABEL[label]
       if (home) return home
     }
+  }
+
+  // Role defaults when Super Admin has not assigned custom modules.
+  if (normalized === "GUARD") return ROUTES.GUARD_RECEPTION_PANEL
+  if (normalized === "RECEPTIONIST") return ROUTES.VISITOR_MANAGEMENT_OVERVIEW
+  if (normalized === "HR") return ROUTES.EMPLOYEES
+  if (
+    normalized === "WAREHOUSE_OFFICER" ||
+    normalized === "WAREHOUSE_SUPERINTENDENT" ||
+    normalized === "WAREHOUSE_IN_CHARGE" ||
+    normalized === "EXAMINATION_OFFICER" ||
+    normalized === "STOCK_CONTROLLER" ||
+    normalized === "AUDITOR" ||
+    normalized === "PRAL"
+  ) {
+    return ROUTES.OPERATIONS_DASHBOARD
+  }
+  if (
+    normalized === "OPERATION_MANAGER" ||
+    normalized === "COLLECTOR" ||
+    normalized === "DEPUTY_COLLECTOR" ||
+    normalized === "ASSISTANT_COLLECTOR"
+  ) {
+    return ROUTES.DASHBOARD
   }
 
   // Unconfigured users remain on the dashboard until modules are assigned.
