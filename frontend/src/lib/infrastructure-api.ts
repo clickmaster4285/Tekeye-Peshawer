@@ -1,7 +1,7 @@
 /**
  * Infrastructure Monitoring API — sites, devices, alerts, events, reports.
  */
-import { API_BASE_URL, getAuthHeaders } from "@/lib/api"
+import { API_BASE_URL, getAuthHeaders, getStoredToken } from "@/lib/api"
 
 const BASE = `${API_BASE_URL}/api`
 
@@ -329,6 +329,41 @@ export async function probeInfraDevice(id: number): Promise<InfraDevice> {
   return apiJson(`/infra/devices/${id}/probe/`, { method: "POST", body: "{}" })
 }
 
+export type NvrHealthLevel = "healthy" | "warning" | "critical" | "unknown"
+
+export type NvrHddDisk = {
+  disk_number: number
+  name: string
+  status: string
+  health_label: string
+  level: NvrHealthLevel
+  capacity_mb: number
+  free_mb: number
+  used_mb: number
+  capacity_gb?: number | null
+  remaining_gb?: number | null
+  usage_pct: number | null
+  capacity_display: string
+  free_display: string
+  used_display: string
+  usage_display: string
+  disk_type: string
+  attribute?: string
+  disk_model?: string
+  disk_serial?: string
+  error_status: string
+}
+
+export type NvrHealthScorecard = {
+  overall: NvrHealthLevel
+  overall_label: string
+  storage: { level: NvrHealthLevel; label: string; detail: string; disk_count?: number; healthy_disks?: number }
+  cameras: { level: NvrHealthLevel; label: string; detail: string; online?: number; total?: number }
+  recording: { level: NvrHealthLevel; label: string; detail: string; recording?: number; online?: number }
+  system: { level: NvrHealthLevel; label: string; detail: string }
+  network: { level: NvrHealthLevel; label: string; detail: string }
+}
+
 export type NvrDetailPayload = {
   id: number
   name: string
@@ -337,8 +372,13 @@ export type NvrDetailPayload = {
   ip_address: string | null
   manufacturer: string
   model_number: string
+  install_location?: string
+  source_key?: string
+  /** cameras.Nvr id for MJPEG/RTSP preview */
+  cameras_nvr_id?: number | null
   last_polled_at: string | null
   last_error: string
+  health?: NvrHealthScorecard
   device_information: {
     model: string
     firmware: string
@@ -363,12 +403,8 @@ export type NvrDetailPayload = {
     used_space: string
     free_space: string
     disk_errors: string | number
-    hdd_list: Array<{
-      status: string
-      capacity_mb: number
-      free_mb: number
-      used_mb: number
-    }>
+    hdd_count?: number
+    hdd_list: NvrHddDisk[]
   }
   network_health: {
     interface_status: string
@@ -395,6 +431,7 @@ export type NvrDetailPayload = {
       name: string
       code: string
       channel?: number | string
+      preview_channel?: number
       status: string
       recording: boolean
       last_polled_at: string | null
@@ -432,6 +469,52 @@ export async function fetchNvrDetail(
 ): Promise<NvrDetailPayload> {
   const q = opts?.refresh ? "?refresh=1" : ""
   return apiJson(`/infra/devices/${id}/nvr_detail/${q}`)
+}
+
+export type NvrCommandAction =
+  | "reboot"
+  | "format_hdd"
+  | "sync_time"
+  | "diagnostics"
+  | "test_network"
+  | "test_storage"
+  | "start_recording"
+  | "stop_recording"
+  | "refresh_status"
+
+export type NvrCommandResult = {
+  ok: boolean
+  action: string
+  message: string
+  http_status?: number | null
+  detail?: string
+  summary?: Record<string, unknown>
+  result?: Record<string, unknown>
+  disk_id?: string
+  channel?: number
+}
+
+export async function executeNvrCommand(
+  id: number,
+  action: NvrCommandAction | string,
+  opts?: { disk_id?: string | number; channel?: string | number },
+): Promise<NvrCommandResult> {
+  return apiJson(`/infra/devices/${id}/nvr_command/`, {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      disk_id: opts?.disk_id,
+      channel: opts?.channel,
+    }),
+  })
+}
+
+/** JPEG snapshot URL for an NVR channel (token query for <img> / new-tab). */
+export function getNvrChannelSnapshotUrl(infraDeviceId: number, channel: number): string {
+  const params = new URLSearchParams({ channel: String(channel) })
+  const token = getStoredToken()
+  if (token) params.set("token", token)
+  return `${API_BASE_URL.replace(/\/$/, "")}/api/infra/devices/${infraDeviceId}/channel_snapshot/?${params}`
 }
 
 export type CameraDetailPayload = {

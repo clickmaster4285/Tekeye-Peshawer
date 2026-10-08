@@ -264,6 +264,102 @@ class InfraDeviceViewSet(viewsets.ModelViewSet):
         logs = load_stored_server_logs(device, limit=limit, category=category)
         return Response({"count": len(logs), "results": logs})
 
+    @action(detail=True, methods=["post"], url_path="nvr_command")
+    def nvr_command(self, request, pk=None):
+        """
+        Execute an NVR control action from TekeEye (reboot, format, sync time, etc.).
+        Body: { "action": "reboot"|"format_hdd"|"sync_time"|..., "disk_id"?, "channel"? }
+        """
+        from .models import DeviceType
+        from .nvr_health import execute_nvr_command
+        from users.permissions import is_global_admin
+
+        device = self.get_object()
+        if device.device_type != DeviceType.NVR:
+            return Response(
+                {"detail": "This endpoint is only for NVR devices."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        data = request.data if isinstance(request.data, dict) else {}
+        action = str(data.get("action") or "").strip().lower()
+        if not action:
+            return Response(
+                {"detail": "action is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        destructive = action in (
+            "reboot",
+            "restart",
+            "restart_nvr",
+            "format_hdd",
+            "format",
+            "factory_reset",
+        )
+        if destructive and not is_global_admin(request.user):
+            # Allow ADMIN role as well via staff/superuser fallbacks
+            role = getattr(request.user, "role", None) or ""
+            if str(role).upper() not in ("ADMIN", "SUPER_ADMIN", "SUPERADMIN") and not getattr(
+                request.user, "is_staff", False
+            ):
+                return Response(
+                    {"detail": "Administrator role required for this NVR command."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        result = execute_nvr_command(
+            device,
+            action,
+            disk_id=data.get("disk_id"),
+            channel=data.get("channel"),
+        )
+        # Persist refreshed metrics after diagnostics-style actions
+        if action in ("diagnostics", "run_diagnostics", "refresh_status", "test_storage", "test_network"):
+            try:
+                from .nvr_health import enrich_nvr_metrics
+
+                metrics = enrich_nvr_metrics(device)
+                slim = {**(device.last_metrics or {}), **metrics}
+                slim["nvr_logs"] = []
+                device.last_metrics = slim
+                device.last_polled_at = __import__("django.utils.timezone", fromlist=["now"]).now()
+                device.save(update_fields=["last_metrics", "last_polled_at", "updated_at"])
+            except Exception:
+                pass
+
+        _log_event(
+            device=device,
+            event_type="nvr_command",
+            title=f"NVR command: {action}",
+            message=result.get("message") or action,
+            actor=_actor_name(request),
+            payload={"action": action, "ok": result.get("ok"), "disk_id": data.get("disk_id"), "channel": data.get("channel")},
+        )
+        # Always 200 with ok flag so the UI can show NVR firmware messages cleanly
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="channel_snapshot")
+    def channel_snapshot(self, request, pk=None):
+        """JPEG snapshot for an NVR channel (ISAPI picture)."""
+        from django.http import HttpResponse
+
+        from .models import DeviceType
+        from .nvr_health import fetch_channel_snapshot_jpeg
+
+        device = self.get_object()
+        if device.device_type != DeviceType.NVR:
+            return Response(
+                {"detail": "This endpoint is only for NVR devices."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            channel = int(request.query_params.get("channel") or 1)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid channel"}, status=status.HTTP_400_BAD_REQUEST)
+        content, err = fetch_channel_snapshot_jpeg(device, channel)
+        if not content:
+            return Response({"detail": err or "Snapshot failed"}, status=status.HTTP_502_BAD_GATEWAY)
+        return HttpResponse(content, content_type="image/jpeg")
+
     @action(detail=True, methods=["get", "post", "delete"])
     def nvr_logs(self, request, pk=None):
         """

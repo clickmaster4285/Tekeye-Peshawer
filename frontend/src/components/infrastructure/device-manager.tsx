@@ -45,6 +45,7 @@ import {
   getInfrastructureNvrDetailPath,
   getInfrastructureServerDetailPath,
 } from "@/routes/config"
+import { NvrHddStatusList } from "@/components/infrastructure/nvr-hdd-status"
 import {
   DEVICE_TYPE_LABELS,
   PROTOCOL_OPTIONS,
@@ -61,9 +62,31 @@ import {
   type InfraDevice,
   type InfraDeviceWrite,
   type InfraSite,
+  type NvrHddDisk,
+  type NvrHealthScorecard,
   type ProtocolType,
   type SnmpVersion,
 } from "@/lib/infrastructure-api"
+
+function nvrHealthFromDevice(d: InfraDevice): NvrHealthScorecard | null {
+  const h = d.last_metrics?.health
+  if (!h || typeof h !== "object") return null
+  return h as NvrHealthScorecard
+}
+
+function nvrHddsFromDevice(d: InfraDevice): NvrHddDisk[] {
+  const list = d.last_metrics?.hdd_list
+  if (!Array.isArray(list)) return []
+  return list as NvrHddDisk[]
+}
+
+function healthDotClass(level: string | undefined) {
+  const lv = (level || "").toLowerCase()
+  if (lv === "healthy" || lv === "ok" || lv === "normal") return "bg-emerald-500"
+  if (lv === "warning") return "bg-amber-500"
+  if (lv === "critical" || lv === "error" || lv === "abnormal") return "bg-red-500"
+  return "bg-slate-400"
+}
 
 type FormState = {
   site: string
@@ -440,34 +463,172 @@ export function InfrastructureDeviceManager({ deviceType, title, description }: 
               No {DEVICE_TYPE_LABELS[deviceType].toLowerCase()} configured yet. Click Add to
               register one.
             </div>
-          ) : (
-            <div className="overflow-x-auto">
+          ) : deviceType === "nvr" ? (
+            <div className="overflow-x-auto rounded-lg border">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Model</TableHead>
-                    <TableHead>IP</TableHead>
-                    <TableHead>Protocol</TableHead>
-                    <TableHead>Live status</TableHead>
-                    <TableHead>Last polled</TableHead>
-                    <TableHead>Site</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      NVR
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Network
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Status
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Health
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground min-w-[22rem]">
+                      Hard drives
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Polled
+                    </TableHead>
+                    <TableHead className="h-11 px-4 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((d) => {
+                    const nvrHealth = nvrHealthFromDevice(d)
+                    const nvrDisks = nvrHddsFromDevice(d)
+                    return (
+                      <TableRow key={d.id} className="align-top">
+                        <TableCell className="px-4 py-3">
+                          <Link
+                            to={getInfrastructureNvrDetailPath(d.id)}
+                            className="text-sm font-semibold text-foreground underline-offset-2 hover:underline"
+                          >
+                            {d.name}
+                          </Link>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {[d.manufacturer, d.model_number].filter(Boolean).join(" ") || "—"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {d.site_name || "No site"}
+                            {d.install_location ? ` · ${d.install_location}` : ""}
+                          </p>
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          <p className="font-mono text-sm tabular-nums">{d.ip_address || "—"}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {d.primary_protocol_label}
+                          </p>
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          <Badge className={`border ${statusBadge(d.status)}`} variant="outline">
+                            {d.status_label}
+                          </Badge>
+                          {d.last_error ? (
+                            <p className="mt-1 max-w-[10rem] truncate text-[11px] text-amber-700" title={d.last_error}>
+                              {d.last_error}
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          {nvrHealth ? (
+                            <div>
+                              <Badge
+                                className={`border ${statusBadge(
+                                  nvrHealth.overall === "healthy"
+                                    ? "online"
+                                    : nvrHealth.overall === "critical"
+                                      ? "offline"
+                                      : "degraded",
+                                )}`}
+                                variant="outline"
+                              >
+                                <span
+                                  className={`mr-1.5 inline-block h-2 w-2 rounded-full ${healthDotClass(nvrHealth.overall)}`}
+                                />
+                                {nvrHealth.overall_label}
+                              </Badge>
+                              <p className="mt-1 text-[11px] text-muted-foreground whitespace-nowrap">
+                                Storage {nvrHealth.storage?.label || "—"}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground whitespace-nowrap">
+                                Cameras {nvrHealth.cameras?.label || "—"}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Poll for health</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          <NvrHddStatusList disks={nvrDisks} />
+                        </TableCell>
+                        <TableCell className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {d.last_polled_at
+                            ? new Date(d.last_polled_at).toLocaleString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-right">
+                          <div className="inline-flex items-center gap-0.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => void probeOne(d)}
+                            >
+                              Poll
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-8" asChild>
+                              <Link to={getInfrastructureNvrDetailPath(d.id)}>Detail</Link>
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(d)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void remove(d)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Name
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Model
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      IP
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Protocol
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Live status
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Last polled
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Site
+                    </TableHead>
+                    <TableHead className="h-11 px-4 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.map((d) => (
                     <TableRow key={d.id}>
-                      <TableCell className="font-medium">
+                      <TableCell className="px-4 font-medium">
                         <div>
-                          {deviceType === "nvr" ? (
-                            <Link
-                              to={getInfrastructureNvrDetailPath(d.id)}
-                              className="text-foreground underline-offset-2 hover:underline"
-                            >
-                              {d.name}
-                            </Link>
-                          ) : deviceType === "camera" ? (
+                          {deviceType === "camera" ? (
                             <Link
                               to={getInfrastructureCameraDetailPath(d.id)}
                               className="text-foreground underline-offset-2 hover:underline"
@@ -492,16 +653,16 @@ export function InfrastructureDeviceManager({ deviceType, title, description }: 
                           <div className="text-[10px] text-muted-foreground">Auto-synced</div>
                         ) : null}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-3">
                         <div className="text-sm">
                           {[d.manufacturer, d.model_number].filter(Boolean).join(" ") || "—"}
                         </div>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{d.ip_address || "—"}</TableCell>
-                      <TableCell>
+                      <TableCell className="px-3 font-mono text-sm">{d.ip_address || "—"}</TableCell>
+                      <TableCell className="px-3">
                         <Badge variant="outline">{d.primary_protocol_label}</Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-3">
                         <Badge className={`border ${statusBadge(d.status)}`} variant="outline">
                           {d.status_label}
                         </Badge>
@@ -511,15 +672,15 @@ export function InfrastructureDeviceManager({ deviceType, title, description }: 
                           </div>
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      <TableCell className="px-3 text-xs text-muted-foreground whitespace-nowrap">
                         {d.last_polled_at
                           ? new Date(d.last_polled_at).toLocaleTimeString()
                           : "—"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="px-3 text-sm text-muted-foreground">
                         {d.site_name || "—"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="px-4 text-right">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -528,11 +689,6 @@ export function InfrastructureDeviceManager({ deviceType, title, description }: 
                         >
                           Poll
                         </Button>
-                        {deviceType === "nvr" ? (
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link to={getInfrastructureNvrDetailPath(d.id)}>Detail</Link>
-                          </Button>
-                        ) : null}
                         {deviceType === "camera" ? (
                           <Button variant="ghost" size="sm" asChild>
                             <Link to={getInfrastructureCameraDetailPath(d.id)}>Detail</Link>

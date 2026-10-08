@@ -48,7 +48,17 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { ROUTES } from "@/routes/config"
+import { NvrHddStatusList } from "@/components/infrastructure/nvr-hdd-status"
+import { ROUTES, getInfrastructureNvrDetailPath } from "@/routes/config"
+import type { NvrHddDisk, NvrHealthScorecard } from "@/lib/infrastructure-api"
+
+function healthDotClass(level: string | undefined) {
+  const lv = (level || "").toLowerCase()
+  if (lv === "healthy" || lv === "ok" || lv === "normal") return "bg-emerald-500"
+  if (lv === "warning") return "bg-amber-500"
+  if (lv === "critical" || lv === "error" || lv === "abnormal") return "bg-red-500"
+  return "bg-slate-400"
+}
 import {
   acknowledgeInfraAlert,
   createInfraAlertRule,
@@ -514,7 +524,7 @@ export function InfrastructureNvrs() {
     <InfrastructureDeviceManager
       deviceType="nvr"
       title="NVRs"
-      description="Configure NVR inventory with SNMP, channel count, and network settings."
+      description="NVR inventory with live health, per-disk storage status, and channel summary from ISAPI polling."
     />
   )
 }
@@ -612,48 +622,122 @@ export function InfrastructureDeviceHealth() {
         </Alert>
       ) : null}
       <Card>
-        <CardContent className="pt-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Live status board</CardTitle>
+          <CardDescription>
+            Device connectivity and NVR storage health from the last successful poll.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-2">
           {loading ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Device</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>IP</TableHead>
-                  <TableHead>Protocol</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last polled</TableHead>
-                  <TableHead>Last error</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {devices.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell className="font-medium">{d.name}</TableCell>
-                    <TableCell>{d.device_type_label}</TableCell>
-                    <TableCell className="font-mono text-sm">{d.ip_address || "—"}</TableCell>
-                    <TableCell>{d.primary_protocol_label}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{d.status_label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {d.last_polled_at
-                        ? new Date(d.last_polled_at).toLocaleString()
-                        : d.last_seen_at
-                          ? new Date(d.last_seen_at).toLocaleString()
-                          : "—"}
-                    </TableCell>
-                    <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
-                      {d.last_error || "—"}
-                    </TableCell>
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Device
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Type
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Network
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Status
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Health
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground min-w-[22rem]">
+                      Hard drives
+                    </TableHead>
+                    <TableHead className="h-11 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Last polled
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {devices.map((d) => {
+                    const health =
+                      d.device_type === "nvr" && d.last_metrics?.health
+                        ? (d.last_metrics.health as NvrHealthScorecard)
+                        : null
+                    const disks =
+                      d.device_type === "nvr" && Array.isArray(d.last_metrics?.hdd_list)
+                        ? (d.last_metrics.hdd_list as NvrHddDisk[])
+                        : []
+                    return (
+                      <TableRow key={d.id} className="align-top">
+                        <TableCell className="px-4 py-3 font-medium">
+                          {d.device_type === "nvr" ? (
+                            <Link
+                              to={getInfrastructureNvrDetailPath(d.id)}
+                              className="font-semibold underline-offset-2 hover:underline"
+                            >
+                              {d.name}
+                            </Link>
+                          ) : (
+                            d.name
+                          )}
+                          {d.site_name ? (
+                            <p className="mt-0.5 text-xs text-muted-foreground">{d.site_name}</p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="px-3 py-3 text-sm">{d.device_type_label}</TableCell>
+                        <TableCell className="px-3 py-3">
+                          <p className="font-mono text-sm tabular-nums">{d.ip_address || "—"}</p>
+                          <p className="text-xs text-muted-foreground">{d.primary_protocol_label}</p>
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          <Badge variant="outline">{d.status_label}</Badge>
+                          {d.last_error ? (
+                            <p
+                              className="mt-1 max-w-[10rem] truncate text-[11px] text-amber-700"
+                              title={d.last_error}
+                            >
+                              {d.last_error}
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          {d.device_type !== "nvr" ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : health ? (
+                            <div className="inline-flex items-center gap-1.5 text-sm font-medium">
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full ${healthDotClass(health.overall)}`}
+                              />
+                              {health.overall_label}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Poll NVR</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="px-3 py-3">
+                          {d.device_type === "nvr" ? (
+                            <NvrHddStatusList disks={disks} />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {d.last_polled_at
+                            ? new Date(d.last_polled_at).toLocaleString()
+                            : d.last_seen_at
+                              ? new Date(d.last_seen_at).toLocaleString()
+                              : "—"}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

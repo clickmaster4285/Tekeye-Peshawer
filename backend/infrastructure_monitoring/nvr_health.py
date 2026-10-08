@@ -102,6 +102,329 @@ def _http_post(ip: str, path: str, data: str, **kwargs) -> tuple[int | None, str
     return _http_request("POST", ip, path, data=data, **kwargs)
 
 
+def _http_put(ip: str, path: str, data: str | None = None, **kwargs) -> tuple[int | None, str]:
+    return _http_request("PUT", ip, path, data=data, **kwargs)
+
+
+def resolve_cameras_nvr_id(device) -> int | None:
+    """Map InfraDevice → cameras.Nvr id (source_key or IP match)."""
+    sk = (getattr(device, "source_key", None) or "").strip()
+    if sk.startswith("cameras.nvr:"):
+        try:
+            return int(sk.split(":", 1)[1])
+        except (TypeError, ValueError):
+            pass
+    ip = (getattr(device, "ip_address", None) or "").strip()
+    if not ip:
+        return None
+    try:
+        from cameras.models import Nvr
+
+        nvr = (
+            Nvr.objects.filter(ip_address=ip, is_active=True)
+            .order_by("id")
+            .first()
+        )
+        return int(nvr.id) if nvr else None
+    except Exception:
+        return None
+
+
+def _nvr_http_creds(device) -> tuple[str, str, str, int]:
+    ip = (device.ip_address or "").strip()
+    username = (device.username or "").strip()
+    password = device.password or ""
+    http_port = int(device.onvif_port or 80)
+    return ip, username, password, http_port
+
+
+def execute_nvr_command(
+    device,
+    action: str,
+    *,
+    disk_id: str | int | None = None,
+    channel: str | int | None = None,
+) -> dict[str, Any]:
+    """
+    Execute a write/control action against the NVR over ISAPI / Dahua CGI.
+    Returns { ok, action, message, http_status?, detail? }.
+    """
+    action = (action or "").strip().lower().replace("-", "_")
+    ip, username, password, http_port = _nvr_http_creds(device)
+    if not ip:
+        return {"ok": False, "action": action, "message": "NVR has no IP address"}
+    if not username:
+        return {"ok": False, "action": action, "message": "NVR username/password required"}
+
+    brand = (device.manufacturer or device.model_number or "").lower()
+
+    # —— Read-only diagnostics (always available) ——
+    if action in ("diagnostics", "run_diagnostics", "refresh_status"):
+        metrics = enrich_nvr_metrics(device)
+        return {
+            "ok": True,
+            "action": action,
+            "message": "Diagnostics complete — health refreshed from NVR",
+            "summary": {
+                "hdd_status": metrics.get("hdd_status"),
+                "channels_total": (metrics.get("channels") or {}).get("total"),
+                "channels_online": (metrics.get("channels") or {}).get("online"),
+                "network": metrics.get("network_interface_status"),
+                "nvr_status": metrics.get("nvr_status"),
+            },
+        }
+
+    if action in ("test_network",):
+        net = (
+            fetch_dahua_network(ip, username=username, password=password, http_port=http_port)
+            if "dahua" in brand
+            else fetch_hikvision_network(
+                ip, username=username, password=password, http_port=http_port
+            )
+        )
+        return {
+            "ok": bool(net.get("network_ok")),
+            "action": action,
+            "message": "Network probe finished",
+            "result": net,
+        }
+
+    if action in ("test_storage",):
+        storage = fetch_hikvision_storage(
+            ip, username=username, password=password, http_port=http_port
+        )
+        return {
+            "ok": bool(storage.get("storage_ok")),
+            "action": action,
+            "message": "Storage probe finished",
+            "result": {
+                "hdd_status": storage.get("hdd_status"),
+                "hdd_count": storage.get("hdd_count"),
+                "free_mb": storage.get("hdd_free_mb"),
+                "capacity_mb": storage.get("hdd_capacity_mb"),
+            },
+        }
+
+    # —— Reboot ——
+    if action in ("reboot", "restart", "restart_nvr"):
+        if "dahua" in brand:
+            code, body = _http_get(
+                ip,
+                "/cgi-bin/magicBox.cgi?action=reboot",
+                username=username,
+                password=password,
+                port=http_port,
+                timeout=15,
+            )
+        else:
+            reboot_xml = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<Reboot xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0"></Reboot>'
+            )
+            code, body = None, ""
+            for path, payload in (
+                ("/ISAPI/System/reboot", reboot_xml),
+                ("/ISAPI/System/reboot", None),
+                ("/ISAPI/System/reboot?format=json", '{"Reboot":{}}'),
+            ):
+                code, body = _http_request(
+                    "PUT",
+                    ip,
+                    path,
+                    username=username,
+                    password=password,
+                    port=http_port,
+                    timeout=20,
+                    data=payload,
+                    headers={"Content-Type": "application/json"}
+                    if payload and "json" in path
+                    else None,
+                )
+                if code in (200, 201, 202, 204):
+                    break
+        ok = code in (200, 201, 202, 204) or (code is None and "timeout" in (body or "").lower())
+        # Many NVRs drop connection mid-reboot — treat connection errors as accepted
+        if code is None and body:
+            ok = True
+        return {
+            "ok": ok,
+            "action": "reboot",
+            "message": "Reboot command sent to NVR" if ok else f"Reboot failed (HTTP {code})",
+            "http_status": code,
+            "detail": (body or "")[:300],
+        }
+
+    # —— Sync time ——
+    if action in ("sync_time",):
+        now = datetime.now(timezone.utc).astimezone()
+        local = now.strftime("%Y-%m-%dT%H:%M:%S")
+        # Hikvision Time XML
+        time_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Time xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0">'
+            f"<localTime>{local}</localTime>"
+            "<timeMode>manual</timeMode>"
+            "</Time>"
+        )
+        code, body = _http_put(
+            ip,
+            "/ISAPI/System/time",
+            time_xml,
+            username=username,
+            password=password,
+            port=http_port,
+            timeout=12,
+        )
+        if code not in (200, 201, 204) and "dahua" in brand:
+            code, body = _http_get(
+                ip,
+                f"/cgi-bin/global.cgi?action=setCurrentTime&time={quote(local)}",
+                username=username,
+                password=password,
+                port=http_port,
+                timeout=12,
+            )
+        ok = code in (200, 201, 204)
+        return {
+            "ok": ok,
+            "action": "sync_time",
+            "message": f"NVR time set to {local}" if ok else f"Sync time failed (HTTP {code})",
+            "http_status": code,
+            "detail": (body or "")[:300],
+        }
+
+    # —— Format HDD ——
+    if action in ("format_hdd", "format"):
+        if disk_id in (None, "", "all"):
+            return {
+                "ok": False,
+                "action": action,
+                "message": "disk_id is required for format_hdd",
+            }
+        did = str(disk_id).strip()
+        format_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<formatProgress xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0">'
+            f"<hdd id=\"{did}\"/>"
+            "</formatProgress>"
+        )
+        code, body = None, ""
+        for path, method, payload in (
+            (f"/ISAPI/ContentMgmt/Storage/hdd/{did}/format", "PUT", None),
+            (f"/ISAPI/ContentMgmt/Storage/hdd/{did}/format", "PUT", format_xml),
+            ("/ISAPI/ContentMgmt/Storage/hdd/format", "PUT", format_xml),
+        ):
+            code, body = _http_request(
+                method,
+                ip,
+                path,
+                username=username,
+                password=password,
+                port=http_port,
+                timeout=60,
+                data=payload,
+            )
+            if code in (200, 201, 202, 204):
+                break
+        ok = code in (200, 201, 202, 204)
+        return {
+            "ok": ok,
+            "action": "format_hdd",
+            "message": f"Format started for HDD {did}" if ok else f"Format failed (HTTP {code})",
+            "http_status": code,
+            "detail": (body or "")[:400],
+            "disk_id": did,
+        }
+
+    # —— Manual recording start/stop ——
+    if action in ("start_recording", "stop_recording"):
+        if channel in (None, ""):
+            return {"ok": False, "action": action, "message": "channel is required"}
+        try:
+            ch = int(str(channel).strip())
+        except ValueError:
+            return {"ok": False, "action": action, "message": "Invalid channel"}
+        track_id = ch if ch >= 100 else ch * 100 + 1
+        verb = "start" if action == "start_recording" else "stop"
+        paths = [
+            f"/ISAPI/ContentMgmt/record/control/manual/{verb}/tracks/{track_id}",
+            f"/ISAPI/ContentMgmt/record/control/manual/{verb}/channels/{ch}",
+        ]
+        code, body = None, ""
+        for path in paths:
+            code, body = _http_put(
+                ip,
+                path,
+                None,
+                username=username,
+                password=password,
+                port=http_port,
+                timeout=12,
+            )
+            if code in (200, 201, 204):
+                break
+        ok = code in (200, 201, 204)
+        return {
+            "ok": ok,
+            "action": action,
+            "message": (
+                f"Recording {verb} on channel {ch}"
+                if ok
+                else f"Recording {verb} failed (HTTP {code}) — firmware may not support manual control"
+            ),
+            "http_status": code,
+            "detail": (body or "")[:300],
+            "channel": ch,
+            "track_id": track_id,
+        }
+
+    return {
+        "ok": False,
+        "action": action,
+        "message": f"Unsupported action: {action}",
+    }
+
+
+def fetch_channel_snapshot_jpeg(
+    device, channel: int
+) -> tuple[bytes | None, str]:
+    """Pull a JPEG snapshot from the NVR for a logical channel (1-based)."""
+    ip, username, password, http_port = _nvr_http_creds(device)
+    if not ip or not username:
+        return None, "NVR credentials required"
+    ch = max(1, int(channel))
+    stream_id = ch if ch >= 100 else ch * 100 + 1
+    paths = [
+        f"/ISAPI/Streaming/channels/{stream_id}/picture",
+        f"/ISAPI/Streaming/channels/{ch}/picture",
+        f"/ISAPI/ContentMgmt/StreamingProxy/channels/{stream_id}/picture",
+    ]
+    url_base = f"http://{ip}:{http_port}"
+    for path in paths:
+        for auth in (
+            HTTPDigestAuth(username, password or ""),
+            HTTPBasicAuth(username, password or ""),
+        ):
+            try:
+                res = requests.get(
+                    f"{url_base}{path}",
+                    auth=auth,
+                    timeout=12,
+                    verify=False,
+                    headers={"Accept": "image/jpeg"},
+                )
+                if res.status_code == 401:
+                    continue
+                ctype = (res.headers.get("Content-Type") or "").lower()
+                if res.status_code == 200 and (
+                    "image" in ctype or res.content[:3] == b"\xff\xd8\xff"
+                ):
+                    return res.content, ""
+            except Exception as exc:
+                logger.debug("snapshot %s failed: %s", path, exc)
+    return None, "Snapshot not available from this NVR firmware"
+
+
 def _safe_float(raw: Any) -> float | None:
     if raw is None or raw == "":
         return None
@@ -130,6 +453,417 @@ def _channel_state_from_flags(*, online: bool, video_loss: bool) -> str:
     if online:
         return "online"
     return "offline"
+
+
+# Canonical HDD statuses — match Hikvision NVR Storage UI wording.
+NVR_HDD_STATUS_LABELS = (
+    "Normal",
+    "Sleep",
+    "Error",
+    "Abnormal",
+    "Offline",
+    "Unformatted",
+    "Full",
+    "Unknown",
+)
+
+
+def map_nvr_hdd_status(raw_status: str, *, usage_pct: float | None = None) -> str:
+    """Map vendor HDD status strings to the same labels shown on the NVR UI."""
+    s = (raw_status or "").strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+
+    # Already a known label (from a previous normalize pass)
+    titled = (raw_status or "").strip().title()
+    if titled in NVR_HDD_STATUS_LABELS:
+        return titled
+    # Title-case "sleep" → "Sleep"
+    if titled == "Sleep":
+        return "Sleep"
+
+    if not s or s in ("unknown", "na", "n/a", "none"):
+        return "Unknown"
+
+    # Trust vendor ok/normal — freeSpace=0 with status ok is still Normal on NVR UI
+    if s in ("ok", "normal", "good", "healthy", "fine", "ready"):
+        return "Normal"
+
+    # Hikvision idle ↔ NVR UI "Sleep"
+    if s in ("sleep", "sleeping", "idle", "standby"):
+        return "Sleep"
+
+    if s in ("full", "spacefull", "diskfull", "hddfull"):
+        return "Full"
+
+    if s in ("offline", "notexist", "missing", "nodisk", "unused", "empty"):
+        return "Offline"
+
+    if "unformat" in s or s in ("raw", "notformatted"):
+        return "Unformatted"
+
+    if s in ("error", "err", "fault", "failed", "fail", "bad", "damage", "damaged"):
+        return "Error"
+
+    if s in ("abnormal", "warning", "warn", "degraded", "busy"):
+        return "Abnormal"
+
+    if "error" in s or "fault" in s or "fail" in s:
+        return "Error"
+    if "sleep" in s or s == "idle":
+        return "Sleep"
+    if "abnormal" in s or "warn" in s:
+        return "Abnormal"
+    if "offline" in s or "missing" in s:
+        return "Offline"
+    if "unformat" in s:
+        return "Unformatted"
+    if "full" in s:
+        return "Full"
+
+    return "Unknown"
+
+
+def hdd_status_level(label: str) -> str:
+    """healthy | warning | critical | unknown for health engine / UI colors."""
+    # Sleep is a normal NVR state (disk spun down) — not a fault.
+    if label in ("Normal", "Sleep"):
+        return "healthy"
+    if label == "Full":
+        return "warning"
+    if label in ("Error", "Abnormal", "Offline", "Unformatted"):
+        return "critical"
+    return "unknown"
+
+
+def _mb_to_display(mb: Any) -> str:
+    """Display capacity like the NVR UI (GB for multi-TB disks, not forced TiB)."""
+    try:
+        v = float(mb)
+    except (TypeError, ValueError):
+        return "—"
+    if v < 0:
+        return "—"
+    if v == 0:
+        return "0 GB"
+    # NVR Storage page uses Capacity(GB) / Remaining Capacity(GB) ≈ MB/1024
+    if v >= 1024:
+        gb = v / 1024.0
+        if gb >= 100:
+            return f"{gb:.0f} GB"
+        return f"{gb:.2f} GB"
+    return f"{v:.0f} MB"
+
+
+def _optional_mb(raw: dict[str, Any], *keys: str) -> float | None:
+    """Read a capacity/free value only when the key is present (missing ≠ 0)."""
+    for key in keys:
+        if key not in raw:
+            continue
+        val = raw.get(key)
+        if val is None or val == "":
+            return None
+        parsed = _safe_float(val)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def normalize_hdd_entry(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    """Normalize one HDD into a UI-ready dict (works for fresh ISAPI or stored metrics)."""
+    raw_status = str(raw.get("status") or raw.get("hddStatus") or "unknown").strip() or "unknown"
+    cap = _optional_mb(raw, "capacity_mb", "capacity", "hddCapacity") or 0.0
+    free = _optional_mb(raw, "free_mb", "freeSpace", "hddFreeSpace", "free")
+    used = _optional_mb(raw, "used_mb", "used")
+    free_known = free is not None
+    if used is None and free_known and cap > 0:
+        used = max(0.0, cap - float(free))
+    usage_pct = (
+        round((float(used) / cap) * 100.0, 1)
+        if used is not None and cap > 0
+        else None
+    )
+    # Only treat as Full when free space was actually reported as ~0
+    if free_known and free is not None and cap > 0 and free <= max(1.0, cap * 0.005):
+        if usage_pct is None:
+            usage_pct = 100.0
+        if used is None:
+            used = max(0.0, cap - float(free))
+
+    disk_no = raw.get("disk_number") or raw.get("id") or raw.get("hddName") or (index + 1)
+    try:
+        disk_number = int(str(disk_no).strip())
+    except (TypeError, ValueError):
+        disk_number = index + 1
+
+    disk_type = str(raw.get("disk_type") or raw.get("hddType") or raw.get("type") or "").strip()
+    disk_model = str(raw.get("disk_model") or raw.get("hddModel") or "").strip()
+    disk_serial = str(
+        raw.get("disk_serial") or raw.get("hddSerialNumber") or raw.get("serial") or ""
+    ).strip()
+    attribute = str(raw.get("attribute") or "").strip()
+    if not attribute:
+        prop = str(raw.get("property") or "").strip().upper()
+        attribute = {"RW": "R/W", "RO": "R/O", "REDUND": "Redundant"}.get(prop, prop)
+    # Vendor status wins. Only label Full when NVR explicitly says full.
+    health_label = map_nvr_hdd_status(raw_status, usage_pct=None)
+    if health_label == "Unknown" and raw_status.strip().lower() in ("full",):
+        health_label = "Full"
+
+    level = hdd_status_level(health_label)
+    free_mb = float(free) if free_known and free is not None else None
+    used_mb = float(used) if used is not None else None
+    # Remaining capacity in GB (same unit as NVR Storage → Remaining Capacity(GB))
+    remaining_gb = round(free_mb / 1024.0) if free_mb is not None else None
+    capacity_gb = round(cap / 1024.0) if cap > 0 else None
+
+    return {
+        "disk_number": disk_number,
+        "name": f"HDD {disk_number}",
+        "status": health_label,  # exact NVR status label
+        "raw_status": raw_status,
+        "health_label": health_label,
+        "level": level,
+        "capacity_mb": cap,
+        "free_mb": free_mb,
+        "used_mb": used_mb,
+        "capacity_gb": capacity_gb,
+        "remaining_gb": remaining_gb,
+        "usage_pct": usage_pct if free_known else None,
+        "free_known": free_known,
+        "capacity_display": _mb_to_display(cap) if cap > 0 else "—",
+        "free_display": _mb_to_display(free_mb) if free_known else "—",
+        "used_display": _mb_to_display(used_mb) if used_mb is not None else "—",
+        "usage_display": (
+            f"{usage_pct:.1f}%" if free_known and usage_pct is not None else "—"
+        ),
+        "disk_type": disk_type or "—",
+        "attribute": attribute or "—",
+        "disk_model": disk_model or "—",
+        "disk_serial": disk_serial or "—",
+        "error_status": "None" if health_label in ("Normal", "Sleep") else health_label,
+    }
+
+
+def normalize_hdd_list(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(rows or []):
+        if not isinstance(row, dict):
+            continue
+        out.append(normalize_hdd_entry(row, i))
+    out.sort(key=lambda r: int(r.get("disk_number") or 0))
+    return out
+
+
+def _rank_level(level: str) -> int:
+    return {"healthy": 0, "warning": 1, "critical": 2, "unknown": -1}.get(
+        (level or "").lower(), -1
+    )
+
+
+def _worst_level(*levels: str) -> str:
+    best = "unknown"
+    best_rank = -1
+    for lv in levels:
+        r = _rank_level(lv)
+        if r > best_rank:
+            best = (lv or "unknown").lower()
+            best_rank = r
+    return best if best_rank >= 0 else "unknown"
+
+
+def compute_nvr_health(metrics: dict[str, Any], *, device_status: str = "") -> dict[str, Any]:
+    """
+    Unified NVR health scorecard from polled metrics.
+    Levels: healthy | warning | critical | unknown
+    """
+    hdds = normalize_hdd_list(metrics.get("hdd_list") if isinstance(metrics.get("hdd_list"), list) else [])
+    channels = metrics.get("channels") if isinstance(metrics.get("channels"), dict) else {}
+    total = int(channels.get("total") or 0)
+    online = int(channels.get("online") or 0)
+    offline = int(channels.get("offline") or 0)
+    video_loss = int(channels.get("video_loss") or 0)
+    recording = int(channels.get("recording") or 0)
+
+    # Storage — Full (circular overwrite) is warning, not critical/abnormal
+    if not hdds and not metrics.get("storage_ok"):
+        storage_level = "unknown"
+        storage_label = "No storage data"
+        storage_detail = "Storage not reported"
+    else:
+        bad = sum(1 for h in hdds if h.get("level") == "critical")
+        warn = sum(1 for h in hdds if h.get("level") == "warning")
+        ok = sum(1 for h in hdds if h.get("level") == "healthy")
+        full = sum(1 for h in hdds if h.get("health_label") == "Full")
+        sleep = sum(1 for h in hdds if h.get("health_label") == "Sleep")
+        if bad:
+            storage_level = "critical"
+            storage_label = f"{ok}/{len(hdds)} Healthy"
+            storage_detail = f"{bad} disk(s) error/offline"
+        elif warn:
+            storage_level = "warning"
+            storage_label = f"{ok}/{len(hdds)} Healthy"
+            if sleep and sleep == warn:
+                storage_detail = f"{sleep} disk(s) sleep"
+            elif full and full == warn:
+                storage_detail = f"{full} disk(s) full (overwrite mode)"
+            else:
+                storage_detail = f"{warn} disk(s) need attention"
+        elif hdds:
+            storage_level = "healthy"
+            storage_label = f"{len(hdds)}/{len(hdds)} Healthy"
+            storage_detail = "All disks normal"
+        else:
+            storage_level = "healthy" if metrics.get("hdd_status") in ("ok", "normal", "full") else "unknown"
+            storage_label = str(metrics.get("hdd_status") or "Unknown")
+            storage_detail = "Aggregated storage only"
+
+    # Cameras
+    problem = offline + video_loss
+    if total <= 0:
+        cameras_level = "unknown"
+        cameras_label = "No channels"
+        cameras_detail = "Channel list empty"
+    elif problem == 0:
+        cameras_level = "healthy"
+        cameras_label = f"{online}/{total} Online"
+        cameras_detail = "All channels online"
+    elif problem / max(total, 1) >= 0.25 or online == 0:
+        cameras_level = "critical"
+        cameras_label = f"{online}/{total} Online"
+        cameras_detail = f"{problem} offline/video-loss"
+    else:
+        cameras_level = "warning"
+        cameras_label = f"{online}/{total} Online"
+        cameras_detail = f"{problem} offline/video-loss"
+
+    # Recording (Phase-1 heuristic — Phase 2 will add evidence age)
+    rec_status = str(metrics.get("recording_status") or "").lower()
+    if total <= 0:
+        recording_level = "unknown"
+        recording_label = "Unknown"
+        recording_detail = "No channel data"
+    elif online > 0 and recording == 0:
+        recording_level = "critical"
+        recording_label = "Recording stopped"
+        recording_detail = f"0/{online} online cameras recording"
+    elif online > 0 and recording < online:
+        recording_level = "warning"
+        recording_label = f"{recording}/{online} Recording"
+        recording_detail = "Some online cameras not recording"
+    elif recording > 0 or rec_status in ("available", "ok", "normal", "recording"):
+        recording_level = "healthy"
+        recording_label = "Active" if recording > 0 else "Available"
+        recording_detail = f"{recording} channel(s) recording"
+    else:
+        recording_level = "unknown"
+        recording_label = rec_status or "Unknown"
+        recording_detail = "Recording status unclear"
+
+    # System
+    ds = (device_status or metrics.get("nvr_status") or "").lower()
+    temp = _safe_float(metrics.get("temperature_c"))
+    cpu = _safe_float(metrics.get("cpu_percent"))
+    if "offline" in ds:
+        system_level = "critical"
+        system_label = "Offline"
+        system_detail = "NVR unreachable"
+    else:
+        system_level = "healthy"
+        system_label = "Normal"
+        system_detail = "System OK"
+        if temp is not None and temp >= 85:
+            system_level = "critical"
+            system_label = f"{temp:.0f}°C"
+            system_detail = "Temperature critical"
+        elif temp is not None and temp >= 70:
+            system_level = "warning"
+            system_label = f"{temp:.0f}°C"
+            system_detail = "Temperature high"
+        elif cpu is not None and cpu >= 95:
+            system_level = "warning"
+            system_label = f"CPU {cpu:.0f}%"
+            system_detail = "CPU high"
+
+    # Network — if we are polling the NVR successfully it cannot be hard-down
+    iface = str(metrics.get("network_interface_status") or "").lower().strip()
+    iface_up = iface in (
+        "up",
+        "connect",
+        "connected",
+        "linkup",
+        "online",
+        "ok",
+        "normal",
+    )
+    iface_down = iface in ("down", "disconnect", "disconnected", "linkdown", "offline", "error", "fault")
+    reachable = "online" in ds or bool(metrics.get("device_info_ok") or metrics.get("network_ok"))
+    if "offline" in ds and not reachable:
+        network_level = "critical"
+        network_label = "Down"
+        network_detail = "Device offline"
+    elif iface_down and not reachable:
+        network_level = "critical"
+        network_label = "Down"
+        network_detail = "Interface fault"
+    elif iface_down and reachable:
+        # Stale/wrong secondary NIC status while HTTP still works
+        network_level = "healthy"
+        network_label = "Connected"
+        network_detail = metrics.get("network_link_speed") or "Reachable (link status ambiguous)"
+    elif iface_up or reachable:
+        network_level = "healthy"
+        network_label = "Connected"
+        network_detail = metrics.get("network_link_speed") or "Link up"
+    else:
+        network_level = "unknown"
+        network_label = "Unknown"
+        network_detail = "No network metrics"
+
+    overall = _worst_level(
+        storage_level, cameras_level, recording_level, system_level, network_level
+    )
+    overall_label = {
+        "healthy": "Healthy",
+        "warning": "Warning",
+        "critical": "Critical",
+        "unknown": "Unknown",
+    }.get(overall, "Unknown")
+
+    healthy_disks = sum(1 for h in hdds if h.get("level") == "healthy")
+    return {
+        "overall": overall,
+        "overall_label": overall_label,
+        "storage": {
+            "level": storage_level,
+            "label": storage_label,
+            "detail": storage_detail,
+            "disk_count": len(hdds),
+            "healthy_disks": healthy_disks,
+        },
+        "cameras": {
+            "level": cameras_level,
+            "label": cameras_label,
+            "detail": cameras_detail,
+            "online": online,
+            "total": total,
+        },
+        "recording": {
+            "level": recording_level,
+            "label": recording_label,
+            "detail": recording_detail,
+            "recording": recording,
+            "online": online,
+        },
+        "system": {
+            "level": system_level,
+            "label": system_label,
+            "detail": system_detail,
+        },
+        "network": {
+            "level": network_level,
+            "label": network_label,
+            "detail": str(network_detail),
+        },
+    }
 
 
 def _summarize_channels(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -201,6 +935,38 @@ def _format_bytes(raw: Any) -> str:
     return f"{n:.2f} {units[i]}"
 
 
+def _normalize_link_oper_status(raw: str) -> str:
+    """Map Hikvision linkStatus values to up/down/unknown."""
+    s = (raw or "").strip().lower().replace(" ", "").replace("_", "")
+    if s in (
+        "up",
+        "connect",
+        "connected",
+        "linkup",
+        "online",
+        "ok",
+        "normal",
+        "true",
+        "1",
+        "active",
+    ):
+        return "up"
+    if s in (
+        "down",
+        "disconnect",
+        "disconnected",
+        "linkdown",
+        "offline",
+        "false",
+        "0",
+        "inactive",
+        "error",
+        "fault",
+    ):
+        return "down"
+    return ""
+
+
 def fetch_hikvision_network(
     ip: str, *, username: str, password: str, http_port: int = 80
 ) -> dict[str, Any]:
@@ -213,7 +979,9 @@ def fetch_hikvision_network(
         <Link><speed>1000</speed><duplex>full</duplex>...</Link>
       </NetworkInterface>
 
-    We must NOT treat addressingType (static/dhcp) as interface status.
+    We must NOT treat addressingType (static/dhcp) as interface status,
+    and must NOT prefer a disabled secondary NIC that reports down/half.
+    HTTP reachability implies the active management NIC is up.
     """
     out: dict[str, Any] = {}
     code, body = _http_get(
@@ -227,20 +995,18 @@ def fetch_hikvision_network(
     if code == 200 and body:
         try:
             root = ET.fromstring(body)
-            best: dict[str, Any] = {}
+            scored: list[tuple[int, dict[str, Any]]] = []
             for iface in root.iter():
                 if _tag(iface).lower() != "networkinterface":
                     continue
                 iface_id = _find_direct(iface, "id") or "1"
-                enabled = _find_direct(iface, "enabled", "enable") or _find_text(
-                    iface, "enabled", "enable"
-                )
-                # Walk children for Link / IPAddress
+                enabled = _find_direct(iface, "enabled", "enable") or ""
                 speed = ""
                 duplex = ""
                 mac = ""
                 link_status = ""
                 addressing = ""
+                ip_addr = ""
                 for child in list(iface):
                     t = _tag(child).lower()
                     if t == "link":
@@ -254,16 +1020,41 @@ def fetch_hikvision_network(
                         mac = _find_direct(child, "MACAddress", "macAddress") or _find_text(
                             child, "MACAddress", "macAddress"
                         )
-                        link_status = (
-                            _find_direct(child, "linkStatus", "connectionStatus", "status")
-                            or _find_text(child, "linkStatus", "connectionStatus")
-                        )
+                        # Never use bare "status" — overlaps unrelated nodes
+                        link_status = _find_direct(
+                            child, "linkStatus", "connectionStatus", "operStatus"
+                        ) or _find_text(child, "linkStatus", "connectionStatus", "operStatus")
                     elif t == "ipaddress":
                         addressing = (
                             _find_direct(child, "addressingType", "ipAddressType")
                             or _find_text(child, "addressingType")
                         )
-                # Prefer first interface with a real speed, else first
+                        ip_addr = (
+                            _find_direct(child, "ipAddress", "address", "ipv4Address")
+                            or _find_text(child, "ipAddress", "ipv4Address")
+                        )
+                oper = _normalize_link_oper_status(link_status)
+                en = (enabled or "").lower()
+                enabled_yes = en in ("true", "1", "yes", "")
+                enabled_no = en in ("false", "0", "no")
+                speed_ok = bool(_format_link_speed(speed))
+                score = 0
+                if oper == "up":
+                    score += 50
+                if enabled_yes and not enabled_no:
+                    score += 20
+                if ip_addr:
+                    score += 15
+                # Prefer the NIC that matches the IP we are polling
+                if ip_addr and ip_addr.strip() == str(ip).strip():
+                    score += 100
+                if addressing:
+                    score += 5
+                if speed_ok:
+                    score += 10
+                # enabled=false is common on Hikvision even for the active NIC — don't punish hard
+                if oper == "down":
+                    score -= 40
                 candidate = {
                     "id": iface_id,
                     "enabled": enabled,
@@ -271,39 +1062,52 @@ def fetch_hikvision_network(
                     "duplex": duplex,
                     "mac": mac,
                     "link_status": link_status,
+                    "oper": oper,
                     "addressing": addressing,
+                    "ip": ip_addr,
                 }
-                formatted = _format_link_speed(speed)
-                if formatted and not best.get("_speed_ok"):
-                    candidate["_speed_ok"] = True
-                    best = candidate
-                elif not best:
-                    best = candidate
-            if best:
-                # Interface status: link up/down / enabled — never addressingType
-                status = (best.get("link_status") or "").strip()
-                if not status:
+                scored.append((score, candidate))
+            if scored:
+                scored.sort(key=lambda x: x[0], reverse=True)
+                best = scored[0][1]
+                oper = best.get("oper") or ""
+                if not oper:
                     en = (best.get("enabled") or "").lower()
-                    if en in ("true", "1", "yes"):
-                        status = "up"
-                    elif en in ("false", "0", "no"):
-                        status = "down"
+                    if en in ("false", "0", "no"):
+                        oper = "down"
                     else:
-                        status = "up"  # interface exists and answered
-                out["network_interface_status"] = status
+                        # Management HTTP succeeded — active path is up
+                        oper = "up"
+                # If best score is still a down NIC but we got HTTP 200, force up
+                if oper == "down":
+                    oper = "up"
+                out["network_interface_status"] = oper
                 out["network_addressing"] = best.get("addressing") or ""
-                out["network_duplex"] = best.get("duplex") or ""
                 out["network_mac"] = best.get("mac") or ""
                 speed_label = _format_link_speed(best.get("speed"))
+                duplex = (best.get("duplex") or "").strip()
+                # Hikvision reports speed=0 + duplex=half when autoNegotiation is on;
+                # that is NOT the real negotiated link — do not show "half duplex".
                 if speed_label:
                     out["network_link_speed"] = speed_label
-                elif best.get("duplex"):
-                    # Speed 0 but duplex present — still useful
-                    out["network_link_speed"] = f"Auto ({best.get('duplex')} duplex)"
+                    if duplex:
+                        out["network_duplex"] = duplex
+                else:
+                    out["network_link_speed"] = "Auto-negotiated"
+                    out["network_duplex"] = "auto"
+                if best.get("ip"):
+                    out["network_ip"] = best.get("ip")
                 out["network_ok"] = True
                 out["network_iface_id"] = best.get("id") or "1"
         except ET.ParseError as exc:
             logger.debug("network interfaces parse failed: %s", exc)
+
+    # HTTP answered → never leave interface as down
+    if code == 200:
+        out.setdefault("network_interface_status", "up")
+        out["network_ok"] = True
+        if out.get("network_interface_status") == "down":
+            out["network_interface_status"] = "up"
 
     iface_id = str(out.get("network_iface_id") or "1")
 
@@ -322,16 +1126,20 @@ def fetch_hikvision_network(
                 root = ET.fromstring(sb)
                 speed = _find_text(root, "speed", "linkSpeed", "Speed")
                 duplex = _find_text(root, "duplex", "Duplex")
-                link_status = _find_text(root, "linkStatus", "connectionStatus", "status")
+                link_status = _find_text(
+                    root, "linkStatus", "connectionStatus", "operStatus"
+                )
                 label = _format_link_speed(speed)
                 if label:
                     out["network_link_speed"] = label
-                elif duplex and not out.get("network_link_speed"):
-                    out["network_link_speed"] = f"Auto ({duplex} duplex)"
-                if link_status and not out.get("network_interface_status"):
-                    out["network_interface_status"] = link_status
-                if duplex:
-                    out["network_duplex"] = duplex
+                    if duplex:
+                        out["network_duplex"] = duplex
+                elif not out.get("network_link_speed"):
+                    out["network_link_speed"] = "Auto-negotiated"
+                    out["network_duplex"] = "auto"
+                oper = _normalize_link_oper_status(link_status)
+                if oper == "up":
+                    out["network_interface_status"] = "up"
                 if label or duplex:
                     out["network_ok"] = True
                     break
@@ -370,7 +1178,6 @@ def fetch_hikvision_network(
             errs = _find_text(
                 root,
                 "errorPackets",
-                "errors",
                 "recvErrorPackets",
                 "sendErrorPackets",
                 "ifInErrors",
@@ -821,12 +1628,9 @@ def fetch_hikvision_logs(
                 pass
 
             added = _ingest(page_rows)
-            if (
-                not page_rows
-                or added == 0
-                or "NO MATCHES" in status_str
-                or num_matches == 0
-            ):
+            if "NO MATCHES" in status_str or (num_matches == 0 and not page_rows):
+                break
+            if not page_rows or added == 0:
                 empty_streak += 1
                 if empty_streak >= 2:
                     break
@@ -838,8 +1642,10 @@ def fetch_hikvision_logs(
             if step <= 0:
                 break
             position += step
-            # If fewer than page_size returned, this filter is exhausted
-            if len(page_rows) < page_size:
+            # MORE means more pages; OK/DONE or short page ends this filter
+            if "MORE" in status_str:
+                continue
+            if len(page_rows) < page_size or status_str in ("OK", "DONE", "TRUE"):
                 break
 
     # Newest first
@@ -855,25 +1661,63 @@ def _hik_log_search_xml(
     max_results: int,
     major_type: str | None,
 ) -> str:
-    search_id = str(uuid.uuid4())
+    # Many Hikvision firmwares (incl. DS-77xx V5.04) require metaId + braced searchID
+    search_id = "{" + str(uuid.uuid4()) + "}"
     major_block = ""
     if major_type is not None:
-        major_block = f"""
-  <majorTypeList>
-    <majorType>{major_type}</majorType>
-  </majorTypeList>"""
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<CMSearchDescription>
-  <searchID>{search_id}</searchID>
-  <searchResultPosition>{int(position)}</searchResultPosition>
-  <maxResults>{int(max_results)}</maxResults>
-  <timeSpanList>
-    <timeSpan>
-      <startTime>{start_s}</startTime>
-      <endTime>{end_s}</endTime>
-    </timeSpan>
-  </timeSpanList>{major_block}
-</CMSearchDescription>"""
+        major_block = (
+            "\n  <majorTypeList>\n"
+            f"    <majorType>{major_type}</majorType>\n"
+            "  </majorTypeList>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<CMSearchDescription>"
+        f"<searchID>{search_id}</searchID>"
+        "<metaId>log.std-cgi.com</metaId>"
+        f"<searchResultPosition>{int(position)}</searchResultPosition>"
+        f"<maxResults>{int(max_results)}</maxResults>"
+        "<timeSpanList>"
+        "<timeSpan>"
+        f"<startTime>{start_s}</startTime>"
+        f"<endTime>{end_s}</endTime>"
+        "</timeSpan>"
+        "</timeSpanList>"
+        f"{major_block}"
+        "</CMSearchDescription>"
+    )
+
+
+def _parse_hik_log_meta_id(meta_id: str) -> tuple[str, str, str]:
+    """
+    Parse metaId like:
+      log.hikvision.com/Alarm/motionStart/16
+      log.std-cgi.com/Operation/login
+    → (major_type, subtype, channel_no)
+    """
+    parts = [p for p in (meta_id or "").strip().split("/") if p]
+    # Drop host-like first segment
+    if parts and ("." in parts[0] or parts[0].lower().startswith("log")):
+        parts = parts[1:]
+    major = parts[0] if parts else ""
+    subtype = parts[1] if len(parts) > 1 else ""
+    channel = ""
+    if len(parts) > 2 and parts[-1].isdigit():
+        channel = parts[-1]
+        if len(parts) > 2:
+            subtype = "/".join(parts[1:-1]) if len(parts) > 2 else subtype
+    major_map = {
+        "alarm": "Trigger Alarm",
+        "exception": "Exception",
+        "operation": "Operation",
+        "information": "Information",
+        "info": "Information",
+        "smart": "Smart",
+        "event": "Event",
+        "industry": "Industry",
+    }
+    major_label = major_map.get(major.lower(), major or "—")
+    return major_label, subtype or "—", channel
 
 
 _HIK_MAJOR_TYPE_MAP = {
@@ -958,37 +1802,44 @@ def _parse_hikvision_log_xml(body: str) -> list[dict[str, Any]]:
     except ET.ParseError:
         return rows
 
-    entry_tags = {
-        "searchmatchitem",
-        "matchelement",
-        "logitem",
-        "logentry",
-        "item",
-        "logdescriptor",
-    }
-    for item in root.iter():
-        tag = _tag(item).lower()
-        if tag not in entry_tags:
-            continue
-        # Skip empty containers that only wrap lists
-        has_time = bool(
-            _find_direct(item, "time", "logTime", "dateTime", "startTime")
-            or _find_text(item, "time", "logTime", "dateTime", "startTime")
-        )
-        has_major = bool(
-            _find_direct(item, "majorType", "MajorType")
-            or _find_text(item, "majorType", "MajorType", "major")
-        )
-        has_minor = bool(
-            _find_direct(item, "minorType", "MinorType", "subType")
-            or _find_text(item, "minorType", "MinorType", "subType", "eventType")
-        )
-        if not (has_time or has_major or has_minor):
-            continue
+    def _dash(v: str) -> str:
+        v = (v or "").strip()
+        return v if v and v.lower() not in ("0", "none", "null", "") else "--"
 
+    # Prefer logDescriptor nodes (Hikvision DS-77xx / PSIA-style results)
+    descriptors = [el for el in root.iter() if _tag(el).lower() == "logdescriptor"]
+    targets = descriptors or [
+        el
+        for el in root.iter()
+        if _tag(el).lower()
+        in ("searchmatchitem", "matchelement", "logitem", "logentry", "item")
+    ]
+
+    for item in targets:
+        meta_id = (
+            _find_direct(item, "metaId", "MetaId")
+            or _find_text(item, "metaId", "MetaId")
+            or ""
+        )
         ts = (
-            _find_direct(item, "time", "logTime", "dateTime", "startTime")
-            or _find_text(item, "time", "logTime", "dateTime", "startTime")
+            _find_direct(
+                item,
+                "StartDateTime",
+                "startDateTime",
+                "time",
+                "logTime",
+                "dateTime",
+                "startTime",
+            )
+            or _find_text(
+                item,
+                "StartDateTime",
+                "startDateTime",
+                "time",
+                "logTime",
+                "dateTime",
+                "startTime",
+            )
             or "—"
         )
         major_raw = (
@@ -1002,13 +1853,25 @@ def _parse_hikvision_log_xml(body: str) -> list[dict[str, Any]]:
             or ""
         )
         channel = (
-            _find_direct(item, "channelID", "channelNo", "channel", "dynChannelID")
-            or _find_text(item, "channelID", "channelNo", "channel", "dynChannelID")
+            _find_direct(item, "channelID", "channelNo", "channel", "dynChannelID", "localID")
+            or _find_text(item, "channelID", "channelNo", "channel", "dynChannelID", "localID")
             or ""
         )
+        if meta_id:
+            m_major, m_sub, m_ch = _parse_hik_log_meta_id(meta_id)
+            if not major_raw:
+                major_raw = m_major
+            if not subtype or subtype == "—":
+                subtype = m_sub
+            if not channel or channel in ("0", "D0"):
+                channel = m_ch or channel
+        # localID often like D16 → channel 16
+        if channel.upper().startswith("D") and channel[1:].isdigit():
+            channel = channel[1:]
+
         user = (
-            _find_direct(item, "userName", "localUserName", "user", "localOrRemoteUser")
-            or _find_text(item, "userName", "localUserName", "user", "localOrRemoteUser")
+            _find_direct(item, "userName", "localUserName", "user", "localOrRemoteUser", "panelUser")
+            or _find_text(item, "userName", "localUserName", "user", "localOrRemoteUser", "panelUser")
             or ""
         )
         remote_ip = (
@@ -1020,28 +1883,24 @@ def _parse_hikvision_log_xml(body: str) -> list[dict[str, Any]]:
             _find_direct(item, "description", "logDescription", "info", "detail")
             or _find_text(item, "description", "logDescription", "info", "detail")
             or subtype
+            or meta_id
             or "—"
         )
-        # Skip totally empty rows
-        if not major_raw and not subtype and (not ts or ts == "—"):
+        if not major_raw and not subtype and (not ts or ts == "—") and not meta_id:
             continue
-
-        # Normalize blank channel/user/ip to -- like NVR UI
-        def _dash(v: str) -> str:
-            v = (v or "").strip()
-            return v if v and v.lower() not in ("0", "none", "null") else "--"
 
         row = {
             "time": ts,
-            "major_type": _map_major_type(major_raw),
+            "major_type": _map_major_type(major_raw) if major_raw and major_raw[0].isdigit() else (major_raw or "—"),
             "subtype": subtype or "—",
-            "minor_type": subtype or "—",  # legacy alias
+            "minor_type": subtype or "—",
             "channel_no": _dash(channel),
             "channel": _dash(channel),
             "local_remote_user": _dash(user),
             "user": _dash(user),
             "remote_host_ip": _dash(remote_ip),
             "description": desc,
+            "meta_id": meta_id,
             "source": "nvr_isapi",
         }
         row["fingerprint"] = _log_fingerprint(row)
@@ -1285,8 +2144,12 @@ def parse_hikvision_device_status_xml(body: str) -> dict[str, Any]:
     if temp_vals:
         out["temperature_c"] = round(sum(temp_vals) / len(temp_vals), 1)
 
-    state = _find_text(root, "deviceStatus", "status", "workStatus")
-    if state and state.lower() not in ("static", "dhcp"):
+    # Do NOT search bare "status" — it matches unrelated nested nodes (often "unknown")
+    state = (
+        _find_text(root, "deviceStatus", "workStatus", "deviceState")
+        or _find_direct(root, "deviceStatus", "workStatus", "deviceState")
+    )
+    if state and state.lower() not in ("static", "dhcp", "unknown", ""):
         out["system_state"] = state
     else:
         out.setdefault("system_state", "normal")
@@ -1377,6 +2240,320 @@ def fetch_hikvision_system_health(
     return out
 
 
+def _parse_hdd_elements(root: Element) -> list[dict[str, Any]]:
+    """Extract per-disk capacity/free/status from Storage or Storage/hdd XML.
+
+    Hikvision documents capacity and freeSpace in MB. On many NVRs freeSpace stays
+    0 while status=ok (volume / circular recording). Prefer Storage/quota for real
+    free space — applied later in fetch_hikvision_storage.
+    """
+    raw_hdds: list[dict[str, Any]] = []
+    hdd_idx = 0
+    for hdd in root.iter():
+        if _tag(hdd).lower() != "hdd":
+            continue
+        hdd_idx += 1
+        status = (
+            _find_direct(hdd, "status", "hddStatus")
+            or _find_direct(hdd, "hddStatus")
+            or "unknown"
+        )
+        cap_raw = _find_direct(
+            hdd, "capacity", "hddCapacity", "capacityMB", "volume"
+        )
+        free_raw = _find_direct(
+            hdd,
+            "freeSpace",
+            "hddFreeSpace",
+            "freeSpaceMB",
+            "freeSize",
+            "freesize",
+            "free",
+        )
+        if not cap_raw:
+            cap_raw = _find_text(hdd, "capacity", "hddCapacity", "capacityMB")
+        if not free_raw:
+            free_raw = _find_text(
+                hdd, "freeSpace", "hddFreeSpace", "freeSpaceMB", "freeSize", "freesize"
+            )
+        cap = _safe_float(cap_raw)
+        free = _safe_float(free_raw) if free_raw not in ("", None) else None
+        disk_id = (
+            _find_direct(hdd, "id", "hddId", "hddName", "name")
+            or str(hdd_idx)
+        )
+        disk_type = _find_direct(hdd, "hddType", "type") or ""
+        disk_model = _find_direct(hdd, "hddModel", "model") or ""
+        disk_serial = _find_direct(hdd, "hddSerialNumber", "serialNumber") or ""
+        prop = (_find_direct(hdd, "property") or "").strip().upper()
+        # NVR UI Attribute: RW → R/W
+        attribute = {"RW": "R/W", "RO": "R/O", "REDUND": "Redundant"}.get(prop, prop or "")
+        # NVR UI Type: SATA local drives shown as Local
+        type_label = "Local" if disk_type.upper() in ("SATA", "SAS", "LOCAL", "") else disk_type
+        entry: dict[str, Any] = {
+            "id": disk_id,
+            "disk_number": disk_id,
+            "status": status,
+            "disk_type": type_label or disk_type,
+            "disk_model": disk_model,
+            "disk_serial": disk_serial,
+            "attribute": attribute,
+            "property": prop,
+        }
+        if cap is not None:
+            entry["capacity_mb"] = cap
+        if free is not None:
+            entry["free_mb"] = free
+            if cap is not None:
+                entry["used_mb"] = max(0.0, cap - free)
+        raw_hdds.append(entry)
+    return raw_hdds
+
+
+def _fetch_hikvision_volume_quota(
+    ip: str, *, username: str, password: str, http_port: int = 80
+) -> dict[str, float]:
+    """
+    /ISAPI/ContentMgmt/Storage/quota — real volume free space.
+
+    On DS-77xx / similar, per-HDD freeSpace is often stuck at 0 while
+    freeVideoQuota reports the true remaining recording capacity (MB).
+    """
+    code, body = _http_get(
+        ip,
+        "/ISAPI/ContentMgmt/Storage/quota",
+        username=username,
+        password=password,
+        port=http_port,
+        timeout=12,
+    )
+    if code != 200 or not body:
+        return {}
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return {}
+
+    best_total = None
+    best_free = None
+    for node in root.iter():
+        if _tag(node).lower() != "diskquota":
+            continue
+        total = _safe_float(
+            _find_direct(node, "totalDiskVolume", "totalCapacity", "capacity")
+        )
+        free = _safe_float(
+            _find_direct(
+                node,
+                "freeVideoQuota",
+                "freePictureQuota",
+                "freeSpace",
+                "freeCapacity",
+            )
+        )
+        if total is None or free is None or total <= 0:
+            continue
+        # Prefer the largest consistent volume reading
+        if best_total is None or total > best_total:
+            best_total = total
+            best_free = free
+    if best_total is None or best_free is None:
+        return {}
+    free = max(0.0, min(float(best_free), float(best_total)))
+    return {
+        "volume_total_mb": float(best_total),
+        "volume_free_mb": free,
+        "volume_used_mb": max(0.0, float(best_total) - free),
+    }
+
+
+def _merge_hdd_rows(
+    primary: list[dict[str, Any]], secondary: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge Storage + Storage/hdd rows by disk id; prefer rows with free_mb."""
+    by_id: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    def _key(row: dict[str, Any]) -> str:
+        return str(row.get("id") or row.get("disk_number") or "")
+
+    for row in primary + secondary:
+        k = _key(row)
+        if not k:
+            continue
+        if k not in by_id:
+            by_id[k] = dict(row)
+            order.append(k)
+            continue
+        cur = by_id[k]
+        for field in (
+            "status",
+            "disk_type",
+            "disk_model",
+            "disk_serial",
+            "attribute",
+            "property",
+            "capacity_mb",
+            "free_mb",
+            "used_mb",
+        ):
+            if cur.get(field) in (None, "", "unknown") and row.get(field) not in (
+                None,
+                "",
+            ):
+                cur[field] = row[field]
+        # Prefer explicit free_mb from either side
+        if cur.get("free_mb") is None and row.get("free_mb") is not None:
+            cur["free_mb"] = row["free_mb"]
+            if cur.get("capacity_mb") is not None:
+                cur["used_mb"] = max(0.0, float(cur["capacity_mb"]) - float(row["free_mb"]))
+        if (not cur.get("status") or cur.get("status") == "unknown") and row.get("status"):
+            cur["status"] = row["status"]
+    return [by_id[k] for k in order]
+
+
+def fetch_hikvision_storage(
+    ip: str, *, username: str, password: str, http_port: int = 80
+) -> dict[str, Any]:
+    """Pull HDD list + real volume free space from Storage, Storage/hdd, quota."""
+    out: dict[str, Any] = {}
+    rows_a: list[dict[str, Any]] = []
+    rows_b: list[dict[str, Any]] = []
+
+    for path, bucket in (
+        ("/ISAPI/ContentMgmt/Storage", "a"),
+        ("/ISAPI/ContentMgmt/Storage/hdd", "b"),
+    ):
+        code, body = _http_get(
+            ip, path, username=username, password=password, port=http_port, timeout=12
+        )
+        if code != 200 or not body:
+            continue
+        try:
+            root = ET.fromstring(body)
+            parsed = _parse_hdd_elements(root)
+            if bucket == "a":
+                rows_a = parsed
+            else:
+                rows_b = parsed
+        except ET.ParseError as exc:
+            logger.debug("storage parse failed %s: %s", path, exc)
+
+    # Prefer Storage/hdd (often includes model/serial)
+    prefer_b = bool(rows_b)
+    raw_hdds = (
+        _merge_hdd_rows(rows_b, rows_a) if prefer_b else _merge_hdd_rows(rows_a, rows_b)
+    )
+
+    # Enrich model/serial from per-disk endpoints when list omitted them
+    for row in raw_hdds:
+        if row.get("disk_model") and row.get("disk_serial"):
+            continue
+        disk_id = str(row.get("id") or row.get("disk_number") or "").strip()
+        if not disk_id:
+            continue
+        sc, sb = _http_get(
+            ip,
+            f"/ISAPI/ContentMgmt/Storage/hdd/{disk_id}",
+            username=username,
+            password=password,
+            port=http_port,
+            timeout=8,
+        )
+        if sc != 200 or not sb:
+            continue
+        try:
+            one = _parse_hdd_elements(ET.fromstring(sb))
+            if one:
+                if not row.get("disk_model") and one[0].get("disk_model"):
+                    row["disk_model"] = one[0]["disk_model"]
+                if not row.get("disk_serial") and one[0].get("disk_serial"):
+                    row["disk_serial"] = one[0]["disk_serial"]
+                if (not row.get("status") or row.get("status") == "unknown") and one[0].get(
+                    "status"
+                ):
+                    row["status"] = one[0]["status"]
+        except ET.ParseError:
+            continue
+
+    quota = _fetch_hikvision_volume_quota(
+        ip, username=username, password=password, http_port=http_port
+    )
+    capacity_sum = sum(float(r.get("capacity_mb") or 0) for r in raw_hdds)
+    volume_free = quota.get("volume_free_mb")
+    volume_total = quota.get("volume_total_mb") or capacity_sum
+
+    # Prefer exact per-disk freeSpace from ISAPI (matches NVR Storage table).
+    # Only fall back to volume quota when NO disk reports freeSpace at all.
+    any_disk_reports_free = any(r.get("free_mb") is not None for r in raw_hdds)
+    free_values_missing = bool(raw_hdds) and all(r.get("free_mb") is None for r in raw_hdds)
+    if (
+        free_values_missing
+        and volume_free is not None
+        and volume_free > 0
+        and capacity_sum > 0
+    ):
+        for r in raw_hdds:
+            cap = float(r.get("capacity_mb") or 0)
+            if cap <= 0:
+                continue
+            share = volume_free * (cap / capacity_sum)
+            r["free_mb"] = share
+            r["used_mb"] = max(0.0, cap - share)
+        out["storage_free_source"] = "quota"
+    elif any_disk_reports_free:
+        out["storage_free_source"] = "hdd"
+    elif volume_free is not None:
+        out["storage_free_source"] = "quota"
+    else:
+        out["storage_free_source"] = "hdd"
+
+    hdds = normalize_hdd_list(raw_hdds)
+    if not hdds:
+        out["storage_ok"] = False
+        return out
+
+    errors = sum(1 for h in hdds if h.get("level") == "critical")
+    warns = sum(1 for h in hdds if h.get("level") == "warning")
+    fulls = sum(1 for h in hdds if h.get("health_label") == "Full")
+    sleeps = sum(1 for h in hdds if h.get("health_label") == "Sleep")
+    capacity_total = sum(float(h.get("capacity_mb") or 0) for h in hdds)
+
+    # Aggregate from per-disk values when available (exact NVR Remaining Capacity sum)
+    free_known = [h for h in hdds if h.get("free_known")]
+    if free_known:
+        free_total = sum(float(h.get("free_mb") or 0) for h in free_known)
+        used_total = sum(
+            float(h.get("used_mb") if h.get("used_mb") is not None else max(0.0, float(h.get("capacity_mb") or 0) - float(h.get("free_mb") or 0)))
+            for h in hdds
+        )
+        out["hdd_capacity_mb"] = capacity_total
+        out["hdd_free_mb"] = free_total
+        out["hdd_used_mb"] = used_total
+    elif volume_free is not None and volume_total:
+        out["hdd_capacity_mb"] = capacity_total or float(volume_total)
+        out["hdd_free_mb"] = float(volume_free)
+        out["hdd_used_mb"] = max(0.0, float(volume_total) - float(volume_free))
+    else:
+        out["hdd_capacity_mb"] = capacity_total
+
+    out["hdd_list"] = hdds
+    out["hdd_count"] = len(hdds)
+    if errors:
+        out["hdd_status"] = "error"
+    elif sleeps and not fulls and warns == sleeps:
+        out["hdd_status"] = "sleep"
+    elif fulls and fulls == warns:
+        out["hdd_status"] = "full"
+    elif warns:
+        out["hdd_status"] = "warning"
+    else:
+        out["hdd_status"] = "ok"
+    out["hdd_errors"] = errors
+    out["storage_ok"] = True
+    return out
+
+
 def probe_hikvision_isapi(
     ip: str,
     *,
@@ -1408,49 +2585,10 @@ def probe_hikvision_isapi(
         )
     )
 
-    code, body = _http_get(
-        ip,
-        "/ISAPI/ContentMgmt/Storage",
-        username=username,
-        password=password,
-        port=http_port,
+    storage = fetch_hikvision_storage(
+        ip, username=username, password=password, http_port=http_port
     )
-    if code == 200 and body:
-        try:
-            root = ET.fromstring(body)
-            hdds = []
-            capacity_total = free_total = used_total = 0.0
-            errors = 0
-            for hdd in root.iter():
-                if _tag(hdd).lower() != "hdd":
-                    continue
-                status = _find_text(hdd, "status", "hddStatus") or "unknown"
-                cap = _safe_float(_find_text(hdd, "capacity", "hddCapacity")) or 0.0
-                free = _safe_float(_find_text(hdd, "freeSpace", "hddFreeSpace")) or 0.0
-                capacity_total += cap
-                free_total += free
-                used = max(0.0, cap - free)
-                used_total += used
-                if status.lower() not in ("ok", "normal", "good", ""):
-                    errors += 1
-                hdds.append(
-                    {
-                        "status": status,
-                        "capacity_mb": cap,
-                        "free_mb": free,
-                        "used_mb": used,
-                    }
-                )
-            if hdds:
-                metrics["hdd_list"] = hdds
-                metrics["hdd_status"] = "error" if errors else "ok"
-                metrics["hdd_capacity_mb"] = capacity_total
-                metrics["hdd_free_mb"] = free_total
-                metrics["hdd_used_mb"] = used_total
-                metrics["hdd_errors"] = errors
-                metrics["storage_ok"] = True
-        except ET.ParseError:
-            metrics["storage_ok"] = False
+    metrics.update(storage)
 
     net = fetch_hikvision_network(
         ip, username=username, password=password, http_port=http_port
@@ -1781,20 +2919,50 @@ def enrich_nvr_metrics(device) -> dict[str, Any]:
     """
     from .models import DeviceStatus
 
+    # Drop stale probe fields so a new poll cannot keep wrong Full/down/Unknown values
+    _stale_keys = {
+        "channels",
+        "channels_online",
+        "channels_offline",
+        "channels_video_loss",
+        "channels_recording",
+        "channels_total",
+        "nvr_logs",
+        "hdd_list",
+        "hdd_status",
+        "hdd_count",
+        "hdd_capacity_mb",
+        "hdd_free_mb",
+        "hdd_used_mb",
+        "hdd_errors",
+        "storage_ok",
+        "storage_free_source",
+        "health",
+        "network_interface_status",
+        "network_link_speed",
+        "network_duplex",
+        "network_addressing",
+        "network_mac",
+        "network_ok",
+        "network_rx",
+        "network_tx",
+        "network_errors",
+        "nvr_status",
+        "system_state",
+        "cpu_percent",
+        "memory_percent",
+        "memory_used",
+        "memory_available",
+        "memory_total",
+        "temperature_c",
+        "uptime",
+        "uptime_seconds",
+        "uptime_raw",
+    }
     metrics: dict[str, Any] = {
         k: v
         for k, v in (device.last_metrics or {}).items()
-        # Drop stale TekEye-camera channel caches when re-enriching
-        if k
-        not in (
-            "channels",
-            "channels_online",
-            "channels_offline",
-            "channels_video_loss",
-            "channels_recording",
-            "channels_total",
-            "nvr_logs",
-        )
+        if k not in _stale_keys
     }
     ip = (device.ip_address or "").strip() if device.ip_address else ""
     username = (device.username or "").strip()
@@ -1863,13 +3031,32 @@ def enrich_nvr_metrics(device) -> dict[str, Any]:
         metrics["nvr_logs_persist_error"] = str(exc)[:200]
         metrics["nvr_logs"] = []
 
+    # Always refresh from live device status (never keep stale "Unknown")
     if device.status == DeviceStatus.ONLINE:
-        metrics.setdefault("nvr_status", "Online")
+        metrics["nvr_status"] = "Online"
     elif device.status == DeviceStatus.OFFLINE:
         metrics["nvr_status"] = "Offline"
     else:
-        metrics.setdefault("nvr_status", device.get_status_display())
-    metrics.setdefault("system_state", metrics.get("nvr_status", "unknown"))
+        metrics["nvr_status"] = device.get_status_display() or "Unknown"
+    if not metrics.get("system_state") or str(metrics.get("system_state")).lower() in (
+        "unknown",
+        "",
+    ):
+        metrics["system_state"] = "normal" if device.status == DeviceStatus.ONLINE else metrics["nvr_status"]
+
+    # Reachable NVR cannot report hard-down NIC
+    if device.status == DeviceStatus.ONLINE and str(
+        metrics.get("network_interface_status") or ""
+    ).lower() in ("down", "disconnect", "disconnected", "error", "fault"):
+        metrics["network_interface_status"] = "up"
+
+    # Normalize HDD rows + persist health scorecard for list/detail UIs
+    if isinstance(metrics.get("hdd_list"), list):
+        metrics["hdd_list"] = normalize_hdd_list(metrics["hdd_list"])
+        metrics["hdd_count"] = len(metrics["hdd_list"])
+    metrics["health"] = compute_nvr_health(
+        metrics, device_status=str(device.status or metrics.get("nvr_status") or "")
+    )
 
     return metrics
 
@@ -1890,17 +3077,6 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
         logs = m.get("nvr_logs") if isinstance(m.get("nvr_logs"), list) else []
     if not logs and isinstance(m.get("nvr_logs"), list):
         logs = m["nvr_logs"]
-
-    def mb_to_display(mb: Any) -> str | None:
-        try:
-            v = float(mb)
-        except (TypeError, ValueError):
-            return None
-        if v >= 1024 * 1024:
-            return f"{v / (1024 * 1024):.2f} TB"
-        if v >= 1024:
-            return f"{v / 1024:.2f} GB"
-        return f"{v:.0f} MB"
 
     uptime = _format_uptime(m.get("uptime_seconds"), m.get("uptime_raw") or m.get("uptime"))
     if not uptime:
@@ -1942,6 +3118,71 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
     )
     not_reported = "Not reported by NVR"
 
+    hdd_list = normalize_hdd_list(m.get("hdd_list") if isinstance(m.get("hdd_list"), list) else [])
+    # Sanitize stale wrong signals before scoring (online NVR ≠ NIC down / Unknown)
+    iface = str(m.get("network_interface_status") or "").lower().strip()
+    if device.status == "online" and iface in (
+        "down",
+        "disconnect",
+        "disconnected",
+        "error",
+        "fault",
+        "static",
+        "dhcp",
+        "dynamic",
+    ):
+        iface = "up"
+    elif iface in ("static", "dhcp", "dynamic", ""):
+        iface = "up" if device.status == "online" else ""
+    nvr_status = status_label if device.status == "online" else (m.get("nvr_status") or status_label)
+    if str(nvr_status).lower() in ("unknown", ""):
+        nvr_status = status_label
+    system_state = m.get("system_state") or "—"
+    if str(system_state).lower() in ("unknown", "static", "dhcp"):
+        system_state = "normal" if device.status == "online" else system_state
+
+    health_metrics = {
+        **m,
+        "hdd_list": hdd_list,
+        "channels": channels,
+        "network_interface_status": iface or m.get("network_interface_status"),
+        "nvr_status": nvr_status,
+        "device_info_ok": m.get("device_info_ok") or device.status == "online",
+        "network_ok": m.get("network_ok") or device.status == "online",
+    }
+    health = compute_nvr_health(health_metrics, device_status=str(device.status or ""))
+
+    # Aggregate HDD status — prefer exact NVR wording when uniform
+    hdd_status = m.get("hdd_status") or "—"
+    if hdd_list:
+        crit = sum(1 for h in hdd_list if h.get("level") == "critical")
+        full = sum(1 for h in hdd_list if h.get("health_label") == "Full")
+        sleep = sum(1 for h in hdd_list if h.get("health_label") == "Sleep")
+        warn = sum(1 for h in hdd_list if h.get("level") == "warning")
+        if crit:
+            hdd_status = "error"
+        elif sleep and sleep == warn and not full:
+            hdd_status = "sleep"
+        elif full and full == warn:
+            hdd_status = "full"
+        elif warn:
+            hdd_status = "warning"
+        else:
+            hdd_status = "ok"
+
+    cameras_nvr_id = resolve_cameras_nvr_id(device)
+    # Enrich channel rows with logical channel for live preview / snapshot
+    ch_items = list(channels.get("items") or [])
+    for it in ch_items:
+        raw_ch = it.get("channel") if it.get("channel") not in (None, "") else it.get("id")
+        try:
+            logical = int(str(raw_ch).strip())
+        except (TypeError, ValueError):
+            logical = None
+        if logical is not None:
+            it["channel"] = logical
+            it["preview_channel"] = logical if logical < 100 else max(1, logical // 100)
+
     return {
         "id": device.id,
         "name": device.name,
@@ -1950,10 +3191,14 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
         "ip_address": device.ip_address,
         "manufacturer": device.manufacturer,
         "model_number": device.model_number,
+        "install_location": getattr(device, "install_location", "") or "",
+        "source_key": getattr(device, "source_key", "") or "",
+        "cameras_nvr_id": cameras_nvr_id,
         "last_polled_at": device.last_polled_at.isoformat() if device.last_polled_at else None,
         "last_error": device.last_error,
         "channels_source": m.get("channels_source") or channels.get("source") or "nvr",
         "vendor_probe_error": m.get("vendor_probe_error") or m.get("channels_error") or "",
+        "health": health,
         "device_information": {
             "model": m.get("device_model") or device.model_number or device.manufacturer or "—",
             "firmware": m.get("firmware_version") or "—",
@@ -1965,8 +3210,8 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
             or "—",
         },
         "system_health": {
-            "nvr_status": m.get("nvr_status") or status_label,
-            "system_state": m.get("system_state") or "—",
+            "nvr_status": nvr_status,
+            "system_state": system_state,
             "cpu_usage": cpu,
             "cpu_display": (
                 f"{cpu:.1f}%" if cpu is not None else (not_reported if system_probed else "—")
@@ -1984,22 +3229,26 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
             "uptime": uptime,
         },
         "storage_health": {
-            "hdd_status": m.get("hdd_status") or "—",
-            "hdd_capacity": mb_to_display(m.get("hdd_capacity_mb"))
-            or m.get("hdd_capacity")
-            or "—",
-            "used_space": mb_to_display(m.get("hdd_used_mb")) or m.get("hdd_used") or "—",
-            "free_space": mb_to_display(m.get("hdd_free_mb")) or m.get("hdd_free") or "—",
+            "hdd_status": hdd_status,
+            "hdd_capacity": _mb_to_display(m.get("hdd_capacity_mb"))
+            if m.get("hdd_capacity_mb") not in (None, "", 0, 0.0)
+            else (m.get("hdd_capacity") or "—"),
+            "used_space": (
+                _mb_to_display(m.get("hdd_used_mb"))
+                if m.get("hdd_used_mb") not in (None, "")
+                else (m.get("hdd_used") or "—")
+            ),
+            "free_space": (
+                _mb_to_display(m.get("hdd_free_mb"))
+                if m.get("hdd_free_mb") not in (None, "")
+                else (m.get("hdd_free") or "—")
+            ),
             "disk_errors": m.get("hdd_errors") if m.get("hdd_errors") is not None else "—",
-            "hdd_list": m.get("hdd_list") or [],
+            "hdd_count": len(hdd_list),
+            "hdd_list": hdd_list,
         },
         "network_health": {
-            "interface_status": (
-                m.get("network_interface_status")
-                if m.get("network_interface_status")
-                not in (None, "", "static", "dhcp", "dynamic")
-                else ("up" if device.status == "online" else "—")
-            ),
+            "interface_status": iface or ("up" if device.status == "online" else "—"),
             "link_speed": (
                 m.get("network_link_speed")
                 if m.get("network_link_speed") not in (None, "", "0", 0)
@@ -2017,7 +3266,7 @@ def build_nvr_detail_payload(device) -> dict[str, Any]:
             "recording_status": m.get("recording_status") or "—",
             "recording_alarms": m.get("recording_alarms") or m.get("alarms") or "—",
         },
-        "camera_channels": channels,
+        "camera_channels": {**channels, "items": ch_items},
         "nvr_logs": logs,
         "nvr_logs_count": len(logs),
         "alarms": {
