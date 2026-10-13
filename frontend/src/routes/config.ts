@@ -91,6 +91,9 @@ export const ROUTES = {
   OPS_CAMERA_DISTRIBUTION: "/ops-central/distribution",
   /** All connected Central Ops servers — live city camera wall */
   ALL_CITIES_CAMERAS: "/all-cities-cameras",
+  /** Peshawar HQ — multi-city City Control Grid (same admin layout) */
+  CITY_CONTROL_GRID: "/city-control-grid",
+  CITY_CONTROL_SUMMARY: "/city-control-grid/:cityId",
   PERSON_JOURNEY: "/person-journey",
   ASSISTANT: "/assistant",
   PERSON_JOURNEY_DETAIL: "/person-journey/:uuid",
@@ -455,6 +458,7 @@ export interface NavGroup {
  */
 const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
   { label: "Dashboard", href: ROUTES.DASHBOARD },
+  { label: "City Control Grid", href: ROUTES.CITY_CONTROL_GRID },
   {
     label: "Visitor Management",
     overviewHref: ROUTES.VISITOR_MANAGEMENT_OVERVIEW,
@@ -761,20 +765,20 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
 
 /** Sidebar navigation sections: each has a title and list of groups or items */
 export const NAV_SECTIONS: { title: string; items: (NavItem | NavGroup)[] }[] = [
-  { title: "Main Menu", items: ALL_NAV_ITEMS.slice(0, 1) },
-  { title: "Management System", items: ALL_NAV_ITEMS.slice(1, 8) },
-  { title: "Reports and Monitoring", items: ALL_NAV_ITEMS.slice(8, 9) },
-  { title: "Support", items: ALL_NAV_ITEMS.slice(9, 10) },
-  { title: "System", items: ALL_NAV_ITEMS.slice(10, 11) },
+  { title: "Main Menu", items: ALL_NAV_ITEMS.slice(0, 2) },
+  { title: "Management System", items: ALL_NAV_ITEMS.slice(2, 9) },
+  { title: "Reports and Monitoring", items: ALL_NAV_ITEMS.slice(9, 10) },
+  { title: "Support", items: ALL_NAV_ITEMS.slice(10, 11) },
+  { title: "System", items: ALL_NAV_ITEMS.slice(11, 12) },
 ]
 
 export type NavSection = { title: string; items: (NavItem | NavGroup)[] }
 
-const VISITOR_MANAGEMENT_NAV = ALL_NAV_ITEMS[1] as NavGroup
-const WAREHOUSE_MANAGEMENT_NAV = ALL_NAV_ITEMS[2] as NavGroup
-const SEIZURE_MANAGEMENT_NAV = ALL_NAV_ITEMS[3] as NavGroup
-const HUMAN_RESOURCE_NAV = ALL_NAV_ITEMS[4] as NavGroup
-const AUCTION_MANAGEMENT_NAV = ALL_NAV_ITEMS[7] as NavGroup
+const VISITOR_MANAGEMENT_NAV = ALL_NAV_ITEMS[2] as NavGroup
+const WAREHOUSE_MANAGEMENT_NAV = ALL_NAV_ITEMS[3] as NavGroup
+const SEIZURE_MANAGEMENT_NAV = ALL_NAV_ITEMS[4] as NavGroup
+const HUMAN_RESOURCE_NAV = ALL_NAV_ITEMS[5] as NavGroup
+const AUCTION_MANAGEMENT_NAV = ALL_NAV_ITEMS[8] as NavGroup
 
 /** IT Super Admin only — not part of Super Admin sidebar. */
 const INFRASTRUCTURE_MONITORING_NAV: NavGroup = {
@@ -1087,6 +1091,7 @@ export function getNavSectionsForRole(
         title: "Central Ops",
         items: [
           { label: "Central Ops", href: ROUTES.OPS_CENTRAL },
+          { label: "City Control Grid", href: ROUTES.CITY_CONTROL_GRID },
           { label: "ML Servers", href: ROUTES.OPS_ML_SERVERS },
           { label: "Camera Distribution", href: ROUTES.OPS_CAMERA_DISTRIBUTION },
           { label: "All Cities Cameras", href: ROUTES.ALL_CITIES_CAMERAS },
@@ -1174,6 +1179,7 @@ export function getModuleLabelForPath(
     ["/employees", "Human Resource"],
     ["/recruitment", "Human Resource"],
     ["/requests-support", "Requests & Support"],
+    ["/city-control-grid", "AI Monitoring & Analytics"],
   ]
   for (const [prefix, label] of PREFIX_MODULES) {
     if (path === prefix || path.startsWith(`${prefix}/`)) return label

@@ -520,6 +520,8 @@ export function isPathAllowedForRole(
       path.startsWith(`${ROUTES.OPS_CENTRAL}/`) ||
       path === ROUTES.ALL_CITIES_CAMERAS ||
       path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`) ||
+      path === ROUTES.CITY_CONTROL_GRID ||
+      path.startsWith(`${ROUTES.CITY_CONTROL_GRID}/`) ||
       path === ROUTES.INFRASTRUCTURE_OVERVIEW ||
       path.startsWith(`${ROUTES.INFRASTRUCTURE_OVERVIEW}/`) ||
       path === ROUTES.SUPPORT_DASHBOARD ||
@@ -551,7 +553,9 @@ export function isPathAllowedForRole(
     const path = normalizePathname(pathname)
     if (
       path === ROUTES.ALL_CITIES_CAMERAS ||
-      path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`)
+      path.startsWith(`${ROUTES.ALL_CITIES_CAMERAS}/`) ||
+      path === ROUTES.CITY_CONTROL_GRID ||
+      path.startsWith(`${ROUTES.CITY_CONTROL_GRID}/`)
     ) {
       return true
     }

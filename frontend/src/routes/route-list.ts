@@ -149,6 +149,8 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: "ops-central/ml-servers", page: "OpsMlServers" },
   { path: "ops-central/distribution", page: "OpsCameraDistribution" },
   { path: toChildPath(ROUTES.ALL_CITIES_CAMERAS), page: "AllCitiesCameras" },
+  { path: toChildPath(ROUTES.CITY_CONTROL_GRID), page: "CityControlGridPage" },
+  { path: "city-control-grid/:cityId", page: "CityControlSummaryPage" },
   { path: toChildPath(ROUTES.ASSISTANT), page: "Assistant" },
   { path: toChildPath(ROUTES.PERSON_JOURNEY), page: "PersonJourney" },
   { path: "person-journey/:uuid", page: "PersonJourneyDetail" },

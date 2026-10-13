@@ -260,6 +260,10 @@ export const PAGE_LOADERS = {
     import("@/pages/support/SupportCreateRequest").then((m) => ({ default: m.default })),
   SupportRequestDetail: () =>
     import("@/pages/support/SupportRequestDetail").then((m) => ({ default: m.default })),
+  CityControlGridPage: () =>
+    import("@/pages/operations/CityControlGridPage").then((m) => ({ default: m.default })),
+  CityControlSummaryPage: () =>
+    import("@/pages/operations/CityControlSummaryPage").then((m) => ({ default: m.default })),
 } as const satisfies Record<string, PageLoader>
 
 function toLazyPages<T extends Record<string, PageLoader>>(loaders: T) {

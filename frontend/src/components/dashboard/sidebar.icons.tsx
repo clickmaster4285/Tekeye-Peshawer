@@ -70,6 +70,7 @@ const PRIMARY_MENU_ICONS: Record<string, SidebarIconComponent> = {
   "Human Resource Management System": Users,
   "System Configuration": Cog,
   "Central Ops": Server,
+  "City Control Grid": LayoutGrid,
   "GPS Tracking": MapPin,
 }
 
