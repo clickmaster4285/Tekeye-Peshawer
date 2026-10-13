@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import {
   ArrowRight,
@@ -28,9 +28,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { CityStatusMap } from "@/components/city-control/CityStatusMap"
 import {
-  CITY_CONTROL_ALERTS,
-  CITY_CONTROL_KPIS,
-  CITY_CONTROL_ROWS,
+  fetchCityControlGridLive,
+  zeroCityControlKpis,
+  type CityControlAlert,
+  type CityControlKpi,
   type CityControlRow,
   type CityStatus,
   type Connectivity,
@@ -91,15 +92,41 @@ export default function CityControlGridPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [rows, setRows] = useState<CityControlRow[]>([])
+  const [kpis, setKpis] = useState<CityControlKpi[]>(() => zeroCityControlKpis())
+  const [alerts, setAlerts] = useState<CityControlAlert[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const ac = new AbortController()
+    setLoading(true)
+    fetchCityControlGridLive({ signal: ac.signal })
+      .then((live) => {
+        if (ac.signal.aborted) return
+        setRows(live.rows)
+        setKpis(live.kpis)
+        setAlerts(live.alerts)
+      })
+      .catch(() => {
+        if (ac.signal.aborted) return
+        setRows([])
+        setKpis(zeroCityControlKpis())
+        setAlerts([])
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false)
+      })
+    return () => ac.abort()
+  }, [])
 
   const cities = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return CITY_CONTROL_ROWS.filter((c) => {
+    return rows.filter((c) => {
       if (statusFilter !== "all" && c.status !== statusFilter) return false
       if (!q) return true
       return c.city.toLowerCase().includes(q)
     })
-  }, [query, statusFilter])
+  }, [query, rows, statusFilter])
 
   const openCity = (city: CityControlRow) => {
     navigate(`${ROUTES.CITY_CONTROL_GRID}/${city.id}`)
@@ -147,7 +174,7 @@ export default function CityControlGridPage() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-        {CITY_CONTROL_KPIS.map((kpi) => {
+        {kpis.map((kpi) => {
           const tone = KPI_TONE[kpi.tone]
           const Icon = tone.Icon
           return (
@@ -322,7 +349,7 @@ export default function CityControlGridPage() {
               {cities.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-4 py-10 text-center text-sm text-[#607DA5]">
-                    No cities match your filters.
+                    {loading ? "Loading live city data…" : "No cities match your filters."}
                   </td>
                 </tr>
               ) : null}
@@ -333,7 +360,7 @@ export default function CityControlGridPage() {
 
       {/* Bottom panels */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <CityStatusMap tall className="min-h-[420px] xl:min-h-full" />
+        <CityStatusMap tall className="min-h-[420px] xl:min-h-full" rows={rows} />
 
         {/* Alerts */}
         <div className="flex min-h-[300px] flex-col overflow-hidden rounded-[10px] border border-[#D9E6F5] bg-white shadow-[0_1px_2px_rgba(16,44,85,0.04)]">
@@ -347,34 +374,40 @@ export default function CityControlGridPage() {
             </Link>
           </div>
           <ul className="flex-1 divide-y divide-[#E8F0FA]">
-            {CITY_CONTROL_ALERTS.map((alert) => {
-              const badge =
-                alert.severity === "Info"
-                  ? "border-[#BFE8D4] bg-[#E8F8F1] text-[#12A66A]"
-                  : alert.severity === "Medium"
-                    ? "border-[#FFE0B8] bg-[#FFF4E8] text-[#D97706]"
-                    : "border-[#F7C9CD] bg-[#FFECEE] text-[#FF4D59]"
-              return (
-                <li key={alert.id} className="flex items-start gap-3 px-4 py-2.5">
-                  <span className="w-10 shrink-0 pt-0.5 text-[11px] font-semibold tabular-nums text-[#607DA5]">
-                    {alert.time}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-semibold leading-snug text-[#102C55]">
-                      {alert.city} – {alert.title}
-                    </p>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                      badge
-                    )}
-                  >
-                    {alert.severity}
-                  </span>
-                </li>
-              )
-            })}
+            {alerts.length === 0 ? (
+              <li className="px-4 py-8 text-center text-[13px] text-[#607DA5]">
+                {loading ? "Loading alerts…" : "No recent alerts."}
+              </li>
+            ) : (
+              alerts.map((alert) => {
+                const badge =
+                  alert.severity === "Info"
+                    ? "border-[#BFE8D4] bg-[#E8F8F1] text-[#12A66A]"
+                    : alert.severity === "Medium"
+                      ? "border-[#FFE0B8] bg-[#FFF4E8] text-[#D97706]"
+                      : "border-[#F7C9CD] bg-[#FFECEE] text-[#FF4D59]"
+                return (
+                  <li key={alert.id} className="flex items-start gap-3 px-4 py-2.5">
+                    <span className="w-10 shrink-0 pt-0.5 text-[11px] font-semibold tabular-nums text-[#607DA5]">
+                      {alert.time}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-semibold leading-snug text-[#102C55]">
+                        {alert.city} – {alert.title}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                        badge
+                      )}
+                    >
+                      {alert.severity}
+                    </span>
+                  </li>
+                )
+              })
+            )}
           </ul>
         </div>
 

@@ -1,3 +1,13 @@
+import {
+  fetchInfraAlerts,
+  fetchInfraDevices,
+  type InfraDevice,
+} from "@/lib/infrastructure-api"
+import {
+  fetchCityControlBoard,
+  type CityControlBoardCity,
+} from "@/lib/ops-central-api"
+
 export type CityStatus = "Online" | "Offline" | "Degraded"
 export type AlertSeverity = "High" | "Critical" | "Medium" | "Info"
 export type Connectivity = "Good" | "Limited" | "No Signal"
@@ -6,6 +16,7 @@ export type CityControlRow = {
   id: string
   rank: number
   city: string
+  locationCode?: string
   isHq?: boolean
   status: CityStatus
   camerasOnline: number
@@ -235,65 +246,234 @@ export type CityDetailExtras = {
   opsBars: { day: string; seizures: number; detentions: number }[]
 }
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const
 
-function scaleTrend(base: number) {
-  return DAYS.map((day, i) => {
-    const f = 0.55 + ((i * 17 + base) % 40) / 100
-    return {
-      day,
-      people: Math.round(base * 0.12 * f),
-      vehicles: Math.round(base * 0.09 * f),
-      weapons: Math.max(0, Math.round(base * 0.015 * f)),
-      plates: Math.round(base * 0.07 * f),
-    }
-  })
+function emptyTrend(): CityDetailExtras["trend"] {
+  const out: CityDetailExtras["trend"] = []
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    out.push({ day: DAY_LABELS[d.getDay()], people: 0, vehicles: 0, weapons: 0, plates: 0 })
+  }
+  return out
 }
 
-function scaleOps(seizures: number, detentions: number) {
-  return DAYS.map((day, i) => ({
-    day,
-    seizures: Math.max(0, Math.round((seizures / 7) * (0.6 + (i % 4) * 0.2))),
-    detentions: Math.max(0, Math.round((detentions / 7) * (0.5 + (i % 3) * 0.25))),
-  }))
+function emptyOpsBars(): CityDetailExtras["opsBars"] {
+  const out: CityDetailExtras["opsBars"] = []
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    out.push({ day: DAY_LABELS[d.getDay()], seizures: 0, detentions: 0 })
+  }
+  return out
 }
 
-const DETECTION_TEMPLATES: CityRecentDetection[] = [
-  { time: "16:03", type: "Weapon", object: "Knife", camera: "Cam 12" },
-  { time: "15:47", type: "License Plate", object: "LES-4521", camera: "Cam 03" },
-  { time: "15:22", type: "Person", object: "Unrecognized", camera: "Cam 07" },
-  { time: "14:58", type: "Vehicle", object: "SUV", camera: "Cam 01" },
-  { time: "14:11", type: "License Plate", object: "BXV-742", camera: "Cam 09" },
-]
-
+/** Fallback extras when live detail is unavailable — zeros only, no mock samples. */
 export function getCityDetailExtras(city: CityControlRow): CityDetailExtras {
-  const offline = city.camerasTotal - city.camerasOnline
   const disconnected = city.status === "Offline"
   const degraded = city.status === "Degraded"
+  const offlineCams = Math.max(0, city.camerasTotal - city.camerasOnline)
 
   return {
-    staffOnline: disconnected ? 0 : Math.max(1, Math.round(city.camerasOnline / 12)),
-    staffTotal: Math.max(3, Math.round(city.camerasTotal / 12)),
-    nvrsOnline: disconnected ? 0 : degraded ? 2 : Math.max(1, Math.ceil(city.camerasOnline / 15)),
-    nvrsTotal: Math.max(2, Math.ceil(city.camerasTotal / 15)),
+    staffOnline: 0,
+    staffTotal: 0,
+    nvrsOnline: 0,
+    nvrsTotal: 0,
     aiService: disconnected ? "Down" : degraded ? "Degraded" : "Healthy",
     apiConnection: disconnected ? "Disconnected" : degraded ? "Intermittent" : "Connected",
-    uptime: disconnected ? "—" : degraded ? "94.2%" : "99.7%",
+    uptime: disconnected ? "—" : "—",
     infraHealth: disconnected ? "Critical" : degraded ? "Degraded" : "Good",
-    infraOnline: disconnected ? 0 : degraded ? 3 : 4,
-    infraTotal: 5,
-    infraIssues: disconnected ? 5 : degraded ? 2 : offline > 0 ? 1 : 0,
-    aiDelta: disconnected ? "0%" : "12%",
-    seizureDelta: disconnected ? "0%" : "8%",
-    detentionDelta: disconnected ? "0%" : "5%",
-    lastSyncFull: `${city.lastSync} PKT`,
-    detections: disconnected
-      ? []
-      : DETECTION_TEMPLATES.map((d, i) => ({
-          ...d,
-          camera: `Cam ${String(((city.rank + i) % 12) + 1).padStart(2, "0")}`,
-        })),
-    trend: scaleTrend(Math.max(20, city.aiDetections24h)),
-    opsBars: scaleOps(city.seizures30d, city.detentions30d),
+    infraOnline: city.camerasOnline > 0 ? 1 : 0,
+    infraTotal: 1,
+    infraIssues: offlineCams > 0 || disconnected ? 1 : 0,
+    aiDelta: "—",
+    seizureDelta: "—",
+    detentionDelta: "—",
+    lastSyncFull: city.lastSync !== "—" ? `${city.lastSync} PKT` : "—",
+    detections: [],
+    trend: emptyTrend(),
+    opsBars: emptyOpsBars(),
   }
+}
+
+/** ——— Live City Control Grid ——— */
+
+function slugifyCityId(code: string): string {
+  return code
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+}
+
+function normalizeLocKey(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[\s-]+/g, "_")
+}
+
+function deviceMatchesCity(device: InfraDevice, locKey: string, cityName: string): boolean {
+  const code = normalizeLocKey(device.site_code || "")
+  const name = (device.site_name || "").toLowerCase()
+  const install = (device.install_location || "").toLowerCase()
+  const city = cityName.toLowerCase()
+  return (
+    code === locKey ||
+    name.includes(city) ||
+    install.includes(city) ||
+    code.includes(locKey) ||
+    locKey.includes(code)
+  )
+}
+
+export type CityControlGridLive = {
+  rows: CityControlRow[]
+  kpis: CityControlKpi[]
+  alerts: CityControlAlert[]
+  extrasById: Record<string, CityDetailExtras>
+}
+
+export function zeroCityControlKpis(): CityControlKpi[] {
+  return [
+    { id: "cameras", label: "Total Cameras", value: "0", support: "Across all cities", tone: "blue" },
+    {
+      id: "ai",
+      label: "AI Detections (24h)",
+      value: "0",
+      support: "People · Vehicles · Weapons · Plates",
+      tone: "purple",
+    },
+    { id: "seizures", label: "Seizures (30d)", value: "0", support: "All cities combined", tone: "red" },
+    { id: "detentions", label: "Detentions (30d)", value: "0", support: "All cities combined", tone: "orange" },
+    { id: "online", label: "Online Cities", value: "0 / 0", support: "0 offline | 0 degraded", tone: "green" },
+  ]
+}
+
+/** Short in-memory cache so grid ↔ summary navigation does not re-hit every API. */
+let cityControlLiveCache: { at: number; data: CityControlGridLive } | null = null
+const CITY_CONTROL_CACHE_MS = 45_000
+
+function mapBoardCity(city: CityControlBoardCity): CityControlRow {
+  const status = (["Online", "Offline", "Degraded"].includes(city.status)
+    ? city.status
+    : "Offline") as CityStatus
+  const connectivity = (["Good", "Limited", "No Signal"].includes(city.connectivity)
+    ? city.connectivity
+    : "No Signal") as Connectivity
+  return {
+    id: city.id || slugifyCityId(city.location_code || city.city),
+    locationCode: city.location_code || normalizeLocKey(city.city),
+    rank: city.rank || 0,
+    city: city.city,
+    isHq: Boolean(city.is_hq),
+    status,
+    camerasOnline: city.cameras_online || 0,
+    camerasTotal: city.cameras_total || 0,
+    aiDetections24h: city.ai_detections_24h || 0,
+    seizures30d: city.seizures_30d || 0,
+    detentions30d: city.detentions_30d || 0,
+    lastSync: city.last_sync || "—",
+    lastSyncRelative: city.last_sync_relative || "No sync",
+    connectivity,
+    bars: city.bars || { cameras: 0, ai: 0, seizures: 0, detentions: 0 },
+  }
+}
+
+/**
+ * Federated City Control Grid.
+ * Cameras + health from each registered city server; seizures / detentions / staff / AI
+ * from that city's Django DB when connected in django mode.
+ */
+export async function fetchCityControlGridLive(opts?: {
+  signal?: AbortSignal
+  includeExtras?: boolean
+  force?: boolean
+}): Promise<CityControlGridLive> {
+  const includeExtras = Boolean(opts?.includeExtras)
+  if (
+    !opts?.force &&
+    cityControlLiveCache &&
+    Date.now() - cityControlLiveCache.at < CITY_CONTROL_CACHE_MS &&
+    (!includeExtras || Object.keys(cityControlLiveCache.data.extrasById).length > 0)
+  ) {
+    return cityControlLiveCache.data
+  }
+
+  const board = await fetchCityControlBoard({ signal: opts?.signal }).catch(() => null)
+  if (opts?.signal?.aborted) {
+    return { rows: [], kpis: zeroCityControlKpis(), alerts: [], extrasById: {} }
+  }
+
+  if (!board) {
+    return { rows: [], kpis: zeroCityControlKpis(), alerts: [], extrasById: {} }
+  }
+
+  const rows = (board.cities || []).map(mapBoardCity)
+  const kpis: CityControlKpi[] = (board.kpis || []).map((k) => ({
+    id: k.id,
+    label: k.label,
+    value: k.value,
+    support: k.support,
+    tone: (["blue", "purple", "red", "orange", "green"].includes(k.tone)
+      ? k.tone
+      : "blue") as CityControlKpi["tone"],
+    delta: k.delta,
+  }))
+  const alerts: CityControlAlert[] = (board.alerts || []).map((a) => ({
+    id: a.id,
+    time: a.time,
+    city: a.city,
+    title: a.title,
+    severity: (["High", "Critical", "Medium", "Info"].includes(a.severity)
+      ? a.severity
+      : "Info") as AlertSeverity,
+  }))
+
+  const extrasById: Record<string, CityDetailExtras> = {}
+
+  if (includeExtras) {
+    const [infraDevices] = await Promise.all([
+      fetchInfraDevices().catch(() => [] as InfraDevice[]),
+      fetchInfraAlerts({ resolved: false }).catch(() => []),
+    ])
+
+    for (const city of board.cities || []) {
+      const row = mapBoardCity(city)
+      const locKey = row.locationCode || normalizeLocKey(row.city)
+      const devices = infraDevices.filter((d) => deviceMatchesCity(d, locKey, row.city))
+      const nvrs = devices.filter((d) => d.device_type === "nvr")
+      const nvrsOnline = nvrs.filter((d) => d.status === "online").length
+      const onlineDevices = devices.filter((d) => d.status === "online").length
+      const issueDevices = devices.filter(
+        (d) => d.status !== "online" && d.status !== "maintenance"
+      ).length
+
+      let infraHealth: CityDetailExtras["infraHealth"] = "Good"
+      if (row.status === "Offline" || (devices.length > 0 && onlineDevices === 0)) {
+        infraHealth = "Critical"
+      } else if (row.status === "Degraded" || issueDevices > 0) {
+        infraHealth = "Degraded"
+      }
+
+      const base = getCityDetailExtras(row)
+      extrasById[row.id] = {
+        ...base,
+        staffOnline: city.staff_online ?? 0,
+        staffTotal: city.staff_total ?? 0,
+        nvrsOnline,
+        nvrsTotal: nvrs.length,
+        infraHealth,
+        infraOnline: devices.length ? onlineDevices : row.camerasOnline > 0 ? 1 : 0,
+        infraTotal: devices.length || 1,
+        infraIssues: issueDevices || Math.max(0, row.camerasTotal - row.camerasOnline),
+      }
+    }
+  }
+
+  const result: CityControlGridLive = {
+    rows,
+    kpis: kpis.length ? kpis : zeroCityControlKpis(),
+    alerts,
+    extrasById,
+  }
+  cityControlLiveCache = { at: Date.now(), data: result }
+  return result
 }

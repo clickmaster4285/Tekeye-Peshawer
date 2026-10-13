@@ -21,26 +21,64 @@ from recognition.services.snapshot_saver import save_detection_snapshot, snapsho
 
 logger = logging.getLogger(__name__)
 
+MIN_FACE_PX = 40
 MIN_DET_SCORE = 0.55
 UPSCALE_BELOW_PX = 110
 UPSCALE_FACTOR = 2.5
-SMALL_FACE_CONFIRM_WINDOW_SEC = 20.0
+
+# Faces are tracked from MIN_FACE_PX but only matched once they pass these gates.
+BEST_EMBEDDINGS_PER_TRACK = 5
+VOTE_WINDOW = 6
+MIN_VOTE_AGREEMENT = 0.6
+# Below this cosine vs. the track's own history, the box now holds a different person.
+IDENTITY_SWITCH_SIMILARITY = 0.25
+DARK_FRAME_MEAN = 80.0
+SNAPSHOT_RETRY_SECONDS = 300.0
 
 
-def _min_face_px() -> int:
-    return max(16, int(getattr(settings, "ATTENDANCE_CCTV_MIN_FACE_PX", 24)))
+def _min_recog_face_px() -> int:
+    return max(MIN_FACE_PX, int(getattr(settings, "ATTENDANCE_CCTV_MIN_RECOG_FACE_PX", 80)))
 
 
-def _small_face_px() -> int:
-    return max(0, int(getattr(settings, "ATTENDANCE_CCTV_SMALL_FACE_PX", 40)))
+def _max_yaw() -> float:
+    return float(getattr(settings, "ATTENDANCE_CCTV_MAX_YAW", 60.0))
 
 
-def _small_face_confirmations() -> int:
-    return max(1, int(getattr(settings, "ATTENDANCE_CCTV_SMALL_FACE_CONFIRMATIONS", 2)))
+def _max_pitch() -> float:
+    return float(getattr(settings, "ATTENDANCE_CCTV_MAX_PITCH", 55.0))
 
 
-def _fullres_detect() -> bool:
-    return bool(getattr(settings, "ATTENDANCE_CCTV_FULLRES_DETECT", True))
+def _detect_width() -> int:
+    return max(320, int(getattr(settings, "ATTENDANCE_CCTV_DETECT_WIDTH", 1280)))
+
+
+def _min_blur() -> float:
+    return float(getattr(settings, "ATTENDANCE_CCTV_MIN_BLUR", 20.0))
+
+
+def _scan_interval() -> float:
+    return max(0.1, float(getattr(settings, "ATTENDANCE_CCTV_SCAN_INTERVAL", 0.5)))
+
+
+def _det_size_for(image_side: int) -> int | None:
+    """Detector input for CCTV: up to ATTENDANCE_CCTV_DET_SIZE, never above the image, multiple of 32."""
+    configured = int(getattr(settings, "ATTENDANCE_CCTV_DET_SIZE", 1280))
+    side = min(configured, int(image_side))
+    side -= side % 32
+    return side if side > 640 else None
+
+
+def _unit(vector) -> np.ndarray | None:
+    arr = np.asarray(vector, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(arr))
+    return arr / norm if norm > 0 else None
+
+
+def _face_yaw_pitch(face) -> tuple[float, float]:
+    from recognition.services.pose import face_yaw_pitch
+
+    yaw, pitch = face_yaw_pitch(face)
+    return abs(yaw), abs(pitch)
 
 
 def _match_cooldown() -> int:
@@ -48,23 +86,53 @@ def _match_cooldown() -> int:
 
 
 def _cctv_infer_max_width() -> int:
-    return max(0, int(getattr(settings, "ATTENDANCE_CCTV_INFER_WIDTH", 1920)))
+    return max(0, int(getattr(settings, "ATTENDANCE_VIDEO_WIDTH", 3840)))
 
 
-def _camera_has_ml_server(camera_id: int) -> bool:
-    """True when the shared ML Camera Session can serve frames for this camera."""
-    from cameras.models import Camera
-    from ml.client import camera_ml_base_url, ml_service_enabled
+def _cctv_frame_source() -> str:
+    """snapshot (camera JPEG at full resolution), shared (ML Camera Session) or rtsp (own OpenCV decode)."""
+    raw = str(getattr(settings, "ATTENDANCE_CCTV_FRAME_SOURCE", "snapshot")).strip().lower()
+    if raw in ("snapshot", "isapi"):
+        return "snapshot"
+    return "shared" if _cctv_use_shared_session() else "rtsp"
 
-    if not ml_service_enabled():
-        return False
-    camera = Camera.objects.filter(pk=camera_id).select_related("nvr", "ml_server").first()
-    if camera is None:
-        return False
+
+def _snapshot_http(rtsp_url: str):
+    """HTTP session + Hikvision ISAPI picture URL for the RTSP channel, or (None, reason)."""
+    import re
+    from urllib.parse import unquote, urlsplit
+
+    import requests
+    from requests.auth import HTTPDigestAuth
+
+    parts = urlsplit(rtsp_url or "")
+    channel = re.search(r"/Channels/(\d+)", parts.path, re.IGNORECASE)
+    if not parts.hostname or not channel:
+        return None, "RTSP URL has no Hikvision channel"
+    width = max(640, int(getattr(settings, "ATTENDANCE_CCTV_SNAPSHOT_WIDTH", 3840)))
+    # The device returns its largest picture up to this size (4K cameras: 4K, NVR channels: 1080p).
+    url = (
+        f"http://{parts.hostname}/ISAPI/Streaming/channels/{channel.group(1)}/picture"
+        f"?videoResolutionWidth={width}&videoResolutionHeight={width * 9 // 16}"
+    )
+    session = requests.Session()
+    session.auth = HTTPDigestAuth(unquote(parts.username or ""), unquote(parts.password or ""))
+    return (session, url), ""
+
+
+def _fetch_snapshot_frame(http) -> tuple[np.ndarray | None, str]:
+    """One full-resolution JPEG from the camera: no stream to decode between scans."""
+    import requests
+
+    session, url = http
     try:
-        return bool(camera_ml_base_url(camera))
-    except Exception:
-        return False
+        resp = session.get(url, timeout=(2.0, 6.0))
+    except requests.RequestException as exc:
+        return None, f"Snapshot failed: {exc}"
+    if resp.status_code != 200 or not resp.content:
+        return None, f"Snapshot HTTP {resp.status_code}"
+    frame = _decode_jpeg_bgr(resp.content)
+    return (frame, "") if frame is not None else (None, "Snapshot JPEG decode failed")
 
 
 def _cctv_use_shared_session() -> bool:
@@ -181,8 +249,7 @@ class CCTVWorkerManager:
     def __init__(self):
         self._lock = threading.Lock()
         self._cameras: dict[int, CameraRuntimeState] = {}
-        self._scan_interval = 1.5
-        self._frame_skip = 8
+        self._scan_interval = _scan_interval()
 
     def list_status(self) -> list[dict]:
         with self._lock:
@@ -362,6 +429,285 @@ class CCTVWorkerManager:
             return face.embedding, (face_w, face_h)
         return best.embedding, (face_w, face_h)
 
+    def _recognition_quality(self, frame, face, face_w: int, face_h: int) -> float | None:
+        """Quality score for a crop, or None when it is too small, turned, blurry or badly exposed to match."""
+        from recognition.services.quality_checker import FaceQualityChecker
+
+        if min(face_w, face_h) < _min_recog_face_px():
+            return None
+        yaw, pitch = _face_yaw_pitch(face)
+        if yaw > _max_yaw() or pitch > _max_pitch():
+            return None
+        height, width = frame.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in face.bbox]
+        crop = frame[max(0, y1):min(height, y2), max(0, x1):min(width, x2)]
+        if crop.size == 0:
+            return None
+        blur = FaceQualityChecker.laplacian_blur_score(crop)
+        if blur < _min_blur():
+            return None
+        exposure = float(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).mean())
+        if exposure < 25.0 or exposure > 235.0:
+            return None
+        det_score = float(getattr(face, "det_score", 0.0))
+        return (
+            det_score
+            * min(1.0, min(face_w, face_h) / 160.0)
+            * float(np.cos(np.radians(yaw)))
+            * min(1.0, blur / 150.0)
+        )
+
+    @staticmethod
+    def _keep_best(track, quality: float, unit_embedding: np.ndarray) -> None:
+        track.best_embeddings.append((quality, unit_embedding))
+        track.best_embeddings.sort(key=lambda item: item[0], reverse=True)
+        del track.best_embeddings[BEST_EMBEDDINGS_PER_TRACK:]
+
+    @staticmethod
+    def _tally_votes(track, pooled_key: str | None) -> tuple[int, bool]:
+        """(votes agreeing with the pooled identity, whether they are a clear majority of identified votes)."""
+        if not pooled_key:
+            return 0, False
+        identified = [key for key, _ in track.votes if key]
+        agree = sum(1 for key in identified if key == pooled_key)
+        majority = bool(identified) and agree / len(identified) >= MIN_VOTE_AGREEMENT
+        return agree, majority
+
+    def _process_tracked_faces(self, state, engine, tracker, frame_infer, faces, now, cooldown, camera_zone):
+        """Match every frame of a track; punch only when repeated good-quality matches agree."""
+        from recognition.models import FaceSample
+        from recognition.services.face_samples import crop_face, save_sample
+        from recognition.services.match_confirm import CONFIRM_CCTV
+        from recognition.services.reviews import enqueue_match_review, record_spoof, record_unknown
+        from users.attendance_service import AttendanceDecisionEngine
+        from users.models import Attendance, Staff
+
+        usable = []
+        dets = []
+        for face in faces:
+            det_score = float(getattr(face, "det_score", 0.0))
+            face_w, face_h = self._face_bbox_size(face)
+            if det_score < 0.30 or face_w < MIN_FACE_PX or face_h < MIN_FACE_PX:
+                continue
+            bbox = [float(v) for v in face.bbox]
+            usable.append(face)
+            dets.append([bbox[0], bbox[1], bbox[2], bbox[3], det_score])
+
+        tracks = tracker.update(np.array(dets, dtype=np.float32) if dets else np.zeros((0, 5), dtype=np.float32))
+        for track in tracks:
+            if track.det_index is None or track.det_index >= len(usable):
+                continue
+            face = usable[track.det_index]
+            bbox = getattr(face, "bbox", None)
+            face_w, face_h = self._face_bbox_size(face)
+
+            # Small, turned or blurry crops keep the track alive but never vote.
+            quality = self._recognition_quality(frame_infer, face, face_w, face_h)
+            if quality is None:
+                continue
+
+            live = engine.check_liveness(frame_infer, face, source="cctv")
+            if not live.get("passed", True) and not live.get("skipped"):
+                record_spoof(
+                    source="cctv",
+                    camera_id=state.camera_id,
+                    message=live.get("message") or "Spoof",
+                )
+                track.votes.append((None, 0.0))
+                del track.votes[:-VOTE_WINDOW]
+                state.last_events.appendleft({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "camera_id": state.camera_id,
+                    "camera_name": state.name,
+                    "matched": False,
+                    "staff_id": None,
+                    "confidence": 0.0,
+                    "message": live.get("message") or "Spoof detected",
+                    "track_id": track.track_id,
+                    "face_size": f"{face_w}x{face_h}",
+                })
+                continue
+
+            embedding, (face_w, face_h) = self._refine_embedding(engine, frame_infer, face)
+            if embedding is None:
+                continue
+            unit = _unit(embedding)
+            if unit is None:
+                continue
+
+            # The IoU tracker can hand a box to the next person through the door.
+            anchor = track.anchor_embedding()
+            if anchor is not None and float(anchor @ unit) < IDENTITY_SWITCH_SIMILARITY:
+                logger.info(
+                    "Camera %s track %s: face changed (sim %.2f) — identity reset",
+                    state.camera_id,
+                    track.track_id,
+                    float(anchor @ unit),
+                )
+                track.reset_identity()
+
+            self._keep_best(track, quality, unit)
+            best_crop = track.extra.get("best_crop")
+            if best_crop is None or quality > best_crop[0]:
+                track.extra["best_crop"] = (quality, crop_face(frame_infer, bbox))
+            frame_match = engine.match_probe(unit, source="cctv")
+            track.votes.append((frame_match.get("gallery_key"), float(frame_match.get("confidence") or 0.0)))
+            del track.votes[:-VOTE_WINDOW]
+
+            # Identity comes from the mean of the track's best crops, not from a single frame.
+            pooled = engine.match_probe(track.anchor_embedding(), source="cctv")
+            gallery_key = pooled.get("gallery_key")
+            confidence = float(pooled.get("confidence") or 0.0)
+            agree, majority = self._tally_votes(track, gallery_key)
+
+            if not gallery_key:
+                track.staff_id = None
+                track.identity_confidence = 0.0
+                if len(track.votes) < CONFIRM_CCTV or track.review_queued:
+                    continue
+                track.review_queued = True
+                if pooled.get("ambiguous") or pooled.get("soft_miss"):
+                    enqueue_match_review(
+                        confidence=confidence,
+                        source="cctv",
+                        camera_id=state.camera_id,
+                        message="Ambiguous match" if pooled.get("ambiguous") else "Soft miss",
+                    )
+                    # HR can say who this was; that teaches the gallery and labels calibration data.
+                    save_sample(
+                        kind=FaceSample.KIND_UNMATCHED,
+                        camera_id=state.camera_id,
+                        crop=track.extra["best_crop"][1],
+                        embedding=track.anchor_embedding(),
+                        suggested_key=pooled.get("best_key"),
+                        confidence=confidence,
+                        quality=track.extra["best_crop"][0],
+                    )
+                    message = "Ambiguous face — not marked" if pooled.get("ambiguous") else "Possible match held for review"
+                else:
+                    record_unknown(
+                        confidence=confidence,
+                        source="cctv",
+                        camera_id=state.camera_id,
+                        message="Unknown face",
+                    )
+                    message = "Unknown face"
+                if confidence >= 0.28 or pooled.get("ambiguous") or pooled.get("soft_miss"):
+                    state.last_events.appendleft({
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "camera_id": state.camera_id,
+                        "camera_name": state.name,
+                        "matched": False,
+                        "staff_id": None,
+                        "confidence": round(confidence, 4),
+                        "message": message,
+                        "track_id": track.track_id,
+                        "face_size": f"{face_w}x{face_h}",
+                        "hits": track.hits,
+                    })
+                continue
+
+            staff_id = int(str(gallery_key).replace("staff-", ""))
+            track.staff_id = staff_id
+            track.identity_confidence = confidence
+            event = {
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "camera_id": state.camera_id,
+                "camera_name": state.name,
+                "matched": True,
+                "staff_id": staff_id,
+                "gallery_key": gallery_key,
+                "confidence": round(confidence, 4),
+                "message": f"Track #{track.track_id} identified",
+                "face_size": f"{face_w}x{face_h}",
+                "track_id": track.track_id,
+                "hits": track.hits,
+                "votes": agree,
+            }
+            if agree < CONFIRM_CCTV or not majority:
+                event["message"] = f"Tracking #{track.track_id} ({min(agree, CONFIRM_CCTV)}/{CONFIRM_CCTV})"
+                event["attendance"] = {
+                    "action": "pending",
+                    "message": (
+                        f"Confirming ({min(agree, CONFIRM_CCTV)}/{CONFIRM_CCTV})"
+                        if majority
+                        else "Frames disagree on identity — not marked"
+                    ),
+                    "status": "",
+                }
+                state.last_events.appendleft(event)
+                continue
+            if track.attendance_written:
+                state.last_events.appendleft(event)
+                continue
+
+            last_match = state.match_cooldown.get(gallery_key, 0.0)
+            if now - last_match < cooldown:
+                event["message"] = f"Track #{track.track_id} (cooldown)"
+                event["attendance"] = {
+                    "action": "ignored",
+                    "message": "Duplicate recognition within cooldown",
+                    "status": "",
+                }
+                state.last_events.appendleft(event)
+                continue
+
+            state.match_cooldown[gallery_key] = now
+            close_old_connections()
+            staff = Staff.objects.filter(pk=staff_id).select_related("user").first()
+            if not staff:
+                release_db()
+                continue
+            decision = AttendanceDecisionEngine.process_recognition(
+                staff=staff,
+                confidence=confidence,
+                source=Attendance.SOURCE_CCTV,
+                camera_zone=camera_zone,
+            )
+            track.attendance_written = True
+            event["attendance"] = {
+                "action": decision["action"],
+                "message": decision["message"],
+                "status": decision["record"].status if decision["record"] else "",
+            }
+            snapshot = save_detection_snapshot(
+                staff=staff,
+                camera_id=state.camera_id,
+                camera_name=state.name,
+                frame=frame_infer,
+                confidence=confidence,
+                attendance_action=decision["action"],
+                attendance_record=(
+                    decision["record"]
+                    if decision["action"] in ("check_in", "check_out")
+                    else None
+                ),
+                bbox=bbox.tolist() if bbox is not None else None,
+            )
+            if snapshot:
+                event["snapshot"] = snapshot_to_dict(snapshot)
+                event["message"] = f"Detected on {state.name or 'Camera'}"
+            _emit_attendance_realtime(throttle_sec=1.0)
+            logger.info(
+                "Camera %s track %s: staff-%s -> %s (%.2f)",
+                state.camera_id,
+                track.track_id,
+                staff_id,
+                decision["action"],
+                confidence,
+            )
+            release_db()
+            save_sample(
+                kind=FaceSample.KIND_PUNCH,
+                camera_id=state.camera_id,
+                crop=track.extra["best_crop"][1],
+                embedding=track.anchor_embedding(),
+                suggested_key=gallery_key,
+                confidence=confidence,
+                quality=track.extra["best_crop"][0],
+            )
+            state.last_events.appendleft(event)
+
     def _run_camera(
         self,
         state: CameraRuntimeState,
@@ -369,9 +715,6 @@ class CCTVWorkerManager:
         start_delay: float = 0.0,
         stream_key: str = "",
     ):
-        from users.attendance_service import AttendanceDecisionEngine
-        from users.models import Attendance, Staff
-
         if start_delay > 0:
             state.last_error = f"Waiting {start_delay:.0f}s before connect…"
             if state.stop_event.wait(start_delay):
@@ -379,6 +722,21 @@ class CCTVWorkerManager:
                 return
 
         engine = get_face_engine()
+        from recognition.services.byte_tracker import BYTETracker
+        from recognition.services.gallery_index import get_gallery_index
+        from recognition.services.preprocess import apply_clahe_bgr
+        from users.attendance_service import camera_attendance_zone
+
+        tracker = BYTETracker()
+        camera_zone = "mixed"
+        try:
+            from cameras.models import Camera
+
+            close_old_connections()
+            cam = Camera.objects.filter(pk=state.camera_id).only("zone", "passage_role").first()
+            camera_zone = camera_attendance_zone(cam)
+        finally:
+            release_db()
         gallery_refresh_at = 0.0
         gallery: dict[str, list[float]] = {}
         gallery_warned = False
@@ -387,33 +745,52 @@ class CCTVWorkerManager:
         reconnect_delay = 5
         cooldown = _match_cooldown()
         last_infer_at = 0.0
-        use_shared = _cctv_use_shared_session()
-        if use_shared and getattr(settings, "ATTENDANCE_CCTV_RTSP_FALLBACK", True):
-            close_old_connections()
-            try:
-                if not _camera_has_ml_server(state.camera_id):
-                    # No ML node assigned → shared session can never serve frames.
-                    use_shared = False
-            finally:
-                release_db()
+        source = _cctv_frame_source()
+        use_snapshot = source == "snapshot"
+        # Snapshot cameras fall back to the shared ML session if the device has no ISAPI pictures.
+        use_shared = source in ("snapshot", "shared")
+        snapshot_http = None
+        snapshot_failures = 0
+        snapshot_retry_at = 0.0
+        if use_snapshot:
+            snapshot_http, reason = _snapshot_http(rtsp_url)
+            if snapshot_http is None:
+                use_snapshot = False
+                logger.info("Camera %s: no snapshots (%s), using shared session", state.camera_id, reason)
         key = (stream_key or f"cam-{state.camera_id}").strip()
-        small_face_hits: dict[str, deque] = {}
-        min_face_px = _min_face_px()
-        small_face_px = _small_face_px()
-        small_face_needed = _small_face_confirmations()
-        fullres = _fullres_detect()
 
         logger.info(
             "Starting CCTV attendance worker for camera %s (%s) frame_source=%s",
             state.camera_id,
             state.name,
-            "shared-session" if use_shared else "rtsp",
+            "snapshot" if use_snapshot else "shared-session" if use_shared else "rtsp",
         )
 
         while not state.stop_event.is_set():
             try:
                 frame = None
-                if use_shared:
+                if snapshot_http is not None and not use_snapshot and time.time() >= snapshot_retry_at:
+                    # Devices answer 503 while busy; try full-resolution snapshots again after a while.
+                    use_snapshot, snapshot_failures = True, 0
+                if use_snapshot:
+                    frame, err = _fetch_snapshot_frame(snapshot_http)
+                    if frame is not None:
+                        snapshot_failures = 0
+                    else:
+                        snapshot_failures += 1
+                        if snapshot_failures < 3:
+                            state.connected = False
+                            state.last_error = err
+                            time.sleep(reconnect_delay)
+                            continue
+                        use_snapshot = False
+                        snapshot_retry_at = time.time() + SNAPSHOT_RETRY_SECONDS
+                        logger.warning(
+                            "Camera %s: snapshots keep failing (%s), using shared session for 5 minutes",
+                            state.camera_id,
+                            err,
+                        )
+                if frame is None and use_shared:
                     close_old_connections()
                     frame, err = _fetch_shared_session_frame(state.camera_id, key, rtsp_url)
                     release_db()
@@ -422,7 +799,7 @@ class CCTVWorkerManager:
                         state.last_error = err or "Waiting for shared Camera Session…"
                         time.sleep(reconnect_delay)
                         continue
-                else:
+                elif frame is None:
                     if cap is None or not cap.isOpened():
                         if cap is not None:
                             cap.release()
@@ -439,17 +816,6 @@ class CCTVWorkerManager:
                         state.last_error = ""
                         logger.info("Camera %s connected (%s)", state.camera_id, info)
 
-                    # Between scans only grab (keeps the RTSP buffer drained
-                    # without colour-converting every frame).
-                    if time.time() - last_infer_at < self._scan_interval:
-                        if not cap.grab():
-                            state.connected = False
-                            state.last_error = "Frame grab failed — reconnecting"
-                            cap.release()
-                            cap = None
-                            time.sleep(reconnect_delay)
-                        continue
-
                     ok, frame = cap.read()
                     if not ok or frame is None:
                         state.connected = False
@@ -464,7 +830,7 @@ class CCTVWorkerManager:
                 state.last_frame_at = datetime.now().isoformat(timespec="seconds")
                 frame_index += 1
 
-                if not use_shared or frame_index % 3 == 0:
+                if frame_index % 3 == 0:
                     small = cv2.resize(frame, (640, 360))
                     ok_jpg, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok_jpg:
@@ -474,7 +840,7 @@ class CCTVWorkerManager:
                 # Legacy RTSP: drain continuously; only pace inference.
                 now = time.time()
                 if now - last_infer_at < self._scan_interval:
-                    if use_shared:
+                    if use_snapshot or use_shared:
                         time.sleep(min(0.2, self._scan_interval))
                     continue
                 last_infer_at = now
@@ -482,7 +848,7 @@ class CCTVWorkerManager:
 
                 maybe_pause_for_cpu(logger, label=f"cctv-{state.camera_id}")
                 if now - gallery_refresh_at > 30:
-                    gallery = self._shared_gallery()
+                    gallery = get_gallery_index()
                     gallery_refresh_at = now
                     state.gallery_size = len(gallery)
 
@@ -503,129 +869,26 @@ class CCTVWorkerManager:
 
                 gallery_warned = False
 
-                h, w = frame.shape[:2]
-                max_w = _cctv_infer_max_width()
-                if max_w <= 0 or w <= max_w:
-                    frame_infer = frame
-                else:
-                    scale = max_w / w
-                    frame_infer = cv2.resize(frame, (max_w, int(h * scale)))
-
-                if fullres:
-                    faces = engine.detect_faces_tiled(frame_infer)
-                else:
-                    faces = engine.detect_faces(frame_infer)
+                # Faces are found on a detect_width copy but measured on the full frame:
+                # a desk face 30px wide at 1280 is ~90px in a 4K snapshot.
+                frame_infer = frame
+                detect_width = _detect_width()
+                det_size = _det_size_for(min(max(frame.shape[:2]), detect_width))
+                faces = engine.detect_faces(frame_infer, det_size=det_size, detect_width=detect_width)
+                # CLAHE retry only helps dim scenes; on bright empty frames it just doubles the cost.
+                if not faces and float(cv2.cvtColor(frame_infer, cv2.COLOR_BGR2GRAY).mean()) < DARK_FRAME_MEAN:
+                    faces = engine.detect_faces(apply_clahe_bgr(frame_infer), det_size=det_size, detect_width=detect_width)
                 state.frames_processed += 1
-
-                for face in faces:
-                    det_score = float(getattr(face, "det_score", 0.0))
-                    if det_score < MIN_DET_SCORE:
-                        continue
-
-                    face_w, face_h = self._face_bbox_size(face)
-                    if face_w < min_face_px or face_h < min_face_px:
-                        continue
-
-                    embedding, (face_w, face_h) = self._refine_embedding(
-                        engine, frame_infer, face
-                    )
-                    gallery_key, confidence = engine.match_embedding(
-                        embedding,
-                        gallery,
-                        threshold=_cctv_threshold(),
-                    )
-                    staff_id = None
-                    if gallery_key and gallery_key.startswith("staff-"):
-                        try:
-                            staff_id = int(gallery_key.replace("staff-", ""))
-                        except ValueError:
-                            staff_id = None
-
-                    event = {
-                        "time": datetime.now().strftime("%H:%M:%S"),
-                        "camera_id": state.camera_id,
-                        "camera_name": state.name,
-                        "matched": gallery_key is not None,
-                        "staff_id": staff_id,
-                        "gallery_key": gallery_key,
-                        "confidence": round(confidence, 4),
-                        "message": "Face recognized" if gallery_key else "Unknown face",
-                        "face_size": f"{face_w}x{face_h}",
-                    }
-
-                    if gallery_key and staff_id:
-                        last_match = state.match_cooldown.get(gallery_key, 0.0)
-                        if now - last_match < cooldown:
-                            event["message"] = "Recognized (cooldown)"
-                            event["attendance"] = {
-                                "action": "ignored",
-                                "message": "Duplicate recognition within cooldown",
-                                "status": "",
-                            }
-                            state.last_events.appendleft(event)
-                            continue
-
-                        # Small/distant faces give noisier embeddings: require the
-                        # same match on repeated scans before marking attendance.
-                        if small_face_needed > 1 and min(face_w, face_h) < small_face_px:
-                            hits = small_face_hits.setdefault(gallery_key, deque(maxlen=10))
-                            hits.append(now)
-                            while hits and now - hits[0] > SMALL_FACE_CONFIRM_WINDOW_SEC:
-                                hits.popleft()
-                            if len(hits) < small_face_needed:
-                                event["message"] = (
-                                    f"Recognized (small face — confirming {len(hits)}/{small_face_needed})"
-                                )
-                                state.last_events.appendleft(event)
-                                continue
-                            hits.clear()
-
-                        state.match_cooldown[gallery_key] = now
-                        close_old_connections()
-                        staff = Staff.objects.filter(pk=staff_id).select_related("user").first()
-                        if staff:
-                            decision = AttendanceDecisionEngine.process_recognition(
-                                staff=staff,
-                                confidence=confidence,
-                                source=Attendance.SOURCE_CCTV,
-                            )
-                            event["attendance"] = {
-                                "action": decision["action"],
-                                "message": decision["message"],
-                                "status": decision["record"].status if decision["record"] else "",
-                            }
-                            bbox = getattr(face, "bbox", None)
-                            snapshot = save_detection_snapshot(
-                                staff=staff,
-                                camera_id=state.camera_id,
-                                camera_name=state.name,
-                                frame=frame_infer,
-                                confidence=confidence,
-                                attendance_action=decision["action"],
-                                attendance_record=(
-                                    decision["record"]
-                                    if decision["action"] in ("check_in", "check_out")
-                                    else None
-                                ),
-                                bbox=bbox.tolist() if bbox is not None else None,
-                            )
-                            if snapshot:
-                                event["snapshot"] = snapshot_to_dict(snapshot)
-                                event["message"] = (
-                                    f"Detected on {state.name or 'Camera'}"
-                                )
-                            _emit_attendance_realtime(throttle_sec=1.0)
-                            logger.info(
-                                "Camera %s: staff-%s -> %s (%.2f)",
-                                state.camera_id,
-                                staff_id,
-                                decision["action"],
-                                confidence,
-                            )
-                            release_db()
-
-                    if gallery_key or confidence >= 0.28:
-                        state.last_events.appendleft(event)
+                self._process_tracked_faces(
+                    state,
+                    engine,
+                    tracker,
+                    frame_infer,
+                    faces,
+                    now,
+                    cooldown,
+                    camera_zone,
+                )
 
             except Exception as exc:
                 logger.exception("Camera %s error: %s", state.camera_id, exc)

@@ -13,9 +13,10 @@ import { useCamera } from "@/hooks/useCamera"
 import { fetchStaff, type StaffRecord } from "@/lib/staff-api"
 import { recognitionApi, type FaceEnrollment } from "@/lib/recognition-api"
 import { ROUTES } from "@/routes/config"
+import { FaceSampleReview } from "./FaceSampleReview"
 import { cn } from "@/lib/utils"
 
-type StaffOption = {
+export type StaffOption = {
   value: string
   label: string
   staff: StaffRecord
@@ -204,7 +205,9 @@ export default function FaceEnrollmentPage() {
       setMessage(reason)
       return { ok: false, reason }
     }
-    setMessage(`Accepted (${result.total_images}/${result.images_required})`)
+    setMessage(
+      `Accepted (${result.total_images}/${result.images_required})${result.pose_hint ? ` · ${result.pose_hint}` : ""}`
+    )
     return { ok: true, reason: "Accepted" }
   }
 
@@ -303,6 +306,9 @@ export default function FaceEnrollmentPage() {
         title: "Face trained",
         description: `Embedding dim ${result.embedding_dim} from ${result.images_used} images`,
       })
+      for (const warning of result.warnings ?? []) {
+        toast({ title: "Add angled photos", description: warning })
+      }
     } catch (err) {
       toast({ title: "Training failed", description: String(err), variant: "destructive" })
     } finally {
@@ -410,6 +416,12 @@ export default function FaceEnrollmentPage() {
                   {enrollment?.is_trained ? "Trained" : "Not trained"}
                 </Badge>
               </div>
+              {enrollment?.pose_coverage && (
+                <p className="text-xs text-muted-foreground">
+                  Poses: front {enrollment.pose_coverage.front}/3 · one side {enrollment.pose_coverage.side_a}/1 · other
+                  side {enrollment.pose_coverage.side_b}/1
+                </p>
+              )}
               {message && <p className="text-sm text-muted-foreground">{message}</p>}
             </div>
 
@@ -570,6 +582,8 @@ export default function FaceEnrollmentPage() {
           </CardContent>
         </Card>
       </div>
+
+      <FaceSampleReview staffOptions={staffOptions} />
     </ModulePageLayout>
   )
 }

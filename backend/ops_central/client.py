@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urljoin
 
@@ -166,6 +167,167 @@ def fetch_remote_detection_events(
         "error": data.get("detail") if isinstance(data, dict) else f"HTTP {status}",
         "results": [],
         "count": 0,
+    }
+
+
+def _parse_remote_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        # Support trailing Z
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _within_last_ms(value: Any, ms: int) -> bool:
+    dt = _parse_remote_iso(value)
+    if dt is None:
+        return False
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_current_timezone())
+    age = (timezone.now() - dt).total_seconds() * 1000
+    return -60_000 <= age <= ms
+
+
+def fetch_remote_city_ops_stats(
+    base_url: str,
+    token: str,
+    *,
+    timeout: float = 8.0,
+) -> dict[str, Any]:
+    """
+    Pull city operational totals from a remote Tekeye Django API
+    (seizures / detentions / AI detections / staff).
+    """
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return {"ok": False, "error": "Django URL is required.", "source": "django"}
+
+    ms24h = 24 * 60 * 60 * 1000
+    ms30d = 30 * 24 * 60 * 60 * 1000
+    errors: list[str] = []
+    seizures_30d = 0
+    detentions_30d = 0
+    ai_24h = 0
+    staff_total = 0
+    staff_online = 0
+    recent_alerts: list[dict[str, Any]] = []
+
+    # Note sheets created in last 30 days (lightweight report endpoint).
+    try:
+        today = timezone.localdate()
+        date_from = (today - timedelta(days=29)).isoformat()
+        date_to = today.isoformat()
+        status, data = remote_get_json(
+            base,
+            "api/seizure-management/note-sheets/created-report/",
+            token,
+            params={"group": "day", "date_from": date_from, "date_to": date_to},
+            timeout=timeout,
+        )
+        if status == 200 and isinstance(data, dict):
+            series = data.get("series") or []
+            if isinstance(series, list):
+                seizures_30d = sum(int(row.get("count") or 0) for row in series if isinstance(row, dict))
+        else:
+            errors.append(f"note-sheets report HTTP {status}")
+    except requests.RequestException as exc:
+        errors.append(_friendly_conn_error(exc, base))
+
+    # Detention memos — list and count last 30d locally.
+    try:
+        status, data = remote_get_json(
+            base, "api/detention-memos/list/", token, timeout=timeout
+        )
+        if status == 200 and isinstance(data, list):
+            for memo in data:
+                if not isinstance(memo, dict):
+                    continue
+                when = memo.get("createdAt") or memo.get("dateTimeDetention")
+                if _within_last_ms(when, ms30d):
+                    detentions_30d += 1
+        elif status == 200 and isinstance(data, dict) and isinstance(data.get("results"), list):
+            for memo in data["results"]:
+                if not isinstance(memo, dict):
+                    continue
+                when = memo.get("createdAt") or memo.get("dateTimeDetention")
+                if _within_last_ms(when, ms30d):
+                    detentions_30d += 1
+        else:
+            errors.append(f"detention-memos HTTP {status}")
+    except requests.RequestException as exc:
+        errors.append(_friendly_conn_error(exc, base))
+
+    # AI detections (24h) — page of recent events.
+    try:
+        dets = fetch_remote_detection_events(base, token, page=1, page_size=100)
+        if dets.get("ok"):
+            for ev in dets.get("results") or []:
+                if not isinstance(ev, dict):
+                    continue
+                if _within_last_ms(ev.get("created_at"), ms24h):
+                    ai_24h += 1
+                class_name = f"{ev.get('class_name') or ''} {ev.get('label') or ''}".lower()
+                if ev.get("is_alert") or any(k in class_name for k in ("weapon", "knife", "gun")):
+                    if _within_last_ms(ev.get("created_at"), ms24h):
+                        recent_alerts.append(
+                            {
+                                "time": ev.get("created_at") or "",
+                                "title": f"AI detection: {ev.get('label') or ev.get('class_name') or 'alert'}",
+                                "severity": "High"
+                                if any(k in class_name for k in ("weapon", "knife", "gun"))
+                                else "Info",
+                            }
+                        )
+        else:
+            errors.append(str(dets.get("error") or "detections failed"))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(str(exc)[:200])
+
+    # Staff / users
+    try:
+        status, data = remote_get_json(base, "api/users/", token, timeout=timeout)
+        rows: list = []
+        if status == 200 and isinstance(data, list):
+            rows = data
+        elif status == 200 and isinstance(data, dict):
+            rows = data.get("results") if isinstance(data.get("results"), list) else []
+        else:
+            errors.append(f"users HTTP {status}")
+        for user in rows:
+            if not isinstance(user, dict):
+                continue
+            staff_total += 1
+            if user.get("is_active", True):
+                staff_online += 1
+    except requests.RequestException as exc:
+        errors.append(_friendly_conn_error(exc, base))
+
+    # Reachability: ok if we got at least one successful ops pull, or health probe works.
+    ok = seizures_30d > 0 or detentions_30d > 0 or ai_24h > 0 or staff_total > 0 or not errors
+    if not ok:
+        health = probe_health(base, token)
+        ok = bool(health.get("ok"))
+        if not ok and health.get("error"):
+            errors.append(str(health.get("error")))
+
+    return {
+        "ok": ok,
+        "source": "django",
+        "seizures_30d": seizures_30d,
+        "detentions_30d": detentions_30d,
+        "ai_detections_24h": ai_24h,
+        "staff_total": staff_total,
+        "staff_online": staff_online,
+        "recent_alerts": recent_alerts[:8],
+        "error": "; ".join(errors[:3]) if errors and not ok else "",
+        "errors": errors,
     }
 
 

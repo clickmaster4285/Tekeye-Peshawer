@@ -1,4 +1,4 @@
-import { CITY_CONTROL_ROWS, type CityStatus } from "@/data/city-control-grid-data"
+import { type CityControlRow, type CityStatus } from "@/data/city-control-grid-data"
 import { cn } from "@/lib/utils"
 
 const MAP_CSS = `
@@ -77,36 +77,47 @@ const LEGEND: CityStatus[] = ["Online", "Degraded", "Offline"]
 type CityStatusMapProps = {
   className?: string
   tall?: boolean
+  rows?: CityControlRow[]
 }
 
 function statusClass(status: CityStatus) {
   return status.toLowerCase()
 }
 
-export function CityStatusMap({ className, tall }: CityStatusMapProps) {
-  const byId = Object.fromEntries(CITY_CONTROL_ROWS.map((c) => [c.id, c]))
+export function CityStatusMap({ className, tall, rows = [] }: CityStatusMapProps) {
+  const byId = Object.fromEntries(rows.map((c) => [c.id, c]))
+  const byName = Object.fromEntries(rows.map((c) => [c.city.trim().toLowerCase(), c]))
 
-  const cities = MAP_CITIES.map((city) => ({
-    ...city,
-    status: (byId[city.id]?.status ?? "Online") as CityStatus,
-  }))
+  // Only plot cities that are actually present in live rows (Central Ops servers).
+  // Do NOT default missing sample cities to Online — that caused fake pins.
+  const cities = MAP_CITIES.flatMap((city) => {
+    const live = byId[city.id] ?? byName[city.name.trim().toLowerCase()]
+    if (!live) return []
+    return [{ ...city, name: live.city || city.name, status: live.status as CityStatus }]
+  })
 
-  const description = [
-    cities
-      .filter((c) => c.status === "Online")
-      .map((c) => c.name)
-      .join(", ") + " are online.",
-    cities
-      .filter((c) => c.status === "Degraded")
-      .map((c) => c.name)
-      .join(", ") + (cities.some((c) => c.status === "Degraded") ? " is degraded." : ""),
-    cities
-      .filter((c) => c.status === "Offline")
-      .map((c) => c.name)
-      .join(", ") + (cities.some((c) => c.status === "Offline") ? " is offline." : ""),
-  ]
-    .filter((s) => s && !s.startsWith(" are") && !s.startsWith(" is"))
-    .join(" ")
+  // Also plot connected servers that are not in the fixed MAP_CITIES layout
+  // (skip — they need coordinates; only known map slots are shown).
+
+  const description =
+    cities.length === 0
+      ? "No connected cities to display. Register servers in Central Ops."
+      : [
+          cities
+            .filter((c) => c.status === "Online")
+            .map((c) => c.name)
+            .join(", ") + (cities.some((c) => c.status === "Online") ? " are online." : ""),
+          cities
+            .filter((c) => c.status === "Degraded")
+            .map((c) => c.name)
+            .join(", ") + (cities.some((c) => c.status === "Degraded") ? " is degraded." : ""),
+          cities
+            .filter((c) => c.status === "Offline")
+            .map((c) => c.name)
+            .join(", ") + (cities.some((c) => c.status === "Offline") ? " is offline." : ""),
+        ]
+          .filter((s) => s && !s.startsWith(" are") && !s.startsWith(" is"))
+          .join(" ")
 
   return (
     <div
@@ -135,31 +146,37 @@ export function CityStatusMap({ className, tall }: CityStatusMapProps) {
               <path key={`boundary-${i}`} d={d} className="boundary" />
             ))}
 
-            {cities.map((city) => {
-              const state = statusClass(city.status)
-              return (
-                <g key={city.id}>
-                  <circle cx={city.x} cy={city.y} r={12} className={`${state} halo`} />
-                  <circle cx={city.x} cy={city.y} r={8} className={state} />
-                  <text
-                    x={city.tx}
-                    y={city.ty}
-                    textAnchor={city.anchor || "start"}
-                    className={`${city.major ? "major" : "city"}${state === "degraded" ? " degraded-label" : ""}`}
-                  >
-                    {city.name}
-                  </text>
-                  <text
-                    x={city.tx + (city.name === "Swat" ? 6 : 0)}
-                    y={city.ty + 24}
-                    textAnchor={city.anchor || "start"}
-                    className={`status ${state === "offline" ? "offline" : `${state}-label`}`}
-                  >
-                    {city.status}
-                  </text>
-                </g>
-              )
-            })}
+            {cities.length === 0 ? (
+              <text x={324} y={220} textAnchor="middle" className="legend">
+                No connected cities — add servers in Central Ops
+              </text>
+            ) : (
+              cities.map((city) => {
+                const state = statusClass(city.status)
+                return (
+                  <g key={city.id}>
+                    <circle cx={city.x} cy={city.y} r={12} className={`${state} halo`} />
+                    <circle cx={city.x} cy={city.y} r={8} className={state} />
+                    <text
+                      x={city.tx}
+                      y={city.ty}
+                      textAnchor={city.anchor || "start"}
+                      className={`${city.major ? "major" : "city"}${state === "degraded" ? " degraded-label" : ""}`}
+                    >
+                      {city.name}
+                    </text>
+                    <text
+                      x={city.tx + (city.name === "Swat" ? 6 : 0)}
+                      y={city.ty + 24}
+                      textAnchor={city.anchor || "start"}
+                      className={`status ${state === "offline" ? "offline" : `${state}-label`}`}
+                    >
+                      {city.status}
+                    </text>
+                  </g>
+                )
+              })
+            )}
 
             {LEGEND.map((label, i) => (
               <g key={label}>

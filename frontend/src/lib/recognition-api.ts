@@ -36,6 +36,28 @@ export type FaceEnrollment = {
   model_version: string
   dataset_folder: string
   profile_image: string | null
+  pose_coverage?: PoseCoverage
+  pose_hint?: string
+}
+
+/** Enrollment photos per head pose. Sides are not named left/right: webcam previews are mirrored. */
+export type PoseCoverage = { front: number; side_a: number; side_b: number }
+
+export type FaceSample = {
+  id: number
+  kind: "punch" | "unmatched"
+  status: "pending" | "approved" | "rejected"
+  staff_id: number | null
+  staff_name: string | null
+  suggested_staff_id: number | null
+  suggested_staff_name: string | null
+  camera_id: number | null
+  camera_name: string
+  image_url: string
+  confidence: number
+  quality: number
+  created_at: string
+  reviewed_at: string | null
 }
 
 export type CaptureResult = {
@@ -44,6 +66,8 @@ export type CaptureResult = {
   total_images?: number
   images_required?: number
   is_enrolled?: boolean
+  pose_coverage?: PoseCoverage
+  pose_hint?: string
 }
 
 export type IdentifyResult = {
@@ -141,7 +165,14 @@ export const recognitionApi = {
     }),
 
   train: (staffId: number) =>
-    apiJson<{ trained: boolean; embedding_dim: number; images_used: number; enrollment: FaceEnrollment }>(
+    apiJson<{
+      trained: boolean
+      embedding_dim: number
+      images_used: number
+      warnings?: string[]
+      pose_coverage?: PoseCoverage
+      enrollment: FaceEnrollment
+    }>(
       `/api/recognition/enroll/${staffId}/train/`,
       { method: "POST", body: "{}" }
     ),
@@ -163,6 +194,17 @@ export const recognitionApi = {
       trained: number
       ready_for_recognition: number
     }>(`/api/recognition/gallery/stats/`),
+
+  faceSamples: (status: FaceSample["status"] = "pending") =>
+    apiJson<{ results: FaceSample[]; pending_count: number }>(
+      `/api/recognition/samples/?status=${encodeURIComponent(status)}`
+    ),
+
+  reviewFaceSample: (sampleId: number, action: "approve" | "reject", staffId?: number) =>
+    apiJson<FaceSample>(`/api/recognition/samples/${sampleId}/review/`, {
+      method: "POST",
+      body: JSON.stringify(staffId ? { action, staff_id: staffId } : { action }),
+    }),
 
   cctvOverview: () => apiJson<CctvOverview>(`/api/recognition/cctv/`),
 

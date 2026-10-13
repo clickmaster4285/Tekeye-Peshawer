@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 import {
   Cable,
@@ -96,7 +96,7 @@ function OpsStreamTile({
               .join(" · ")}
           </p>
         </div>
-        <Badge className="absolute top-2 right-2 bg-emerald-600/90 text-white">ML</Badge>
+        <Badge className="absolute top-2 right-2 bg-emerald-600/90 text-white">Live</Badge>
         {onRemove ? (
           <Button
             type="button"
@@ -134,18 +134,31 @@ export default function OpsCentralPage() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
 
   const [qcName, setQcName] = useState("DI Khan")
+  const [qcMode, setQcMode] = useState<"django" | "ml">("django")
+  const [qcDjango, setQcDjango] = useState("192.168.199.12:8000")
   const [qcMl, setQcMl] = useState("192.168.199.12:8100")
+  const [qcLocation, setQcLocation] = useState("DI_KHAN")
 
   const [showAdd, setShowAdd] = useState(false)
   const [formName, setFormName] = useState("")
+  const [formMode, setFormMode] = useState<"django" | "ml">("django")
+  const [formDjango, setFormDjango] = useState("")
   const [formMl, setFormMl] = useState("")
+  const [formLocation, setFormLocation] = useState("")
   const [saving, setSaving] = useState(false)
   const [removingCameraKey, setRemovingCameraKey] = useState<string | null>(null)
+  /** Bumps when user deletes / cancels so in-flight connect timeouts cannot re-lock the UI. */
+  const connectGen = useRef(0)
 
   const selectedServer = useMemo(
     () => servers.find((s) => String(s.id) === selectedId) || null,
     [servers, selectedId]
   )
+
+  const cancelInFlightConnect = useCallback(() => {
+    connectGen.current += 1
+    setLoadingCameras(false)
+  }, [])
 
   const loadServers = useCallback(async () => {
     setLoadingServers(true)
@@ -153,7 +166,10 @@ export default function OpsCentralPage() {
     try {
       const list = await listRemoteServers()
       setServers(list)
-      setSelectedId((prev) => prev || (list.length > 0 ? String(list[0].id) : ""))
+      setSelectedId((prev) => {
+        if (prev && list.some((s) => String(s.id) === prev)) return prev
+        return list.length > 0 ? String(list[0].id) : ""
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load servers")
     } finally {
@@ -167,22 +183,26 @@ export default function OpsCentralPage() {
 
   const connectSaved = useCallback(
     async (id: number) => {
+      const gen = ++connectGen.current
       setLoadingCameras(true)
       setError(null)
       setStatusMsg(null)
       try {
         await testRemoteServer(id)
+        if (gen !== connectGen.current) return
         const result = await fetchServerCameras(id)
+        if (gen !== connectGen.current) return
         setCameras(result.cameras)
         setStatusMsg(
-          `Connected to ${result.server_name || "ML server"} — ${result.count} camera(s) on this node only`
+          `Connected to ${result.server_name || "city server"} — ${result.count} camera(s) on this node only`
         )
         await loadServers()
       } catch (e) {
+        if (gen !== connectGen.current) return
         setCameras([])
         setError(e instanceof Error ? e.message : "Connect failed")
       } finally {
-        setLoadingCameras(false)
+        if (gen === connectGen.current) setLoadingCameras(false)
       }
     },
     [loadServers]
@@ -198,37 +218,61 @@ export default function OpsCentralPage() {
   }, [isOpsAdmin, selectedId, connectSaved])
 
   const onQuickConnect = async () => {
-    if (!qcName.trim() || !qcMl.trim()) {
-      setError("Server name and ML server URL are required.")
+    if (!qcName.trim()) {
+      setError("Server name is required.")
       return
     }
+    if (qcMode === "django" && !qcDjango.trim()) {
+      setError("Django server URL is required (e.g. 192.168.x.x:8000).")
+      return
+    }
+    if (qcMode === "ml" && !qcMl.trim()) {
+      setError("ML server URL is required (e.g. 192.168.x.x:8100).")
+      return
+    }
+    const gen = ++connectGen.current
     setLoadingCameras(true)
     setError(null)
     setStatusMsg(null)
     try {
       const result = await quickConnect({
         name: qcName.trim(),
-        connection_mode: "ml",
-        ml_base_url: qcMl.trim(),
+        connection_mode: qcMode,
+        location_code: qcLocation.trim().toUpperCase(),
+        base_url: qcMode === "django" ? qcDjango.trim() : "",
+        ml_base_url: qcMl.trim() || undefined,
         save: true,
       })
+      if (gen !== connectGen.current) return
       setCameras(result.cameras)
       setStatusMsg(
-        `ML node “${result.server_name || qcName}” — ${result.count} camera(s) registered on this server only`
+        qcMode === "django"
+          ? `City Django “${result.server_name || qcName}” — ${result.count} camera(s); DB stats will feed City Control`
+          : `ML node “${result.server_name || qcName}” — ${result.count} camera(s) on this node only`
       )
       await loadServers()
+      if (gen !== connectGen.current) return
       if (result.server_id) setSelectedId(String(result.server_id))
     } catch (e) {
+      if (gen !== connectGen.current) return
       setCameras([])
       setError(e instanceof Error ? e.message : "Connect failed")
     } finally {
-      setLoadingCameras(false)
+      if (gen === connectGen.current) setLoadingCameras(false)
     }
   }
 
   const onSaveServer = async () => {
-    if (!formName.trim() || !formMl.trim()) {
-      setError("Server name and ML URL are required.")
+    if (!formName.trim()) {
+      setError("Server name is required.")
+      return
+    }
+    if (formMode === "django" && !formDjango.trim()) {
+      setError("Django server URL is required.")
+      return
+    }
+    if (formMode === "ml" && !formMl.trim()) {
+      setError("ML URL is required.")
       return
     }
     setSaving(true)
@@ -236,13 +280,18 @@ export default function OpsCentralPage() {
     try {
       const created = await createRemoteServer({
         name: formName.trim(),
-        connection_mode: "ml",
-        ml_base_url: formMl.trim(),
+        connection_mode: formMode,
+        location_code: formLocation.trim().toUpperCase(),
+        base_url: formMode === "django" ? formDjango.trim() : undefined,
+        ml_base_url: formMl.trim() || undefined,
         is_active: true,
       })
       setShowAdd(false)
       setFormName("")
+      setFormDjango("")
       setFormMl("")
+      setFormLocation("")
+      setFormMode("django")
       await loadServers()
       setSelectedId(String(created.id))
       await connectSaved(created.id)
@@ -254,8 +303,11 @@ export default function OpsCentralPage() {
   }
 
   const onDelete = async (id: number, name?: string) => {
-    const label = name ? `"${name}"` : "this ML server"
+    const label = name ? `"${name}"` : "this city server"
     if (!window.confirm(`Remove ${label} from Central Ops? Connected cameras will no longer appear.`)) return
+    // Stop any in-flight connect/timeout so Remove always feels responsive.
+    cancelInFlightConnect()
+    setError(null)
     try {
       await deleteRemoteServer(id)
       if (selectedId === String(id)) {
@@ -334,7 +386,7 @@ export default function OpsCentralPage() {
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowAdd((v) => !v)}>
             <Plus className="mr-1.5 h-4 w-4" />
-            {showAdd ? "Cancel" : "Add ML server"}
+            {showAdd ? "Cancel" : "Add city server"}
           </Button>
         </div>
       }
@@ -354,7 +406,7 @@ export default function OpsCentralPage() {
         {showAdd ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Add ML server</CardTitle>
+              <CardTitle className="text-base">Add city server</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -366,14 +418,55 @@ export default function OpsCentralPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>ML server URL</Label>
-                <Input
-                  value={formMl}
-                  onChange={(e) => setFormMl(e.target.value)}
-                  placeholder="192.168.199.12:8100"
-                />
-                <p className="text-xs text-muted-foreground">Port 8100 added if omitted.</p>
+                <Label>Mode</Label>
+                <Select value={formMode} onValueChange={(v) => setFormMode(v as "django" | "ml")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="django">Django (full city stack + DB)</SelectItem>
+                    <SelectItem value="ml">ML only (cameras / GPU)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Location code</Label>
+                <Input
+                  value={formLocation}
+                  onChange={(e) => setFormLocation(e.target.value)}
+                  placeholder="DI_KHAN"
+                />
+              </div>
+              {formMode === "django" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>Django URL</Label>
+                    <Input
+                      value={formDjango}
+                      onChange={(e) => setFormDjango(e.target.value)}
+                      placeholder="192.168.199.12:8000"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ML URL (optional)</Label>
+                    <Input
+                      value={formMl}
+                      onChange={(e) => setFormMl(e.target.value)}
+                      placeholder="192.168.199.12:8100"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Label>ML server URL</Label>
+                  <Input
+                    value={formMl}
+                    onChange={(e) => setFormMl(e.target.value)}
+                    placeholder="192.168.199.12:8100"
+                  />
+                  <p className="text-xs text-muted-foreground">Port 8100 added if omitted.</p>
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <Button onClick={() => void onSaveServer()} disabled={saving}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Server className="mr-2 h-4 w-4" />}
@@ -390,10 +483,22 @@ export default function OpsCentralPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Cable className="h-4 w-4" />
-                  Connect ML server
+                  Connect city server
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Mode</Label>
+                  <Select value={qcMode} onValueChange={(v) => setQcMode(v as "django" | "ml")}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="django">Django (city DB + cameras)</SelectItem>
+                      <SelectItem value="ml">ML only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Server name</Label>
                   <Input
@@ -403,31 +508,70 @@ export default function OpsCentralPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">ML server URL</Label>
+                  <Label className="text-xs">Location code</Label>
                   <Input
-                    value={qcMl}
-                    onChange={(e) => setQcMl(e.target.value)}
-                    placeholder="192.168.199.12:8100"
+                    value={qcLocation}
+                    onChange={(e) => setQcLocation(e.target.value)}
+                    placeholder="DI_KHAN"
                   />
-                  <p className="text-[11px] text-muted-foreground">
-                    ML only — cameras from this node’s /live/status.
-                  </p>
                 </div>
-                <Button className="w-full" onClick={() => void onQuickConnect()} disabled={loadingCameras}>
+                {qcMode === "django" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Django URL</Label>
+                      <Input
+                        value={qcDjango}
+                        onChange={(e) => setQcDjango(e.target.value)}
+                        placeholder="192.168.199.12:8000"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">ML URL (optional)</Label>
+                      <Input
+                        value={qcMl}
+                        onChange={(e) => setQcMl(e.target.value)}
+                        placeholder="192.168.199.12:8100"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Django mode reads that city’s DB for seizures / detentions / staff.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">ML server URL</Label>
+                    <Input
+                      value={qcMl}
+                      onChange={(e) => setQcMl(e.target.value)}
+                      placeholder="192.168.199.12:8100"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      ML only — cameras from this node’s /live/status.
+                    </p>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button className="flex-1" onClick={() => void onQuickConnect()} disabled={loadingCameras}>
+                    {loadingCameras ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Video className="mr-2 h-4 w-4" />
+                    )}
+                    Connect & show streams
+                  </Button>
                   {loadingCameras ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Video className="mr-2 h-4 w-4" />
-                  )}
-                  Connect & show streams
-                </Button>
+                    <Button type="button" variant="outline" onClick={cancelInFlightConnect}>
+                      Cancel
+                    </Button>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Saved ML servers</CardTitle>
+                  <CardTitle className="text-base">Saved city servers</CardTitle>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -440,7 +584,7 @@ export default function OpsCentralPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {servers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No ML servers yet.</p>
+                  <p className="text-sm text-muted-foreground">No city servers yet.</p>
                 ) : (
                   <>
                     <Select value={selectedId} onValueChange={setSelectedId}>
@@ -511,7 +655,9 @@ export default function OpsCentralPage() {
                             <WifiOff className="h-3.5 w-3.5 text-amber-600" />
                           )}
                           <span className="font-medium text-foreground">
-                            {selectedServer.ml_base_url || selectedServer.base_url}
+                            {selectedServer.connection_mode === "django"
+                              ? selectedServer.base_url || selectedServer.ml_base_url
+                              : selectedServer.ml_base_url || selectedServer.base_url}
                           </span>
                         </div>
                         {selectedServer.last_error ? (
@@ -532,6 +678,11 @@ export default function OpsCentralPage() {
                         )}
                         Fetch cameras
                       </Button>
+                      {loadingCameras ? (
+                        <Button type="button" variant="outline" onClick={cancelInFlightConnect}>
+                          Cancel
+                        </Button>
+                      ) : null}
                       <Button
                         variant="outline"
                         disabled={!selectedId}

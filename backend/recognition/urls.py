@@ -10,14 +10,18 @@ from recognition.dashboard_views import DailyReportView, DashboardSummaryView
 from recognition.views import (
     CaptureFaceView,
     EnrollmentStatusView,
+    FaceSampleListView,
+    FaceSampleReviewView,
     GalleryStatsView,
     IdentifyFaceView,
+    SelfiePunchView,
     TrainEmbeddingsView,
 )
 
 urlpatterns = [
     path("gallery/stats/", GalleryStatsView.as_view(), name="gallery-stats"),
     path("identify/", IdentifyFaceView.as_view(), name="identify-face"),
+    path("selfie/", SelfiePunchView.as_view(), name="selfie-punch"),
     path("cctv/", CCTVControlView.as_view(), name="cctv-control"),
     path("cctv/events/", CCTVEventsView.as_view(), name="cctv-events"),
     path(
@@ -25,6 +29,8 @@ urlpatterns = [
         CCTVCameraActionView.as_view(),
         name="cctv-camera-action",
     ),
+    path("samples/", FaceSampleListView.as_view(), name="face-samples"),
+    path("samples/<int:sample_id>/review/", FaceSampleReviewView.as_view(), name="face-sample-review"),
     path("detections/", DetectionSnapshotListView.as_view(), name="detection-snapshots"),
     path("enroll/<int:staff_id>/", EnrollmentStatusView.as_view(), name="enrollment-status"),
     path("enroll/<int:staff_id>/capture/", CaptureFaceView.as_view(), name="capture-face"),

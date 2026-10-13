@@ -345,6 +345,7 @@ export async function createRemoteServer(payload: RemoteServerWrite): Promise<Re
   } else {
     body.base_url = normalizeServerUrl(payload.base_url || "")
     body.ml_base_url = payload.ml_base_url ? normalizeMlUrl(payload.ml_base_url) : ""
+    if (payload.auth_token?.trim()) body.auth_token = payload.auth_token.trim()
   }
   const res = await fetch(`${API}/ops/servers/`, {
     method: "POST",
@@ -499,11 +500,81 @@ export async function fetchServerDetections(
   return { results: data.results || [], count: data.count || 0 }
 }
 
+export type CityControlBoardCity = {
+  id: string
+  location_code: string
+  city: string
+  is_hq?: boolean
+  rank?: number
+  status: "Online" | "Offline" | "Degraded" | string
+  connectivity: "Good" | "Limited" | "No Signal" | string
+  cameras_online: number
+  cameras_total: number
+  ai_detections_24h: number
+  seizures_30d: number
+  detentions_30d: number
+  staff_online?: number
+  staff_total?: number
+  last_sync: string
+  last_sync_relative: string
+  server_ids?: number[]
+  connection_modes?: string[]
+  ops_source?: string
+  error?: string
+  bars?: { cameras: number; ai: number; seizures: number; detentions: number }
+}
+
+export type CityControlBoard = {
+  ok: boolean
+  cities: CityControlBoardCity[]
+  kpis: Array<{
+    id: string
+    label: string
+    value: string
+    support: string
+    tone: "blue" | "purple" | "red" | "orange" | "green" | string
+    delta?: string
+  }>
+  alerts: Array<{
+    id: string
+    time: string
+    city: string
+    title: string
+    severity: "High" | "Critical" | "Medium" | "Info" | string
+  }>
+  server_count: number
+  city_count: number
+  generated_at?: string
+}
+
+/** Federated City Control Grid — cameras + each city's Django DB stats. */
+export async function fetchCityControlBoard(opts?: {
+  signal?: AbortSignal
+}): Promise<CityControlBoard> {
+  const res = await fetch(`${API}/ops/city-control/`, {
+    headers: getAuthHeaders(),
+    signal: opts?.signal,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to load city control board"))
+  return {
+    ok: Boolean(data.ok),
+    cities: data.cities || [],
+    kpis: data.kpis || [],
+    alerts: data.alerts || [],
+    server_count: data.server_count ?? 0,
+    city_count: data.city_count ?? (data.cities || []).length,
+    generated_at: data.generated_at,
+  }
+}
+
 export async function quickConnect(payload: {
   name?: string
   connection_mode?: "ml" | "django"
   base_url?: string
   ml_base_url?: string
+  auth_token?: string
+  location_code?: string
   save?: boolean
 }): Promise<{
   cameras: OpsCamera[]
@@ -519,6 +590,7 @@ export async function quickConnect(payload: {
     name: payload.name || "",
     connection_mode: mode,
     save: payload.save !== false,
+    location_code: payload.location_code || "",
   }
   if (mode === "ml") {
     body.ml_base_url = normalizeMlUrl(payload.ml_base_url || payload.base_url || "")
@@ -526,6 +598,7 @@ export async function quickConnect(payload: {
   } else {
     body.base_url = normalizeServerUrl(payload.base_url || "")
     body.ml_base_url = payload.ml_base_url ? normalizeMlUrl(payload.ml_base_url) : ""
+    if (payload.auth_token?.trim()) body.auth_token = payload.auth_token.trim()
   }
   const res = await fetch(`${API}/ops/quick-connect/`, {
     method: "POST",

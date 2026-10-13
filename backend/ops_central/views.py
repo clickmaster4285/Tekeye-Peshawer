@@ -22,6 +22,7 @@ from .cache import (
     prune_server_camera_cache as _prune_server_camera_cache,
     resolve_stream_key as _resolve_stream_key,
 )
+from .city_control import build_city_control_board
 from .client import (
     apply_detected_gpu,
     delete_remote_camera,
@@ -522,6 +523,23 @@ class AllCitiesCameraSelectionAPIView(APIView):
         return Response({"selected_camera_keys": pref.selected_camera_keys})
 
 
+class CityControlGridAPIView(APIView):
+    """
+    Federated City Control Grid.
+
+    For each registered city server:
+    - cameras / health from Django or ML mode
+    - seizures / detentions / staff / AI from that city's Django DB (django mode)
+    """
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request):
+        ensure_default_remote_server(request.user)
+        board = build_city_control_board(request_user=request.user)
+        return Response(board)
+
+
 class AllCitiesStreamsAPIView(APIView):
     """Aggregate live cameras from every active connected Central Ops server."""
 
@@ -773,6 +791,7 @@ class QuickConnectView(APIView):
         base = (ser.validated_data.get("base_url") or "").rstrip("/")
         ml_base = (ser.validated_data.get("ml_base_url") or "").strip().rstrip("/")
         name = (ser.validated_data.get("name") or "").strip() or "ML Server"
+        location_code = (ser.validated_data.get("location_code") or "").strip().upper()
         do_save = bool(ser.validated_data.get("save", True))
 
         # ——— ML-only: cameras from this ML server only ———
@@ -800,6 +819,7 @@ class QuickConnectView(APIView):
             if do_save:
                 defaults = {
                     "connection_mode": ConnectionMode.ML,
+                    "location_code": location_code,
                     "base_url": ml_base,
                     "ml_base_url": ml_base,
                     "auth_token": "ml-only",
@@ -904,6 +924,7 @@ class QuickConnectView(APIView):
                 name=name,
                 defaults={
                     "connection_mode": ConnectionMode.DJANGO,
+                    "location_code": location_code,
                     "base_url": base,
                     "ml_base_url": ml_root if ml_base else "",
                     "auth_token": token,

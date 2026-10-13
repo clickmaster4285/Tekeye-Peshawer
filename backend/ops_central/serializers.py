@@ -138,6 +138,7 @@ class RemoteServerSerializer(serializers.ModelSerializer):
 
 class QuickConnectSerializer(serializers.Serializer):
     name = serializers.CharField(required=False, allow_blank=True, default="")
+    location_code = serializers.CharField(required=False, allow_blank=True, default="")
     connection_mode = serializers.ChoiceField(
         choices=ConnectionMode.choices,
         required=False,

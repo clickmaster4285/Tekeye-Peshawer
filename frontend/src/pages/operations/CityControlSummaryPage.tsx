@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   Activity,
@@ -35,9 +35,10 @@ import {
 } from "recharts"
 import { CityOverviewMap } from "@/components/city-control/CityOverviewMap"
 import {
-  CITY_CONTROL_ROWS,
+  fetchCityControlGridLive,
   getCityDetailExtras,
   type CityControlRow,
+  type CityDetailExtras,
   type CityDetectionType,
   type CityStatus,
 } from "@/data/city-control-grid-data"
@@ -90,14 +91,15 @@ function StatusPill({ status }: { status: CityStatus }) {
 
 function CityPickerCard({
   city,
+  extras,
   active,
   onSelect,
 }: {
   city: CityControlRow
+  extras: CityDetailExtras
   active: boolean
   onSelect: () => void
 }) {
-  const extras = getCityDetailExtras(city)
   return (
     <button
       type="button"
@@ -143,14 +145,45 @@ export default function CityControlSummaryPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
   const [section, setSection] = useState<NavId>("overview")
+  const [rows, setRows] = useState<CityControlRow[]>([])
+  const [extrasById, setExtrasById] = useState<Record<string, CityDetailExtras>>({})
+  const [loading, setLoading] = useState(true)
 
-  const city = CITY_CONTROL_ROWS.find((c) => c.id === cityId)
+  useEffect(() => {
+    const ac = new AbortController()
+    setLoading(true)
+    fetchCityControlGridLive({ signal: ac.signal, includeExtras: true })
+      .then((live) => {
+        if (ac.signal.aborted) return
+        setRows(live.rows)
+        setExtrasById(live.extrasById)
+      })
+      .catch(() => {
+        if (ac.signal.aborted) return
+        setRows([])
+        setExtrasById({})
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false)
+      })
+    return () => ac.abort()
+  }, [])
+
+  const city = rows.find((c) => c.id === cityId)
 
   const pickerCities = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return CITY_CONTROL_ROWS
-    return CITY_CONTROL_ROWS.filter((c) => c.city.toLowerCase().includes(q))
-  }, [query])
+    if (!q) return rows
+    return rows.filter((c) => c.city.toLowerCase().includes(q))
+  }, [query, rows])
+
+  if (loading) {
+    return (
+      <div className="rounded-[10px] border border-[#D9E6F5] bg-white p-6">
+        <p className="text-sm text-[#607DA5]">Loading live city analytics…</p>
+      </div>
+    )
+  }
 
   if (!city) {
     return (
@@ -163,7 +196,7 @@ export default function CityControlSummaryPage() {
     )
   }
 
-  const extras = getCityDetailExtras(city)
+  const extras = extrasById[city.id] || getCityDetailExtras(city)
   const camerasOffline = city.camerasTotal - city.camerasOnline
   const isStale = city.status === "Offline"
 
@@ -199,6 +232,7 @@ export default function CityControlSummaryPage() {
           <CityPickerCard
             key={c.id}
             city={c}
+            extras={extrasById[c.id] || getCityDetailExtras(c)}
             active={c.id === city.id}
             onSelect={() => navigate(`${ROUTES.CITY_CONTROL_GRID}/${c.id}`)}
           />
@@ -522,9 +556,10 @@ export default function CityControlSummaryPage() {
 
           {/* Footer disclaimer */}
           <div className="rounded-[10px] border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-[12px] leading-relaxed text-[#355D8A]">
-            <strong className="text-[#102C55]">Read-only HQ analytics.</strong> Each city owns its operational
-            database. Peshawar HQ displays authorized summary data only. Offline cities show last-known snapshots and
-            are never labeled as live. Sensitive case details are not copied into the HQ analytics database.
+            <strong className="text-[#102C55]">Federated read-only view.</strong> Each city owns its operational
+            database. HQ pulls live summary totals (cameras, seizures, detentions, staff, AI) from that city’s Django
+            when connected. Offline cities show last-known snapshots and are never labeled as live. Sensitive case
+            details are not copied into the HQ database.
           </div>
         </div>
       </div>
