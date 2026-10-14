@@ -1,4 +1,6 @@
 from django.contrib.auth.models import AbstractUser
+import uuid
+
 from django.db import models
 from django.utils import timezone
 
@@ -206,6 +208,13 @@ class Staff(models.Model):
         help_text="SFace vectors per staff photo: [{image_key, embedding, dim, model}, ...].",
     )
 
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
     def __str__(self):
         desig = (self.designation or "").strip()
         return f"{self.full_name} ({desig})" if desig else self.full_name
@@ -273,6 +282,11 @@ class Attendance(models.Model):
         blank=True,
         help_text="Deprecated: attendance proof is image-only; kept for old records.",
     )
+    # City → HQ sync identity (city_sync Phase 2)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
 
@@ -338,6 +352,13 @@ class LeaveRequest(models.Model):
     rejection_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["-from_date"]

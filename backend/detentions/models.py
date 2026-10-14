@@ -102,6 +102,13 @@ class DetentionMemo(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -153,6 +160,13 @@ class DetentionMemoGoodsLine(models.Model):
         help_text="Optional AI DetectionEvent that sourced this goods line.",
     )
 
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         ordering = ["id"]
 
@@ -170,6 +184,13 @@ class DetentionMemoGoodsImage(models.Model):
     )
     image = models.FileField(upload_to=detention_goods_image_path)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["uploaded_at"]
@@ -195,6 +216,13 @@ class DetentionMemoAttachment(models.Model):
     file = models.FileField(upload_to=detention_attachment_path)
     original_filename = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["uploaded_at", "id"]
@@ -231,6 +259,13 @@ class DepositAccountEntry(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]

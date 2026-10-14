@@ -1,3 +1,5 @@
+from django.contrib.auth import get_user_model
+
 from .models import UserActivityLog
 
 try:
@@ -21,6 +23,7 @@ SKIP_LOG_PATHS = (
     "/api/mobile/gps/",
     "/api/gps/ping/",
     "/api/gps/heartbeat/",
+    "/api/sync/",  # city_sync uses SyncPrincipal, not Django User
     "/favicon.ico",
     "/media/",
 )
@@ -75,6 +78,10 @@ def get_geo(ip):
 
 
 def create_activity_log(user, request, action, source="web"):
+    # Sync API keys authenticate as SyncPrincipal — not a Django User FK target.
+    User = get_user_model()
+    if not isinstance(user, User):
+        return
     ip = get_ip(request)
     device, os_str, browser = get_device_info(request)
     country, city = get_geo(ip)
@@ -98,11 +105,12 @@ class ActivityLogMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
 
-        if request.user.is_authenticated:
+        user = getattr(request, "user", None)
+        if user is not None and getattr(user, "is_authenticated", False):
             path = request.path.rstrip("/") or "/"
             if any(path.startswith(p.rstrip("/")) for p in SKIP_LOG_PATHS):
                 return response
             action = f"{request.method} {path}"
-            create_activity_log(request.user, request, action)
+            create_activity_log(user, request, action)
 
         return response

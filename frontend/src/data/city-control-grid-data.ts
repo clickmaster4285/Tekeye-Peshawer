@@ -28,6 +28,9 @@ export type CityControlRow = {
   lastSyncRelative: string
   connectivity: Connectivity
   bars: { cameras: number; ai: number; seizures: number; detentions: number }
+  /** city_sync | django | ml */
+  opsSource?: string
+  replicaTotal?: number
 }
 
 export type CityControlKpi = {
@@ -374,13 +377,14 @@ function mapBoardCity(city: CityControlBoardCity): CityControlRow {
     lastSyncRelative: city.last_sync_relative || "No sync",
     connectivity,
     bars: city.bars || { cameras: 0, ai: 0, seizures: 0, detentions: 0 },
+    opsSource: city.ops_source || undefined,
+    replicaTotal: city.replica_total || 0,
   }
 }
 
 /**
  * Federated City Control Grid.
- * Cameras + health from each registered city server; seizures / detentions / staff / AI
- * from that city's Django DB when connected in django mode.
+ * Cameras from Ops RemoteServers; ops stats from remote Django and/or city_sync HQ replicas.
  */
 export async function fetchCityControlGridLive(opts?: {
   signal?: AbortSignal

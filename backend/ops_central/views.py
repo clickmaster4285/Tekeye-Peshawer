@@ -22,7 +22,7 @@ from .cache import (
     prune_server_camera_cache as _prune_server_camera_cache,
     resolve_stream_key as _resolve_stream_key,
 )
-from .city_control import build_city_control_board
+from .city_control import build_city_control_board, list_sync_detections
 from .client import (
     apply_detected_gpu,
     delete_remote_camera,
@@ -530,14 +530,37 @@ class CityControlGridAPIView(APIView):
     For each registered city server:
     - cameras / health from Django or ML mode
     - seizures / detentions / staff / AI from that city's Django DB (django mode)
+
+    Also merges city_sync HqCityStatus + HqReplicaRow so heartbeat-connected
+    cities (e.g. Abbottabad) appear on the frontend even without a RemoteServer.
     """
 
     permission_classes = [IsOpsViewer]
 
     def get(self, request):
         ensure_default_remote_server(request.user)
+        try:
+            from .utils import ensure_sync_city_remote_servers
+
+            ensure_sync_city_remote_servers(request.user)
+        except Exception:  # noqa: BLE001
+            pass
         board = build_city_control_board(request_user=request.user)
         return Response(board)
+
+
+class CityControlDetectionsAPIView(APIView):
+    """AI detection feed for City Grid — HQ city_sync replicas."""
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request):
+        loc = (request.query_params.get("location") or request.query_params.get("location_code") or "").strip()
+        try:
+            limit = int(request.query_params.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        return Response(list_sync_detections(location_code=loc, limit=limit))
 
 
 class AllCitiesStreamsAPIView(APIView):

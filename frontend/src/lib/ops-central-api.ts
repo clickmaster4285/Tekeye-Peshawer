@@ -448,7 +448,7 @@ export async function probeMlGpus(mlBaseUrl?: string): Promise<{
   // Prefer probe-gpus; fall back to host-gpus alias if an old server returns 404.
   let { res, data } = await tryFetch("/ops/probe-gpus/")
   if (res.status === 404) {
-    ;({ res, data } = await tryFetch("/ops/host-gpus/"))
+    ; ({ res, data } = await tryFetch("/ops/host-gpus/"))
   }
 
   const gpus = Array.isArray(data.gpus) ? data.gpus : []
@@ -520,6 +520,9 @@ export type CityControlBoardCity = {
   server_ids?: number[]
   connection_modes?: string[]
   ops_source?: string
+  replica_total?: number
+  attendance_30d?: number
+  visitors_30d?: number
   error?: string
   bars?: { cameras: number; ai: number; seizures: number; detentions: number }
 }
@@ -547,7 +550,7 @@ export type CityControlBoard = {
   generated_at?: string
 }
 
-/** Federated City Control Grid — cameras + each city's Django DB stats. */
+/** Federated City Control Grid — cameras + each city's Django DB stats + city_sync. */
 export async function fetchCityControlBoard(opts?: {
   signal?: AbortSignal
 }): Promise<CityControlBoard> {
@@ -565,6 +568,45 @@ export async function fetchCityControlBoard(opts?: {
     server_count: data.server_count ?? 0,
     city_count: data.city_count ?? (data.cities || []).length,
     generated_at: data.generated_at,
+  }
+}
+
+export type CityControlDetectionRow = {
+  id?: string
+  location_code?: string
+  time: string
+  created_at?: string
+  type: string
+  object: string
+  camera: string
+  class_name?: string
+  label?: string
+  confidence?: number | null
+  is_alert?: boolean
+  source?: string
+}
+
+/** AI detections for a city — HQ city_sync replicas when available. */
+export async function fetchCityControlDetections(opts: {
+  location?: string
+  limit?: number
+  signal?: AbortSignal
+}): Promise<{ ok: boolean; results: CityControlDetectionRow[]; count: number; source?: string }> {
+  const params = new URLSearchParams()
+  if (opts.location) params.set("location", opts.location)
+  if (opts.limit) params.set("limit", String(opts.limit))
+  const qs = params.toString()
+  const res = await fetch(`${API}/ops/city-control/detections/${qs ? `?${qs}` : ""}`, {
+    headers: getAuthHeaders(),
+    signal: opts.signal,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(formatApiError(data, "Failed to load city detections"))
+  return {
+    ok: Boolean(data.ok),
+    results: data.results || [],
+    count: data.count ?? (data.results || []).length,
+    source: data.source,
   }
 }
 

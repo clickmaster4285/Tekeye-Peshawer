@@ -40,8 +40,10 @@ import {
   type CityControlRow,
   type CityDetailExtras,
   type CityDetectionType,
+  type CityRecentDetection,
   type CityStatus,
 } from "@/data/city-control-grid-data"
+import { fetchCityControlDetections } from "@/lib/ops-central-api"
 import { ROUTES } from "@/routes/config"
 import { cn } from "@/lib/utils"
 
@@ -148,11 +150,13 @@ export default function CityControlSummaryPage() {
   const [rows, setRows] = useState<CityControlRow[]>([])
   const [extrasById, setExtrasById] = useState<Record<string, CityDetailExtras>>({})
   const [loading, setLoading] = useState(true)
+  const [aiFeed, setAiFeed] = useState<CityRecentDetection[]>([])
+  const [aiLoading, setAiLoading] = useState(false)
 
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
-    fetchCityControlGridLive({ signal: ac.signal, includeExtras: true })
+    fetchCityControlGridLive({ signal: ac.signal, includeExtras: true, force: true })
       .then((live) => {
         if (ac.signal.aborted) return
         setRows(live.rows)
@@ -170,6 +174,51 @@ export default function CityControlSummaryPage() {
   }, [])
 
   const city = rows.find((c) => c.id === cityId)
+
+  useEffect(() => {
+    if (!city?.locationCode) {
+      setAiFeed([])
+      return
+    }
+    const ac = new AbortController()
+    setAiLoading(true)
+    fetchCityControlDetections({
+      location: city.locationCode,
+      limit: section === "ai" ? 120 : 50,
+      signal: ac.signal,
+    })
+      .then((feed) => {
+        if (ac.signal.aborted) return
+        const mapped: CityRecentDetection[] = (feed.results || []).map((r) => {
+          const raw = r.type || "Person"
+          const type: CityDetectionType =
+            raw === "License Plate" || raw === "Person" || raw === "Vehicle" || raw === "Weapon"
+              ? raw
+              : "Person"
+          return {
+            time: r.time || "—",
+            type,
+            object: r.object || "Detection",
+            camera: r.camera || "Camera",
+          }
+        })
+        setAiFeed(mapped)
+        setExtrasById((prev) => {
+          const base = prev[city.id] || getCityDetailExtras(city)
+          return {
+            ...prev,
+            [city.id]: { ...base, detections: mapped.length ? mapped : base.detections },
+          }
+        })
+      })
+      .catch(() => {
+        if (!ac.signal.aborted) setAiFeed([])
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setAiLoading(false)
+      })
+    return () => ac.abort()
+  }, [city?.id, city?.locationCode, section])
 
   const pickerCities = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -421,9 +470,9 @@ export default function CityControlSummaryPage() {
                           className={cn(
                             "font-semibold text-[#102C55]",
                             (value === "Disconnected" || value === "Down" || value === "No Signal") &&
-                              "text-[#FF4D59]",
+                            "text-[#FF4D59]",
                             (value === "Intermittent" || value === "Degraded" || value === "Limited") &&
-                              "text-[#FF9D2E]",
+                            "text-[#FF9D2E]",
                             (value === "Connected" || value === "Healthy" || value === "Good") && "text-[#12A66A]"
                           )}
                         >
@@ -438,19 +487,31 @@ export default function CityControlSummaryPage() {
 
             <div className="rounded-[10px] border border-[#D9E6F5] bg-white p-4">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-[14px] font-semibold text-[#102C55]">
-                  Recent AI Detections ({city.city})
-                </h3>
+                <div>
+                  <h3 className="text-[14px] font-semibold text-[#102C55]">
+                    Recent AI Detections ({city.city})
+                  </h3>
+                  <p className="mt-0.5 text-[11px] text-[#607DA5]">
+                    {city.opsSource === "city_sync"
+                      ? "From HQ city sync replicas"
+                      : "From connected city feed"}
+                    {city.aiDetections24h
+                      ? ` · ${city.aiDetections24h.toLocaleString()} in last 24h window`
+                      : null}
+                  </p>
+                </div>
                 <Activity className="h-4 w-4 text-[#607DA5]" />
               </div>
               {extras.detections.length === 0 ? (
                 <p className="mt-8 text-center text-[13px] text-[#607DA5]">
-                  No live detections — city is offline. Showing last known snapshot only.
+                  {city.status === "Offline"
+                    ? "No detections yet — city sync is offline."
+                    : "No detection events synced yet. Keep city outbox worker running, then refresh."}
                 </p>
               ) : (
-                <div className="mt-3 overflow-x-auto">
+                <div className="mt-3 max-h-[320px] overflow-auto">
                   <table className="w-full text-left text-[12px]">
-                    <thead>
+                    <thead className="sticky top-0 bg-white">
                       <tr className="border-b border-[#E8F0FA] text-[#607DA5]">
                         <th className="py-2 pr-2 font-semibold">Time</th>
                         <th className="py-2 pr-2 font-semibold">Type</th>
@@ -459,8 +520,11 @@ export default function CityControlSummaryPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {extras.detections.map((row) => (
-                        <tr key={`${row.time}-${row.object}`} className="border-b border-[#F2F7FC]">
+                      {extras.detections.map((row, idx) => (
+                        <tr
+                          key={`${row.time}-${row.type}-${row.object}-${row.camera}-${idx}`}
+                          className="border-b border-[#F2F7FC]"
+                        >
                           <td className="py-2 pr-2 tabular-nums text-[#607DA5]">{row.time}</td>
                           <td className="py-2 pr-2">
                             <span className="inline-flex items-center gap-1.5 font-medium text-[#102C55]">
@@ -545,8 +609,67 @@ export default function CityControlSummaryPage() {
             </div>
           </div>
 
+          {/* Full AI detections panel when AI tab selected */}
+          {section === "ai" ? (
+            <div className="rounded-[10px] border border-[#D9E6F5] bg-white p-4">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <h3 className="text-[15px] font-semibold text-[#102C55]">
+                    AI Detections — {city.city}
+                  </h3>
+                  <p className="mt-0.5 text-[12px] text-[#607DA5]">
+                    Synced detection events stored at Peshawar HQ
+                    {aiFeed.length ? ` · showing ${aiFeed.length}` : ""}
+                    {city.aiDetections24h
+                      ? ` · ${city.aiDetections24h.toLocaleString()} counted in board window`
+                      : ""}
+                  </p>
+                </div>
+                <StatusPill status={city.status} />
+              </div>
+              {aiLoading ? (
+                <p className="mt-6 text-center text-[13px] text-[#607DA5]">Loading detections…</p>
+              ) : aiFeed.length === 0 && extras.detections.length === 0 ? (
+                <p className="mt-6 text-center text-[13px] text-[#607DA5]">
+                  No synced detections for this city yet.
+                </p>
+              ) : (
+                <div className="mt-4 max-h-[520px] overflow-auto rounded-lg border border-[#E8F0FA]">
+                  <table className="w-full text-left text-[12px]">
+                    <thead className="sticky top-0 bg-[#F2F7FC]">
+                      <tr className="text-[#607DA5]">
+                        <th className="px-3 py-2.5 font-semibold">Time</th>
+                        <th className="px-3 py-2.5 font-semibold">Type</th>
+                        <th className="px-3 py-2.5 font-semibold">Object</th>
+                        <th className="px-3 py-2.5 font-semibold">Camera</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(aiFeed.length ? aiFeed : extras.detections).map((row, idx) => (
+                        <tr
+                          key={`ai-${row.time}-${row.type}-${row.object}-${idx}`}
+                          className="border-t border-[#F2F7FC] hover:bg-[#F7FBFF]"
+                        >
+                          <td className="px-3 py-2 tabular-nums text-[#607DA5]">{row.time}</td>
+                          <td className="px-3 py-2">
+                            <span className="inline-flex items-center gap-1.5 font-medium text-[#102C55]">
+                              {detectionIcon(row.type)}
+                              {row.type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 font-medium text-[#102C55]">{row.object}</td>
+                          <td className="px-3 py-2 text-[#607DA5]">{row.camera}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* Section note for non-overview tabs */}
-          {section !== "overview" ? (
+          {section !== "overview" && section !== "ai" ? (
             <div className="rounded-[10px] border border-[#D9E6F5] bg-[#F7FBFF] px-4 py-3 text-[13px] text-[#607DA5]">
               Showing <span className="font-semibold text-[#102C55]">{NAV_ITEMS.find((n) => n.id === section)?.label}</span>{" "}
               context for {city.city}. Full module deep-links stay on the local city system; this HQ view remains
@@ -557,9 +680,9 @@ export default function CityControlSummaryPage() {
           {/* Footer disclaimer */}
           <div className="rounded-[10px] border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-[12px] leading-relaxed text-[#355D8A]">
             <strong className="text-[#102C55]">Federated read-only view.</strong> Each city owns its operational
-            database. HQ pulls live summary totals (cameras, seizures, detentions, staff, AI) from that city’s Django
-            when connected. Offline cities show last-known snapshots and are never labeled as live. Sensitive case
-            details are not copied into the HQ database.
+            database. HQ shows live sync heartbeats and AI detections from city_sync replicas when the city is
+            connected. Cameras still come from Ops remote servers when registered. Offline cities keep last-known
+            sync snapshots.
           </div>
         </div>
       </div>

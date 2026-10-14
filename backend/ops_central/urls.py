@@ -10,6 +10,7 @@ from .distribution_views import (
 from .views import (
     AllCitiesCameraSelectionAPIView,
     AllCitiesStreamsAPIView,
+    CityControlDetectionsAPIView,
     CityControlGridAPIView,
     EphemeralMjpegProxyView,
     ProbeMlGpusAPIView,
@@ -37,6 +38,11 @@ urlpatterns = [
         "ops/city-control/",
         CityControlGridAPIView.as_view(),
         name="ops-city-control",
+    ),
+    path(
+        "ops/city-control/detections/",
+        CityControlDetectionsAPIView.as_view(),
+        name="ops-city-control-detections",
     ),
     path(
         "ops/all-cities-selection/",

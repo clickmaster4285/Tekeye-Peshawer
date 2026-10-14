@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "infrastructure_monitoring.apps.InfrastructureMonitoringConfig",
     "voice_agent.apps.VoiceAgentConfig",
     "requests_support.apps.RequestsSupportConfig",
+    "city_sync.apps.CitySyncConfig",
 ]
 
 # -----------------------------
@@ -532,3 +533,64 @@ CIIS_MONITOR_INTERVAL = int(os.getenv("CIIS_MONITOR_INTERVAL", "60"))
 CIIS_MAX_ACTIVE_MOBILE_DEVICES = int(os.getenv("CIIS_MAX_ACTIVE_MOBILE_DEVICES", "1"))
 # ALLOW_WITH_ALERT | BLOCK | REVOKE_OLD
 CIIS_MULTI_DEVICE_POLICY = os.getenv("CIIS_MULTI_DEVICE_POLICY", "ALLOW_WITH_ALERT").strip().upper()
+
+# -----------------------------
+# City ↔ HQ sync (city_sync)
+# Peshawar default role = HQ. Peshawar-as-branch must be a separate deployment.
+# -----------------------------
+SYSTEM_ROLE = os.getenv("SYSTEM_ROLE", "hq").strip().lower()
+LOCATION_CODE = os.getenv("LOCATION_CODE", "PESHAWAR").strip().upper()
+NODE_ID = os.getenv("NODE_ID", "pew-hq-01").strip()
+APP_VERSION = os.getenv("APP_VERSION", "1.0.0").strip()
+SYNC_SCHEMA_VERSION = int(os.getenv("SYNC_SCHEMA_VERSION", "1"))
+ALLOWED_LOCATION_CODES = _env_list(
+    "ALLOWED_LOCATION_CODES",
+    "PESHAWAR,ABBOTTABAD,DI_KHAN,MARDAN,NOWSHERA,KOHAT,PEW,ABT,DIK,MRD,NOW,KHT",
+)
+HQ_SYNC_URL = os.getenv("HQ_SYNC_URL", "").strip().rstrip("/")
+SYNC_API_KEY = os.getenv("SYNC_API_KEY", "").strip()
+SYNC_API_KEY_FILE = os.getenv("SYNC_API_KEY_FILE", "").strip()
+# Dev/pilot keys: "ABBOTTABAD=secret,DI_KHAN=secret"
+SYNC_API_KEYS = os.getenv("SYNC_API_KEYS", "").strip()
+SYNC_OUTBOX_ENABLED = os.getenv("SYNC_OUTBOX_ENABLED", "True").lower() in ("true", "1", "yes")
+SYNC_FORBID_HARD_DELETE = os.getenv("SYNC_FORBID_HARD_DELETE", "True").lower() in ("true", "1", "yes")
+SYNC_REQUIRE_NTP = os.getenv("SYNC_REQUIRE_NTP", "False").lower() in ("true", "1", "yes")
+SYNC_MAX_CLOCK_DRIFT_SECONDS = float(os.getenv("SYNC_MAX_CLOCK_DRIFT_SECONDS", "5"))
+SYNC_SKIP_BOOT_CHECK = os.getenv("SYNC_SKIP_BOOT_CHECK", "False").lower() in ("true", "1", "yes")
+SYNC_HQ_ACCEPTS_CITY_WRITES = os.getenv("SYNC_HQ_ACCEPTS_CITY_WRITES", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+OUTBOX_POLL_INTERVAL = float(os.getenv("OUTBOX_POLL_INTERVAL", "2"))
+OUTBOX_BATCH_SIZE = int(os.getenv("OUTBOX_BATCH_SIZE", "200"))
+OUTBOX_MIN_AGE_SECONDS = float(os.getenv("OUTBOX_MIN_AGE_SECONDS", "2"))
+OUTBOX_HTTP_TIMEOUT = float(os.getenv("OUTBOX_HTTP_TIMEOUT", "30"))
+OUTBOX_MAX_ATTEMPTS_BEFORE_DEAD = int(os.getenv("OUTBOX_MAX_ATTEMPTS_BEFORE_DEAD", "20"))
+SYNC_MAX_BATCH_SIZE_ACCEPTED = int(os.getenv("SYNC_MAX_BATCH_SIZE_ACCEPTED", "500"))
+SYNC_HEARTBEAT_INTERVAL = float(os.getenv("SYNC_HEARTBEAT_INTERVAL", "30"))
+SYNC_GRID_OFFLINE_AFTER_SEC = int(os.getenv("SYNC_GRID_OFFLINE_AFTER_SEC", "90"))
+SYNC_BACKUP_STALE_HOURS = float(os.getenv("SYNC_BACKUP_STALE_HOURS", "26"))
+SYNC_MEDIA_ENABLED = os.getenv("SYNC_MEDIA_ENABLED", "True").lower() in ("true", "1", "yes")
+SYNC_MEDIA_POLL_INTERVAL = float(os.getenv("SYNC_MEDIA_POLL_INTERVAL", "5"))
+SYNC_MEDIA_CHUNK_SIZE = int(os.getenv("SYNC_MEDIA_CHUNK_SIZE", str(4 * 1024 * 1024)))
+SYNC_MEDIA_MAX_ATTEMPTS = int(os.getenv("SYNC_MEDIA_MAX_ATTEMPTS", "30"))
+SYNC_HQ_MEDIA_ROOT = os.getenv("SYNC_HQ_MEDIA_ROOT", "").strip()
+SYNC_REFERENCE_ENABLED = os.getenv("SYNC_REFERENCE_ENABLED", "True").lower() in ("true", "1", "yes")
+SYNC_REFERENCE_POLL_INTERVAL = float(os.getenv("SYNC_REFERENCE_POLL_INTERVAL", "300"))
+# RPO/RTO targets (Phase 0) — documented for ops; used in seeded reference policy.
+SYNC_RPO_DB_MINUTES = int(os.getenv("SYNC_RPO_DB_MINUTES", "15"))
+SYNC_RPO_MEDIA_HOURS = int(os.getenv("SYNC_RPO_MEDIA_HOURS", "24"))
+SYNC_RTO_SERVICE_HOURS = int(os.getenv("SYNC_RTO_SERVICE_HOURS", "8"))
+SYNC_RTO_MEDIA_HOURS = int(os.getenv("SYNC_RTO_MEDIA_HOURS", "48"))
+
+# Dual-store at HQ: keep HqReplicaRow AND a real Postgres DB per connected city.
+# DBs are named via template (default TEKEYE_HQ_ABBOTTABAD). Media stays on Peshawar
+# under MEDIA_ROOT/hq_sync_media/{LOCATION}/ and optionally city_dbs/{LOCATION}/media/.
+SYNC_HQ_CITY_DB_ENABLED = os.getenv("SYNC_HQ_CITY_DB_ENABLED", "True").lower() in ("true", "1", "yes")
+SYNC_HQ_CITY_DB_NAME_TEMPLATE = os.getenv("SYNC_HQ_CITY_DB_NAME_TEMPLATE", "TEKEYE_HQ_{LOCATION}").strip()
+SYNC_HQ_CITY_DB_AUTO_CREATE = os.getenv("SYNC_HQ_CITY_DB_AUTO_CREATE", "True").lower() in ("true", "1", "yes")
+SYNC_HQ_CITY_DB_AUTO_MIGRATE = os.getenv("SYNC_HQ_CITY_DB_AUTO_MIGRATE", "True").lower() in ("true", "1", "yes")
+SYNC_HQ_CITY_MEDIA_MIRROR = os.getenv("SYNC_HQ_CITY_MEDIA_MIRROR", "True").lower() in ("true", "1", "yes")
+# Optional override; supports {LOCATION}. Default: MEDIA_ROOT/city_dbs/{LOCATION}/media
+SYNC_HQ_CITY_MEDIA_ROOT = os.getenv("SYNC_HQ_CITY_MEDIA_ROOT", "").strip()

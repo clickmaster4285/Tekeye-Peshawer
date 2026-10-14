@@ -251,6 +251,18 @@ export default function CityControlGridPage() {
                             HQ
                           </span>
                         ) : null}
+                        {row.opsSource === "city_sync" ? (
+                          <span
+                            className="rounded bg-[#12A66A]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#12A66A]"
+                            title={
+                              row.replicaTotal
+                                ? `${row.replicaTotal.toLocaleString()} synced rows at HQ`
+                                : "Connected via city sync"
+                            }
+                          >
+                            Sync{row.replicaTotal ? ` · ${row.replicaTotal}` : ""}
+                          </span>
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2.5">

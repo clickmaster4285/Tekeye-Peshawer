@@ -1,12 +1,13 @@
-"""Federated City Control Grid — aggregate each city's Django/ML stack."""
+"""Federated City Control Grid — aggregate each city's Django/ML stack + city_sync."""
 
 from __future__ import annotations
 
 import re
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from django.conf import settings
 from django.utils import timezone
 
 from .client import (
@@ -151,8 +152,296 @@ def _format_sync(iso: str | None) -> tuple[str, str]:
     return absolute, relative
 
 
+def _sync_offline_after_sec() -> int:
+    return int(getattr(settings, "SYNC_GRID_OFFLINE_AFTER_SEC", 90) or 90)
+
+
+def _status_from_city_sync_heartbeat(last_heartbeat_at, *, dead_outbox: int = 0, failed_media: int = 0) -> tuple[str, str]:
+    """Map city_sync heartbeat age → City Grid Online/Degraded/Offline."""
+    if not last_heartbeat_at:
+        return "Offline", "No Signal"
+    age = max(0, int((timezone.now() - last_heartbeat_at).total_seconds()))
+    offline_after = _sync_offline_after_sec()
+    if age > 1800:
+        return "Offline", "No Signal"
+    if age > offline_after:
+        return "Offline", "No Signal"
+    if dead_outbox > 0 or failed_media > 0:
+        return "Degraded", "Limited"
+    return "Online", "Good"
+
+
+def _replica_ops_stats(location_code: str) -> dict[str, Any]:
+    """Aggregate HQ replica rows for City Grid KPIs (live synced city data)."""
+    try:
+        from city_sync.models import HqReplicaRow
+    except Exception:  # noqa: BLE001
+        return {
+            "ok": False,
+            "source": "city_sync",
+            "seizures_30d": 0,
+            "detentions_30d": 0,
+            "ai_detections_24h": 0,
+            "staff_total": 0,
+            "staff_online": 0,
+            "replica_total": 0,
+            "attendance_30d": 0,
+            "visitors_30d": 0,
+            "recent_alerts": [],
+        }
+
+    loc = (location_code or "").upper()
+    now = timezone.now()
+    since_24h = now - timedelta(hours=24)
+    since_30d = now - timedelta(days=30)
+    base = HqReplicaRow.objects.filter(location_code=loc, is_deleted=False)
+
+    def _count(entity_type: str, since=None) -> int:
+        qs = base.filter(entity_type=entity_type)
+        if since is not None:
+            qs = qs.filter(received_at__gte=since)
+        return qs.count()
+
+    staff_total = _count("staff")
+    ai_24h = _count("detection_event", since_24h)
+    seizures_30d = _count("note_sheet", since_30d)
+    detentions_30d = _count("detention_memo", since_30d)
+    replica_total = base.count()
+    recent_alerts: list[dict[str, Any]] = []
+    if ai_24h:
+        recent_alerts.append(
+            {
+                "time": now.isoformat(),
+                "title": f"{ai_24h} AI detections synced (24h)",
+                "severity": "Info",
+            }
+        )
+
+    return {
+        "ok": True,
+        "source": "city_sync",
+        "seizures_30d": seizures_30d,
+        "detentions_30d": detentions_30d,
+        "ai_detections_24h": ai_24h,
+        "staff_total": staff_total,
+        "staff_online": staff_total,
+        "replica_total": replica_total,
+        "attendance_30d": _count("attendance", since_30d),
+        "visitors_30d": _count("visitor", since_30d),
+        "recent_alerts": recent_alerts,
+    }
+
+
+def _detection_type_label(class_name: str, label: str) -> str:
+    text = f"{class_name} {label}".lower()
+    if any(k in text for k in ("plate", "anpr", "license")):
+        return "License Plate"
+    if any(k in text for k in ("weapon", "gun", "knife", "rifle")):
+        return "Weapon"
+    if any(k in text for k in ("vehicle", "car", "truck", "bus", "bike", "motorcycle")):
+        return "Vehicle"
+    if any(k in text for k in ("person", "people", "face", "staff", "human", "pedestrian")):
+        return "Person"
+    raw = (class_name or label or "Object").strip().replace("_", " ")
+    return raw[:1].upper() + raw[1:] if raw else "Object"
+
+
+def _format_detection_time(raw: Any) -> str:
+    if not raw:
+        return "—"
+    try:
+        if isinstance(raw, datetime):
+            dt = raw
+        else:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return timezone.localtime(dt).strftime("%H:%M")
+    except Exception:  # noqa: BLE001
+        return str(raw)[:16]
+
+
+def list_sync_detections(
+    *,
+    location_code: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Recent AI detections from HQ city_sync replicas (City Grid UI)."""
+    try:
+        from city_sync.models import HqReplicaRow
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "results": [], "count": 0}
+
+    limit = max(1, min(int(limit or 50), 200))
+    qs = HqReplicaRow.objects.filter(entity_type="detection_event", is_deleted=False)
+    loc = (location_code or "").strip().upper()
+    if loc:
+        qs = qs.filter(location_code=loc)
+    qs = qs.order_by("-received_at")[:limit]
+
+    results: list[dict[str, Any]] = []
+    for row in qs:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        class_name = str(payload.get("class_name") or "")
+        label = str(payload.get("label") or class_name or "Detection")
+        employee = str(payload.get("employee_name") or "").strip()
+        object_label = employee or label or class_name or "Detection"
+        cam_id = payload.get("camera_id") or payload.get("camera")
+        camera = f"Cam {cam_id}" if cam_id not in (None, "") else "Camera"
+        created = payload.get("created_at") or row.updated_at or row.received_at
+        conf = payload.get("confidence")
+        try:
+            confidence = float(conf) if conf is not None else None
+        except (TypeError, ValueError):
+            confidence = None
+        results.append(
+            {
+                "id": str(row.entity_id),
+                "location_code": row.location_code,
+                "time": _format_detection_time(created),
+                "created_at": created.isoformat() if hasattr(created, "isoformat") else str(created or ""),
+                "type": _detection_type_label(class_name, label),
+                "object": object_label,
+                "camera": camera,
+                "class_name": class_name,
+                "label": label,
+                "confidence": confidence,
+                "is_alert": bool(payload.get("is_alert")),
+                "source": "city_sync",
+            }
+        )
+
+    return {
+        "ok": True,
+        "location_code": loc or "ALL",
+        "count": len(results),
+        "results": results,
+        "source": "city_sync",
+    }
+
+
+def _merge_city_sync_into_board(cities: list[dict[str, Any]], alerts: list[dict[str, Any]]) -> None:
+    """
+    Ensure every city_sync-connected location appears on the City Grid.
+
+    - Adds cards for locations that only heartbeat/sync (no Ops RemoteServer).
+    - Fills empty ops stats from HqReplicaRow when django/ML remote returned zeros.
+    """
+    try:
+        from city_sync.models import HqCityStatus
+    except Exception:  # noqa: BLE001
+        return
+
+    by_key = {str(c.get("location_code") or "").upper(): c for c in cities if c.get("location_code")}
+
+    for st in HqCityStatus.objects.all().order_by("location_code"):
+        key = (st.location_code or "").upper()
+        if not key:
+            continue
+        # Skip pure local-dev placeholder codes if somehow present
+        if key in ("LOCAL", "UNKNOWN"):
+            continue
+
+        sync_ops = _replica_ops_stats(key)
+        sync_status, sync_conn = _status_from_city_sync_heartbeat(
+            st.last_heartbeat_at,
+            dead_outbox=int(st.dead_outbox or 0),
+            failed_media=int(st.failed_media or 0),
+        )
+        hb_iso = st.last_heartbeat_at.isoformat() if st.last_heartbeat_at else None
+        last_sync, last_sync_relative = _format_sync(hb_iso)
+        display = display_city_name(key, key)
+
+        existing = by_key.get(key)
+        if existing is None:
+            city = {
+                "id": key.lower().replace("_", "-"),
+                "location_code": key,
+                "city": display,
+                "is_hq": key == "PESHAWAR",
+                "status": sync_status,
+                "connectivity": sync_conn,
+                "cameras_online": 0,
+                "cameras_total": 0,
+                "ai_detections_24h": int(sync_ops.get("ai_detections_24h") or 0),
+                "seizures_30d": int(sync_ops.get("seizures_30d") or 0),
+                "detentions_30d": int(sync_ops.get("detentions_30d") or 0),
+                "staff_online": int(sync_ops.get("staff_online") or 0),
+                "staff_total": int(sync_ops.get("staff_total") or 0),
+                "last_sync": last_sync,
+                "last_sync_relative": last_sync_relative,
+                "server_ids": [],
+                "connection_modes": ["city_sync"],
+                "ops_source": "city_sync",
+                "replica_total": int(sync_ops.get("replica_total") or 0),
+                "attendance_30d": int(sync_ops.get("attendance_30d") or 0),
+                "visitors_30d": int(sync_ops.get("visitors_30d") or 0),
+                "error": "",
+            }
+            cities.append(city)
+            by_key[key] = city
+            if sync_status == "Offline":
+                alerts.append(
+                    {
+                        "id": f"sync-offline-{city['id']}",
+                        "time": timezone.localtime().strftime("%H:%M"),
+                        "city": display,
+                        "title": "City sync heartbeat offline",
+                        "severity": "Critical",
+                    }
+                )
+            elif sync_status == "Online":
+                alerts.append(
+                    {
+                        "id": f"sync-online-{city['id']}",
+                        "time": timezone.localtime().strftime("%H:%M"),
+                        "city": display,
+                        "title": f"Synced replicas: {city['replica_total']}",
+                        "severity": "Info",
+                    }
+                )
+            continue
+
+        # Enrich existing Ops card with sync heartbeat + replica stats when empty.
+        modes = list(existing.get("connection_modes") or [])
+        if "city_sync" not in modes:
+            modes.append("city_sync")
+            existing["connection_modes"] = modes
+
+        if existing.get("status") == "Offline" and sync_status == "Online":
+            existing["status"] = sync_status
+            existing["connectivity"] = sync_conn
+        elif existing.get("status") == "Degraded" and sync_status == "Online":
+            # Keep degraded if cameras bad, but refresh sync time
+            pass
+
+        # Prefer fresher heartbeat for "last sync" display
+        if hb_iso and (
+            existing.get("last_sync_relative") in ("No sync", "—", "", None)
+            or sync_status == "Online"
+        ):
+            existing["last_sync"] = last_sync
+            existing["last_sync_relative"] = last_sync_relative
+
+        if int(existing.get("ai_detections_24h") or 0) == 0:
+            existing["ai_detections_24h"] = int(sync_ops.get("ai_detections_24h") or 0)
+        if int(existing.get("seizures_30d") or 0) == 0:
+            existing["seizures_30d"] = int(sync_ops.get("seizures_30d") or 0)
+        if int(existing.get("detentions_30d") or 0) == 0:
+            existing["detentions_30d"] = int(sync_ops.get("detentions_30d") or 0)
+        if int(existing.get("staff_total") or 0) == 0:
+            existing["staff_total"] = int(sync_ops.get("staff_total") or 0)
+            existing["staff_online"] = int(sync_ops.get("staff_online") or 0)
+
+        existing["replica_total"] = int(sync_ops.get("replica_total") or 0)
+        existing["attendance_30d"] = int(sync_ops.get("attendance_30d") or 0)
+        existing["visitors_30d"] = int(sync_ops.get("visitors_30d") or 0)
+        if existing.get("ops_source") in ("ml", "", None) and existing["replica_total"]:
+            existing["ops_source"] = "city_sync"
+
+
 def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> dict[str, Any]:
-    """Aggregate cameras + Django DB stats per city location."""
+    """Aggregate cameras + Django DB stats per city location (+ city_sync replicas)."""
     servers = list(
         RemoteServer.objects.filter(is_active=True).select_related("site").order_by("name")
     )
@@ -335,6 +624,9 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
                 }
             )
 
+    # Merge city_sync heartbeats + HQ replicas so connected cities show on the frontend grid.
+    _merge_city_sync_into_board(cities, alerts)
+
     cities.sort(key=lambda c: (0 if c.get("is_hq") else 1, c.get("city") or ""))
     for i, city in enumerate(cities, start=1):
         city["rank"] = i
@@ -365,6 +657,7 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
     total_ai = sum(c["ai_detections_24h"] for c in cities)
     total_sz = sum(c["seizures_30d"] for c in cities)
     total_dt = sum(c["detentions_30d"] for c in cities)
+    total_replicas = sum(int(c.get("replica_total") or 0) for c in cities)
 
     kpis = [
         {
@@ -378,28 +671,28 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
             "id": "ai",
             "label": "AI Detections (24h)",
             "value": f"{total_ai:,}",
-            "support": "People · Vehicles · Weapons · Plates",
+            "support": "Remote Django + city sync replicas",
             "tone": "purple",
         },
         {
             "id": "seizures",
             "label": "Seizures (30d)",
             "value": f"{total_sz:,}",
-            "support": "From each city Django DB",
+            "support": "Remote Django + city sync replicas",
             "tone": "red",
         },
         {
             "id": "detentions",
             "label": "Detentions (30d)",
             "value": f"{total_dt:,}",
-            "support": "From each city Django DB",
+            "support": "Remote Django + city sync replicas",
             "tone": "orange",
         },
         {
             "id": "online",
             "label": "Online Cities",
             "value": f"{online} / {len(cities)}",
-            "support": f"{offline} offline | {degraded} degraded",
+            "support": f"{offline} offline | {degraded} degraded | {total_replicas:,} synced rows",
             "tone": "green",
         },
     ]

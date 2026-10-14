@@ -180,7 +180,9 @@ class JourneyPersonTimelineAPIView(APIView):
 
             capture_missing_for_person(person, since=None, limit=15, timeout=35.0)
 
-        events = JourneyEvent.objects.filter(journey_person=person).select_related("camera")
+        events = JourneyEvent.objects.filter(
+            journey_person=person, is_deleted=False
+        ).select_related("camera")
         date_from = request.query_params.get("date_from")
         date_to = request.query_params.get("date_to")
         if date_from:
@@ -346,6 +348,7 @@ class JourneyCameraSightingsAPIView(APIView):
             hours = 0
         events = JourneyEvent.objects.filter(
             camera__isnull=False,
+            is_deleted=False,
         ).select_related("camera", "journey_person")
         if hours > 0:
             since = timezone.now() - timedelta(hours=hours)
@@ -384,6 +387,7 @@ class JourneyRecentEventsAPIView(APIView):
             JourneyEvent.objects.filter(
                 camera__isnull=False,
                 detection_event_id__isnull=False,
+                is_deleted=False,
             )
             .select_related("camera", "journey_person")
             .order_by("-created_at")[:limit]

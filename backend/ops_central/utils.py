@@ -4,7 +4,23 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+from django.conf import settings
 from rest_framework.authtoken.models import Token
+
+
+def parse_location_url_map(raw: str) -> dict[str, str]:
+    """Parse 'ABBOTTABAD=http://host:8000,DI_KHAN=http://…' into a dict."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        key = key.strip().upper()
+        val = val.strip().rstrip("/")
+        if key and val:
+            out[key] = val
+    return out
 
 
 def ensure_http_url(value: str | None, *, default_port: int | None = 8000) -> str:
@@ -101,3 +117,79 @@ def ensure_default_remote_server(user) -> None:
         cached_cameras=[],
         created_by=user if getattr(user, "is_authenticated", False) else None,
     )
+
+
+def ensure_sync_city_remote_servers(user=None) -> int:
+    """
+    Register Ops RemoteServers for each SYNC_CITY_BASE_URLS entry so City Grid
+    can fetch live cameras / Django ops for sync-connected cities (e.g. Abbottabad).
+    """
+    from .models import ConnectionMode, RemoteServer
+
+    base_map = parse_location_url_map(getattr(settings, "SYNC_CITY_BASE_URLS", "") or "")
+    ml_map = parse_location_url_map(getattr(settings, "SYNC_CITY_ML_URLS", "") or "")
+    token_map = parse_location_url_map(getattr(settings, "SYNC_CITY_API_TOKENS", "") or "")
+    if not base_map:
+        return 0
+
+    display = {
+        "PESHAWAR": "Peshawar",
+        "ABBOTTABAD": "Abbottabad",
+        "DI_KHAN": "DI Khan",
+        "MARDAN": "Mardan",
+        "NOWSHERA": "Nowshera",
+        "KOHAT": "Kohat",
+    }
+
+    created_or_updated = 0
+    for loc, base_url in base_map.items():
+        base_url = ensure_http_url(base_url, default_port=8000)
+        ml_url = ensure_http_url(ml_map.get(loc, ""), default_port=8100) if ml_map.get(loc) else ""
+        token = (token_map.get(loc) or "").strip()
+        if not token:
+            token = token_for_user(user) or "pending"
+
+        qs = RemoteServer.objects.filter(location_code__iexact=loc)
+        server = qs.first()
+        if server is None:
+            # Also match by name containing the location
+            server = (
+                RemoteServer.objects.filter(name__icontains=loc.replace("_", " "))
+                .exclude(location_code__iexact="LOCAL")
+                .first()
+            )
+
+        fields = {
+            "name": display.get(loc, loc.replace("_", " ").title()),
+            "location_code": loc,
+            "connection_mode": ConnectionMode.DJANGO,
+            "base_url": base_url,
+            "is_active": True,
+            "notes": "Auto-linked from SYNC_CITY_BASE_URLS (city_sync)",
+        }
+        if ml_url:
+            fields["ml_base_url"] = ml_url
+        # Don't wipe a hand-set token with "pending"
+        if token and token != "pending":
+            fields["auth_token"] = token
+        elif server is None:
+            fields["auth_token"] = token or "pending"
+
+        if server is None:
+            RemoteServer.objects.create(
+                **fields,
+                cached_cameras=[],
+                created_by=user if getattr(user, "is_authenticated", False) else None,
+            )
+            created_or_updated += 1
+        else:
+            update_fields = []
+            for key, val in fields.items():
+                if getattr(server, key, None) != val:
+                    setattr(server, key, val)
+                    update_fields.append(key)
+            if update_fields:
+                server.save(update_fields=update_fields + ["updated_at"])
+                created_or_updated += 1
+
+    return created_or_updated
