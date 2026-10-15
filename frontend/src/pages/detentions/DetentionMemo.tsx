@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { AlertTriangle, BookOpen, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, Package, Plus, Printer, Search, Edit2, Trash2 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -134,15 +136,20 @@ export default function DetentionMemoPage() {
     }
   }, [])
 
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const tableColumns = 10 + (locations.enabled ? 1 : 0)
+
   const filteredRows = useMemo(() => {
-    if (!caseNumberSearch.trim()) return rows
+    const byLocation = rows.filter((r) => locations.matches(r.locationCode, sourceLocation))
+    if (!caseNumberSearch.trim()) return byLocation
     const q = caseNumberSearch.trim().toLowerCase()
-    return rows.filter(
+    return byLocation.filter(
       (r) =>
         r.caseNo.toLowerCase().includes(q) ||
         (r.referenceNumber ?? "").toLowerCase().includes(q)
     )
-  }, [rows, caseNumberSearch])
+  }, [rows, caseNumberSearch, sourceLocation, locations])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pageRows = useMemo(() => filteredRows.slice((page - 1) * pageSize, page * pageSize), [filteredRows, page, pageSize])
@@ -315,6 +322,17 @@ export default function DetentionMemoPage() {
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   />
                 </div>
+                {locations.enabled && (
+                  <SourceLocationSelect
+                    value={sourceLocation}
+                    onChange={(v) => {
+                      setSourceLocation(v)
+                      setPage(1)
+                    }}
+                    options={locations.options}
+                    className="h-8 w-full bg-white text-sm sm:w-44"
+                  />
+                )}
                 {caseNumberSearch ? (
                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={handleClear}>
                     Clear
@@ -435,6 +453,11 @@ export default function DetentionMemoPage() {
                     <TableHead className="w-[9rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Case No
                     </TableHead>
+                    {locations.enabled && (
+                      <TableHead className="w-[7rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Location
+                      </TableHead>
+                    )}
                     <TableHead className="w-[8rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Memo No
                     </TableHead>
@@ -464,13 +487,13 @@ export default function DetentionMemoPage() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         Loading detention memos…
                       </TableCell>
                     </TableRow>
                   ) : pageRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         <Package className="mx-auto mb-2 h-8 w-8 opacity-30" />
                         No detention memos found
                       </TableCell>
@@ -496,6 +519,11 @@ export default function DetentionMemoPage() {
                               {row.caseNo || "—"}
                             </button>
                           </TableCell>
+                          {locations.enabled && (
+                            <TableCell className="whitespace-nowrap px-1.5 py-2 text-xs">
+                              {locations.labelFor(row.locationCode)}
+                            </TableCell>
+                          )}
                           <TableCell className="px-1.5 py-2">
                             <span
                               className="block max-w-full truncate font-mono text-[11px] text-black"

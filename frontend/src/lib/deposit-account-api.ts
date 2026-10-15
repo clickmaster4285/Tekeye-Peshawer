@@ -21,6 +21,8 @@ function errorMessage(res: Response, body: unknown): string {
 
 export type DepositAccountRow = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   detentionMemoId?: string
   /** Case no. of linked detention memo (if any). */
   linkedMemoCaseNo?: string

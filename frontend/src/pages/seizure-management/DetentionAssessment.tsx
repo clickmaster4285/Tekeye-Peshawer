@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useNavigate } from "react-router-dom"
 import {
   ClipboardCheck,
@@ -169,10 +171,15 @@ export default function DetentionAssessmentPage() {
     return map
   }, [assessments])
 
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const tableColumns = 12 + (locations.enabled ? 1 : 0)
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return memos
-    return memos.filter((m) => {
+    const byLocation = memos.filter((m) => locations.matches(m.locationCode, sourceLocation))
+    if (!q) return byLocation
+    return byLocation.filter((m) => {
       const assessment = assessmentByMemoId.get(m.id)
       return (
         (m.caseNo || "").toLowerCase().includes(q) ||
@@ -184,7 +191,7 @@ export default function DetentionAssessmentPage() {
         (assessment?.status || "").toLowerCase().includes(q)
       )
     })
-  }, [memos, search, assessmentByMemoId])
+  }, [memos, search, assessmentByMemoId, sourceLocation, locations])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const pageRows = useMemo(
@@ -397,6 +404,17 @@ export default function DetentionAssessmentPage() {
                   }}
                 />
               </div>
+              {locations.enabled && (
+                <SourceLocationSelect
+                  value={sourceLocation}
+                  onChange={(v) => {
+                    setSourceLocation(v)
+                    setPage(1)
+                  }}
+                  options={locations.options}
+                  className="h-8 w-full bg-white text-sm sm:w-44"
+                />
+              )}
               <p className="text-xs text-muted-foreground tabular-nums">
                 {filtered.length} of {memos.length} shown
               </p>
@@ -412,6 +430,11 @@ export default function DetentionAssessmentPage() {
                     <TableHead className="w-[8.5rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Case No
                     </TableHead>
+                    {locations.enabled && (
+                      <TableHead className="w-[7rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Location
+                      </TableHead>
+                    )}
                     <TableHead className="w-[7.5rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Memo No
                     </TableHead>
@@ -447,14 +470,14 @@ export default function DetentionAssessmentPage() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={12} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
                         Loading detention memos…
                       </TableCell>
                     </TableRow>
                   ) : filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={12} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         No detention memos found. Create a detention memo first.
                       </TableCell>
                     </TableRow>
@@ -487,6 +510,11 @@ export default function DetentionAssessmentPage() {
                               {memo.caseNo || "—"}
                             </button>
                           </TableCell>
+                          {locations.enabled && (
+                            <TableCell className="whitespace-nowrap px-1.5 py-2 text-xs">
+                              {locations.labelFor(memo.locationCode)}
+                            </TableCell>
+                          )}
                           <TableCell className="px-1.5 py-2">
                             <span
                               className="block max-w-full truncate font-mono text-[11px] text-black"

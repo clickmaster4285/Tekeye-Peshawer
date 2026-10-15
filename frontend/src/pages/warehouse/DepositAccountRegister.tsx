@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link } from "react-router-dom"
 import { BookOpen, Eye, Package, Plus, Trash2 } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -74,6 +76,9 @@ const emptyForm = () => ({
 
 export default function DepositAccountRegisterPage() {
   const [rows, setRows] = useState<DepositAccountRow[]>([])
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const visibleRows = rows.filter((r) => locations.matches(r.locationCode, sourceLocation))
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -226,10 +231,15 @@ export default function DepositAccountRegisterPage() {
                 Treasury challans linked to case/seizure and FIR. Use <strong>Seize</strong> to forward a line to the Seizure Register when goods must be seized (same as Release Inventory → Transfer to Seizure). View opens the deposit detail.
               </CardDescription>
             </div>
-            <Button className="w-full flex-shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto" onClick={openAdd}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Entry
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {locations.enabled && (
+                <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+              )}
+              <Button className="w-full flex-shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto" onClick={openAdd}>
+                <Plus className="h-4 w-4 mr-2" />
+                New Entry
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="w-full min-w-0 space-y-3">
             {loadError && (
@@ -248,7 +258,7 @@ export default function DepositAccountRegisterPage() {
             {rows.length > 0 && (
               <>
                 <div className="divide-y rounded-lg border md:hidden">
-                  {rows.map((row) => (
+                  {visibleRows.map((row) => (
                     <div key={row.id} className="p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="truncate text-sm font-semibold">{row.treasuryChallanNo || "—"}</p>
@@ -258,6 +268,11 @@ export default function DepositAccountRegisterPage() {
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                         <p className="truncate text-muted-foreground">Type: <span className="text-foreground">{row.depositType}</span></p>
+                        {locations.enabled && (
+                          <p className="truncate text-muted-foreground">
+                            Location: <span className="text-foreground">{locations.labelFor(row.locationCode)}</span>
+                          </p>
+                        )}
                         <p className="truncate text-muted-foreground">Date: <span className="text-foreground">{row.depositDate || "—"}</span></p>
                         <p className="truncate text-muted-foreground">Case Ref: <span className="text-foreground">{row.caseSeizureRef || "—"}</span></p>
                         <p className="truncate text-muted-foreground">FIR: <span className="text-foreground">{row.firNo || "—"}</span></p>
@@ -308,6 +323,7 @@ export default function DepositAccountRegisterPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Treasury Challan No</TableHead>
+                          {locations.enabled && <TableHead>Location</TableHead>}
                           <TableHead>Deposit Type</TableHead>
                           <TableHead>Case/Seizure Ref</TableHead>
                           <TableHead>FIR No</TableHead>
@@ -320,9 +336,12 @@ export default function DepositAccountRegisterPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {rows.map((row) => (
+                        {visibleRows.map((row) => (
                           <TableRow key={row.id}>
                             <TableCell className="font-medium">{row.treasuryChallanNo || "—"}</TableCell>
+                            {locations.enabled && (
+                              <TableCell className="whitespace-nowrap">{locations.labelFor(row.locationCode)}</TableCell>
+                            )}
                             <TableCell>{row.depositType}</TableCell>
                             <TableCell>{row.caseSeizureRef || "—"}</TableCell>
                             <TableCell>{row.firNo || "—"}</TableCell>

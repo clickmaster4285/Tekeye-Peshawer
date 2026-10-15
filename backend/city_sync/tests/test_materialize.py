@@ -210,6 +210,110 @@ class MaterializeTests(TestCase):
         self.assertEqual(names("?source_location=PESHAWAR"), ["Local"])
 
 
+@override_settings(**HQ)
+class MaterializeStage3bTests(TestCase):
+    def test_detection_copied_without_camera_and_filtered_by_location(self):
+        from cameras.models import ClipStatus, DetectionEvent
+
+        eid = uuid.uuid4()
+        payload = {
+            "_pk": 1,
+            "_model": "cameras.DetectionEvent",
+            "camera": 1,
+            "class_name": "car",
+            "label": "car",
+            "confidence": 0.9,
+            "clip": "",
+            "clip_status": "recording",
+            "person_identity_id": 77,
+            "created_at": "2026-10-15T10:40:51+00:00",
+        }
+        send("detection_event", payload, entity_id=eid)
+        event = DetectionEvent.objects.get(entity_id=eid)
+        self.assertIsNone(event.camera_id)
+        self.assertIsNone(event.person_identity_id)
+        # HQ's snapshot worker must never pick up a city event.
+        self.assertEqual(event.clip_status, ClipStatus.SKIPPED)
+        self.assertEqual(event.location_code, "ABBOTTABAD")
+
+        admin = User.objects.create_user(username="sa", password="x", role="ADMIN")
+        client = APIClient()
+        client.force_authenticate(admin)
+
+        def ids(qs=""):
+            data = client.get(f"/api/cameras/detection-events/{qs}").json()
+            rows = data.get("results", data) if isinstance(data, dict) else data
+            return [r["id"] for r in rows]
+
+        self.assertIn(event.pk, ids())
+        self.assertIn(event.pk, ids("?source_location=ABBOTTABAD"))
+        self.assertNotIn(event.pk, ids("?source_location=PESHAWAR"))
+
+    def test_vehicle_waits_for_its_visitor(self):
+        from visitors.models import Vehicle, Visitor
+
+        vid, cid = uuid.uuid4(), uuid.uuid4()
+        vehicle = {"_pk": 3, "_model": "visitors.Vehicle", "visitor": 9, "plate_number": "ABC-123"}
+        self.assertEqual(send("vehicle", vehicle, entity_id=cid)["result"], "applied")
+        self.assertFalse(Vehicle.objects.filter(entity_id=cid).exists())
+
+        send("visitor", {"_pk": 9, "_model": "visitors.Visitor", "full_name": "Guest", "registered_by_user_id": 4}, entity_id=vid)
+        visitor = Visitor.objects.get(entity_id=vid)
+        self.assertIsNone(visitor.registered_by_user_id)
+        copied = Vehicle.objects.get(entity_id=cid)
+        self.assertEqual(copied.visitor_id, visitor.pk)
+        self.assertEqual(copied.location_code, "ABBOTTABAD")
+        self.assertFalse(HqPendingLink.objects.exists())
+
+    def test_detention_memo_keeps_uuid_and_children_link(self):
+        from detentions.models import DepositAccountEntry, DetentionMemo
+
+        memo_pk, entry_pk = uuid.uuid4(), uuid.uuid4()
+        send("detention_memo", {"_pk": str(memo_pk), "_model": "detentions.DetentionMemo", "case_no": "C-1"}, entity_id=memo_pk)
+        send(
+            "deposit_account_entry",
+            {"_pk": str(entry_pk), "_model": "detentions.DepositAccountEntry", "detention_memo": str(memo_pk)},
+            entity_id=entry_pk,
+        )
+        memo = DetentionMemo.objects.get(entity_id=memo_pk)
+        self.assertEqual(memo.pk, memo_pk)
+        self.assertEqual(DepositAccountEntry.objects.get(entity_id=entry_pk).detention_memo_id, memo_pk)
+
+    def test_vms_list_record_id_clash_is_prefixed(self):
+        from visitors.models import VmsListRecord
+
+        VmsListRecord.objects.create(module="vms_blacklist_management_rows", record_id="row-1", data={})
+        rid = uuid.uuid4()
+        send(
+            "vms_list_record",
+            {"_pk": 5, "_model": "visitors.VmsListRecord", "module": "vms_blacklist_management_rows", "record_id": "row-1", "data": {"name": "X"}},
+            entity_id=rid,
+        )
+        self.assertEqual(VmsListRecord.objects.get(entity_id=rid).record_id, "ABBOTTABAD:row-1")
+        self.assertTrue(HqConflict.objects.filter(reason__startswith="prefixed_on_clash").exists())
+
+        # The whole-list editor only shows (and rewrites) this server's own rows.
+        admin = User.objects.create_user(username="sa", password="x", role="ADMIN")
+        client = APIClient()
+        client.force_authenticate(admin)
+        rows = client.get("/api/vms/lists/?module=vms_blacklist_management_rows").json()
+        self.assertEqual([r["id"] for r in rows], ["row-1"])
+
+    def test_destruction_alert_drops_city_user_ids(self):
+        from warehouse.models import DestructionAlert
+
+        aid = uuid.uuid4()
+        send(
+            "destruction_alert",
+            {"_pk": str(aid), "_model": "warehouse.DestructionAlert", "detention_memo_id": str(uuid.uuid4()),
+             "notified_user_ids": [1, 2], "camera": 4},
+            entity_id=aid,
+        )
+        alert = DestructionAlert.objects.get(entity_id=aid)
+        self.assertEqual(alert.notified_user_ids, [])
+        self.assertIsNone(alert.camera_id)
+
+
 @override_settings(**CITY)
 class CityDeleteTests(TestCase):
     def test_normal_delete_works_and_sends_tombstone(self):

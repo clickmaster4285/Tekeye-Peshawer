@@ -198,7 +198,7 @@ def get_memo_queryset():
             "goods_lines__located_camera__ml_server",
             "goods_lines__detection_event",
             "attachments",
-        ).all()
+        ).filter(is_deleted=False)
 
     )
 
@@ -345,7 +345,7 @@ class DepositAccountEntryListAPIView(APIView):
     def get(self, request):
 
         qs = DepositAccountEntry.objects.select_related(
-            "detention_memo").all().order_by("-created_at")
+            "detention_memo").filter(is_deleted=False).order_by("-created_at")
 
         return Response([deposit_entry_to_frontend_dict(e) for e in qs])
 

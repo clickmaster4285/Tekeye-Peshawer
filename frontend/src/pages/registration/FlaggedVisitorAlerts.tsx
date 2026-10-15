@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
 import { AlertTriangle, Bell, Loader2, CheckCircle2 } from "lucide-react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 
 function formatDate(s: string) {
   if (!s) return "—"
@@ -30,11 +32,14 @@ function severityClass(severity: string) {
 export default function FlaggedVisitorAlertsPage() {
   const [filterAck, setFilterAck] = useState<boolean | undefined>(undefined)
   const queryClient = useQueryClient()
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
 
-  const { data: alerts, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["vms", "security-alerts", filterAck],
     queryFn: () => fetchSecurityAlerts({ acknowledged: filterAck }),
   })
+  const alerts = data?.filter((a) => locations.matches(a.location_code, sourceLocation))
 
   const acknowledgeMutation = useMutation({
     mutationFn: (alertId: number) => acknowledgeSecurityAlert(alertId),
@@ -99,6 +104,14 @@ export default function FlaggedVisitorAlertsPage() {
             >
               Acknowledged
             </Button>
+            {locations.enabled && (
+              <SourceLocationSelect
+                value={sourceLocation}
+                onChange={setSourceLocation}
+                options={locations.options}
+                className="h-9 w-full sm:ml-auto sm:w-48"
+              />
+            )}
           </div>
 
           {isLoading && (
@@ -145,6 +158,7 @@ export default function FlaggedVisitorAlertsPage() {
                           </p>
                           <p className="text-sm text-muted-foreground mt-0.5">{a.message}</p>
                           <p className="text-xs text-muted-foreground mt-1">
+                            {locations.enabled && `${locations.labelFor(a.location_code)} · `}
                             Severity: {a.severity}
                             {a.zone && ` · Zone: ${a.zone}`}
                             {a.gate && ` · Gate: ${a.gate}`}

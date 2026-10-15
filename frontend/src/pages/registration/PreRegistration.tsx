@@ -1,5 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { WalkInStepIndicator } from "@/components/walk-in/step-indicator"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -244,7 +246,12 @@ export default function PreRegistrationPage() {
     queryKey: ["visitors", "pre-registration"],
     queryFn: () => fetchVisitors("pre-registration"),
   })
-  const registrations = (data ?? []).map(mapVisitorToRegistration)
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const visibleVisitors = (data ?? []).filter((v) => locations.matches(v.location_code, sourceLocation))
+  const locationById = new Map(visibleVisitors.map((v) => [v.id, v.location_code]))
+  const registrations = visibleVisitors.map(mapVisitorToRegistration)
+  const tableColumns = 12 + (locations.enabled ? 1 : 0)
   const [showForm, setShowForm] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
   const [deleteId, setDeleteId] = useState<number | null>(null)
@@ -661,15 +668,23 @@ export default function PreRegistrationPage() {
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-border bg-muted/30">
-              <h2 className="text-[22px] font-bold text-foreground">Recent Registrations</h2>
-              <p className="text-base text-muted-foreground mt-0.5">Click a row to view details or use the menu for actions.</p>
+            <div className="px-4 sm:px-6 py-4 border-b border-border bg-muted/30 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-[22px] font-bold text-foreground">Recent Registrations</h2>
+                <p className="text-base text-muted-foreground mt-0.5">Click a row to view details or use the menu for actions.</p>
+              </div>
+              {locations.enabled && (
+                <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-160">
                 <thead>
                   <tr className="border-b border-border bg-muted/20">
                     <th className="text-left px-4 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Visitor Name</th>
+                    {locations.enabled && (
+                      <th className="text-left px-4 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
+                    )}
                     <th className="text-left px-4 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden md:table-cell">Type</th>
                     <th className="text-left px-4 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Department</th>
                     <th className="text-left px-4 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider hidden xl:table-cell">CNIC / ID</th>
@@ -686,17 +701,17 @@ export default function PreRegistrationPage() {
                 <tbody>
                   {isLoading ? (
                     <tr className="border-b border-border last:border-0">
-                      <td colSpan={12} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading registrations…</td>
+                      <td colSpan={tableColumns} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading registrations…</td>
                     </tr>
                   ) : isError ? (
                     <tr className="border-b border-border last:border-0">
-                      <td colSpan={12} className="px-4 py-6 text-center text-sm text-destructive">
+                      <td colSpan={tableColumns} className="px-4 py-6 text-center text-sm text-destructive">
                         {error instanceof Error ? error.message : "Failed to load registrations."}
                       </td>
                     </tr>
                   ) : registrations.length === 0 ? (
                     <tr className="border-b border-border last:border-0">
-                      <td colSpan={12} className="px-4 py-6 text-center text-sm text-muted-foreground">No registrations found.</td>
+                      <td colSpan={tableColumns} className="px-4 py-6 text-center text-sm text-muted-foreground">No registrations found.</td>
                     </tr>
                   ) : (
                     registrations.map((reg) => (
@@ -714,6 +729,11 @@ export default function PreRegistrationPage() {
                             <span className="text-sm font-medium text-foreground">{reg.name}</span>
                           </div>
                         </td>
+                        {locations.enabled && (
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="text-sm text-muted-foreground">{locations.labelFor(locationById.get(reg.id))}</span>
+                          </td>
+                        )}
                         <td className="px-4 py-3 hidden md:table-cell">
                           <span className="text-sm text-muted-foreground">{reg.type}</span>
                         </td>

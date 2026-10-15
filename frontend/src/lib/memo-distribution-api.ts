@@ -204,6 +204,8 @@ function mapAlert(raw: Record<string, unknown>): DestructionAlertRecord {
 
 export type WarehouseStockRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   detentionMemoId: string | null
   caseRef: string
   qrCode: string
@@ -228,6 +230,7 @@ export async function fetchWarehouseStock(detentionMemoId?: string): Promise<War
     quantity: String(row.quantity ?? "0"),
     unit: String(row.unit || ""),
     status: String(row.status || ""),
+    locationCode: String(row.location_code || ""),
   }))
 }
 

@@ -99,6 +99,7 @@ class WarehouseStockItemSerializer(serializers.ModelSerializer):
             "godown_warehouse",
             "status",
             "updated_at",
+            "location_code",
         ]
 
 

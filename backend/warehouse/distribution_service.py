@@ -19,6 +19,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from cameras.models import Camera
+from city_sync.identity import local_rows_q
 from cameras.stream_utils import ffmpeg_path, hwaccel_input_flags, video_encoder_flags
 from detentions.models import DepositAccountEntry, DetentionMemo, DetentionMemoGoodsLine
 
@@ -76,7 +77,8 @@ def sync_stock_items(rows: list[dict[str, Any]]) -> int:
             "status": str(row.get("status") or "In Custody").strip(),
             "detention_memo_id": row.get("detentionMemoId") or row.get("detention_memo_id") or None,
         }
-        _, created = WarehouseStockItem.objects.update_or_create(
+        # This server's own stock only; HQ copies of city stock are never rewritten here.
+        _, created = WarehouseStockItem.objects.filter(local_rows_q()).update_or_create(
             client_row_id=client_id,
             defaults=defaults,
         )
@@ -151,7 +153,7 @@ def _find_stock_for_item(memo: DetentionMemo, item: dict[str, Any]) -> Warehouse
     qr = (item.get("qr_code") or "").strip()
     if qr:
         stock = (
-            WarehouseStockItem.objects.filter(qr_code__iexact=qr)
+            WarehouseStockItem.objects.filter(local_rows_q(), qr_code__iexact=qr)
             .exclude(quantity__lte=0)
             .order_by("-updated_at")
             .first()
@@ -162,7 +164,7 @@ def _find_stock_for_item(memo: DetentionMemo, item: dict[str, Any]) -> Warehouse
     gl = _resolve_goods_line(memo, item)
     if gl and (gl.qr_code_number or "").strip():
         stock = (
-            WarehouseStockItem.objects.filter(qr_code__iexact=gl.qr_code_number.strip())
+            WarehouseStockItem.objects.filter(local_rows_q(), qr_code__iexact=gl.qr_code_number.strip())
             .exclude(quantity__lte=0)
             .order_by("-updated_at")
             .first()

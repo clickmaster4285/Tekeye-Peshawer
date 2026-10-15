@@ -159,6 +159,8 @@ export type DetectionEvent = {
   clip_url?: string;
   video_url?: string;
   created_at: string;
+  /** Server the event came from (Locations & Sync); empty = this server. */
+  location_code?: string;
 };
 
 export type DetectionSummary = {
@@ -195,6 +197,8 @@ export type DetectionEventsQuery = {
   vehicle_only?: boolean;
   as_of?: string;
   as_of_id?: number;
+  /** Location code from Locations & Sync (HQ Super Admin only). */
+  source_location?: string;
 };
 
 export type StreamCameraMeta = {
@@ -603,6 +607,7 @@ export async function fetchDetectionEventsPage(
   if (query.is_alert === false) params.set("is_alert", "false");
   if (query.as_of) params.set("as_of", query.as_of);
   if (query.as_of_id != null) params.set("as_of_id", String(query.as_of_id));
+  if (query.source_location) params.set("source_location", query.source_location);
 
   const res = await fetch(`${API}/cameras/detection-events/?${params}`, {
     headers: getAuthHeaders(),

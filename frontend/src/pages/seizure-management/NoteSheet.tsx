@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useNavigate } from "react-router-dom"
 import {
   ChevronDown,
@@ -415,17 +417,25 @@ export default function NoteSheetPage() {
     return true
   }
 
-  const periodRows = useMemo(() => rows.filter(inActiveRange), [rows, activeRange.from, activeRange.to])
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const tableColumns = 9 + (locations.enabled ? 1 : 0)
+  const locationRows = useMemo(
+    () => rows.filter((r) => locations.matches(r.locationCode, sourceLocation)),
+    [rows, sourceLocation, locations]
+  )
+
+  const periodRows = useMemo(() => locationRows.filter(inActiveRange), [locationRows, activeRange.from, activeRange.to])
 
   const counts = useMemo(() => {
     const byDay = (from: string, to: string) =>
-      rows.filter((row) => {
+      locationRows.filter((row) => {
         const day = sheetDay(row)
         return Boolean(day && day >= from && day <= to)
       }).length
     const byStatus = (status: NoteSheetStatus) => periodRows.filter((row) => row.status === status).length
     return {
-      all: rows.length,
+      all: locationRows.length,
       today: byDay(today, today),
       week: byDay(weekFrom, today),
       month: byDay(monthFrom, today),
@@ -434,7 +444,7 @@ export default function NoteSheetPage() {
       Approved: byStatus("Approved"),
       Rejected: byStatus("Rejected"),
     }
-  }, [rows, periodRows, today, weekFrom, monthFrom])
+  }, [locationRows, periodRows, today, weekFrom, monthFrom])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -672,6 +682,14 @@ export default function NoteSheetPage() {
                 ) : null}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:ml-auto">
+                {locations.enabled && (
+                  <SourceLocationSelect
+                    value={sourceLocation}
+                    onChange={setSourceLocation}
+                    options={locations.options}
+                    className="h-8 w-full bg-white text-sm sm:w-44"
+                  />
+                )}
                 <div className="relative w-full sm:w-72">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -716,6 +734,11 @@ export default function NoteSheetPage() {
                     <TableHead className="sticky left-12 z-20 w-[10.5rem] bg-slate-50/95 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Note Sheet No.
                     </TableHead>
+                    {locations.enabled && (
+                      <TableHead className="w-[7rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Location
+                      </TableHead>
+                    )}
                     <TableHead className="w-[12rem] max-w-[14rem] px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Subject
                     </TableHead>
@@ -742,13 +765,13 @@ export default function NoteSheetPage() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         Loading note sheets…
                       </TableCell>
                     </TableRow>
                   ) : filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-14 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={tableColumns} className="py-14 text-center text-sm text-muted-foreground">
                         {rows.length === 0 ? "No note sheets yet." : "No note sheets match these filters."}
                       </TableCell>
                     </TableRow>
@@ -776,6 +799,11 @@ export default function NoteSheetPage() {
                             </p>
                           ) : null}
                         </TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap px-1.5 py-2 text-xs">
+                            {locations.labelFor(row.locationCode)}
+                          </TableCell>
+                        )}
                         <TableCell className="w-[12rem] max-w-[14rem] whitespace-normal px-1.5 py-2">
                           <p
                             className="line-clamp-2 w-full max-w-[14rem] break-words text-sm leading-snug text-foreground"

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import {
   Scan,
   Package,
@@ -260,7 +262,16 @@ export default function ObjectDetectionPage() {
     queryFn: () => fetchCameras(),
   })
 
-  const queryParams = useMemo(() => buildQuery(page, pageSize, applied), [page, pageSize, applied])
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const queryParams = useMemo(
+    () => ({
+      ...buildQuery(page, pageSize, applied),
+      source_location: sourceLocation === ALL_SOURCE_LOCATIONS ? undefined : sourceLocation,
+    }),
+    [page, pageSize, applied, sourceLocation]
+  )
+  const tableColumns = (isAdmin ? 8 : 7) + (locations.enabled ? 1 : 0)
 
   const {
     data: eventsPage,
@@ -618,6 +629,20 @@ export default function ObjectDetectionPage() {
                   />
                 </div>
               </div>
+              {locations.enabled && (
+                <div className="space-y-2">
+                  <Label>Location</Label>
+                  <SourceLocationSelect
+                    value={sourceLocation}
+                    onChange={(v) => {
+                      setSourceLocation(v)
+                      setPage(1)
+                    }}
+                    options={locations.options}
+                    className="w-full"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Site</Label>
                 <Select
@@ -860,6 +885,7 @@ export default function ObjectDetectionPage() {
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead className="w-[170px]">Date & time</TableHead>
+                    {locations.enabled && <TableHead>Location</TableHead>}
                     <TableHead>Site</TableHead>
                     <TableHead>Camera</TableHead>
                     <TableHead>Class</TableHead>
@@ -872,13 +898,13 @@ export default function ObjectDetectionPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={isAdmin ? 8 : 7} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-12">
                         Loading detection records…
                       </TableCell>
                     </TableRow>
                   ) : events.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isAdmin ? 8 : 7} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-12">
                         <Camera className="h-8 w-8 mx-auto mb-2 opacity-40" />
                         {hasActiveFilters
                           ? "No detections match your filters. Try broader search terms or clear filters."
@@ -891,6 +917,9 @@ export default function ObjectDetectionPage() {
                         <TableCell className="font-mono text-xs whitespace-nowrap">
                           {formatDateTime(row.created_at)}
                         </TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap text-sm">{locations.labelFor(row.location_code)}</TableCell>
+                        )}
                         <TableCell className="text-sm">
                           {row.site_name || row.site_code || "—"}
                         </TableCell>

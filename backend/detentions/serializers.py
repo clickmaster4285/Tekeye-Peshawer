@@ -360,6 +360,7 @@ def memo_to_frontend_dict(memo: DetentionMemo, request=None) -> dict:
 
     return {
         "id": str(memo.pk),
+        "locationCode": memo.location_code or "",
         "caseNo": memo.case_no,
         "referenceNumber": memo.reference_number,
         "firNumber": memo.fir_number,
@@ -484,6 +485,7 @@ def deposit_entry_to_frontend_dict(entry: DepositAccountEntry) -> dict:
     updated = entry.updated_at
     return {
         "id": str(entry.pk),
+        "locationCode": entry.location_code or "",
         "detentionMemoId": str(entry.detention_memo_id) if entry.detention_memo_id else "",
         "linkedMemoCaseNo": linked_case,
         "treasuryChallanNo": entry.treasury_challan_no,

@@ -10,7 +10,9 @@ Rules:
 - A city row that matches a row HQ already owns (same entity_id, or same CNIC for
   staff) is linked, never overwritten: Peshawar wins.
 - City foreign keys are city pks; they are resolved through HqEntityMap. A parent
-  that has not arrived yet becomes an HqPendingLink and is filled in later.
+  that has not arrived yet becomes an HqPendingLink and is filled in later. When the
+  link is required (NOT NULL), the whole row waits and is copied when the parent arrives.
+- Links to tables that are not synced (cameras, user accounts, ...) are left empty.
 - File fields point at the HQ copy of the media file once it is verified.
 """
 
@@ -25,29 +27,50 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from city_sync.models import HqConflict, HqEntityMap, HqMediaObject, HqPendingLink
-from city_sync.syncable import SYNC_MEDIA_FIELDS, SYNCED_ENTITY_TYPES, resolve_model
+from city_sync.syncable import SYNC_MEDIA_FIELDS, SYNCED_ENTITY_TYPES, entity_type_for_model, resolve_model
 
 logger = logging.getLogger(__name__)
 
 SYNC_FIELDS = {"entity_id", "location_code", "version", "is_deleted"}
 
+# HqPendingLink.field prefix for a row that cannot be written until a required parent arrives.
+WAITING_ROW = "__row__:"
+
 
 class Materializer:
     entity_type: str = ""
-    # field name -> entity_type of the parent (resolved through HqEntityMap)
-    foreign_keys: dict[str, str] = {}
     # fields forced to a value on HQ copies (e.g. city user accounts do not exist at HQ)
     overrides: dict[str, Any] = {}
     # unique fields cleared (and reported) when they clash with an existing HQ row
     clear_on_clash: tuple[str, ...] = ()
+    # unique text fields prefixed with "<CITY>:" (and reported) when they clash
+    prefix_on_clash: tuple[str, ...] = ()
+
+    def __init__(self, entity_type: str = ""):
+        if entity_type:
+            self.entity_type = entity_type
 
     @property
     def model(self):
         return resolve_model(SYNCED_ENTITY_TYPES[self.entity_type])
 
+    @property
+    def foreign_keys(self) -> dict[str, str]:
+        """FK field name -> entity_type of its parent, for parents that are synced too."""
+        out = {}
+        for field in self.model._meta.concrete_fields:
+            if field.is_relation and field.name not in self.overrides:
+                target = entity_type_for_model(field.related_model)
+                if target:
+                    out[field.name] = target
+        return out
+
     def find_hq_owned(self, values: dict) -> Any | None:
         """An existing HQ row that is the same real-world record (Peshawar wins)."""
         return None
+
+    def adjust(self, values: dict) -> None:
+        """Last changes to the HQ copy before it is written."""
 
 
 class StaffMaterializer(Materializer):
@@ -81,18 +104,99 @@ class StaffMaterializer(Materializer):
 
 class AttendanceMaterializer(Materializer):
     entity_type = "attendance"
-    foreign_keys = {"staff": "staff"}
     overrides = {"user": None, "video": None}
     # (staff, date) is unique: on a clash keep the record but leave staff empty.
     clear_on_clash = ("staff",)
 
 
-MATERIALIZERS: dict[str, Materializer] = {
-    m.entity_type: m for m in (StaffMaterializer(), AttendanceMaterializer())
-}
+class DetectionEventMaterializer(Materializer):
+    entity_type = "detection_event"
+    # City cameras are not at HQ; camera stays empty (city copies are skipped by HQ workers).
+    overrides = {"camera": None, "person_identity_id": None}
+
+    def adjust(self, values: dict) -> None:
+        from cameras.models import ClipStatus
+
+        # Never let HQ's snapshot worker pick up a city event.
+        values["clip_status"] = ClipStatus.READY if values.get("clip") else ClipStatus.SKIPPED
+
+
+class NoteSheetMaterializer(Materializer):
+    entity_type = "note_sheet"
+    # City user ids mean nothing at HQ.
+    overrides = {"forward_to_user_id": None}
+    # One note sheet per detention memo.
+    clear_on_clash = ("detention_memo",)
+
+
+class VisitorMaterializer(Materializer):
+    entity_type = "visitor"
+    overrides = {"registered_by_user_id": None}
+
+
+class MemoDistributionMaterializer(Materializer):
+    entity_type = "memo_distribution"
+    # City camera ids mean nothing at HQ.
+    overrides = {"camera_ids": []}
+
+
+class DestructionAlertMaterializer(Materializer):
+    entity_type = "destruction_alert"
+    # City user ids would show the alert to unrelated HQ users.
+    overrides = {"notified_user_ids": []}
+
+
+class VmsListRecordMaterializer(Materializer):
+    entity_type = "vms_list_record"
+    # (module, record_id) is unique; a city id that HQ already uses becomes "ABBOTTABAD:<id>".
+    prefix_on_clash = ("record_id",)
+
 
 # Parents first, so a full-history push links children on arrival.
-ENTITY_ORDER = ["staff", "attendance"]
+ENTITY_ORDER = [
+    "staff",
+    "attendance",
+    "detection_event",
+    "visitor",
+    "vehicle",
+    "security_alert",
+    "zone_access_log",
+    "vms_list_record",
+    "detention_memo",
+    "detention_goods_line",
+    "detention_goods_image",
+    "detention_attachment",
+    "deposit_account_entry",
+    "note_sheet",
+    "note_sheet_item",
+    "note_sheet_item_image",
+    "note_sheet_attachment",
+    "detention_assessment",
+    "detention_assessment_attachment",
+    "recovery_memo",
+    "seizure_report",
+    "warehouse_stock_item",
+    "memo_distribution",
+    "destruction_alert",
+]
+
+_CUSTOM = {
+    m.entity_type: m
+    for m in (
+        StaffMaterializer(),
+        AttendanceMaterializer(),
+        DetectionEventMaterializer(),
+        NoteSheetMaterializer(),
+        VisitorMaterializer(),
+        MemoDistributionMaterializer(),
+        DestructionAlertMaterializer(),
+        VmsListRecordMaterializer(),
+    )
+}
+
+# Not copied yet: leave_request (needs leave types), journey_person / journey_event
+# (would mix into HQ live person matching). They stay in HqReplicaRow only.
+MATERIALIZERS: dict[str, Materializer] = {t: _CUSTOM.get(t) or Materializer(t) for t in ENTITY_ORDER}
 
 
 def hq_media_relative_path(storage_path: str) -> str | None:
@@ -134,12 +238,14 @@ def _conflict(loc: str, entity_type: str, entity_id: UUID, version: int, reason:
 
 def _build_values(
     mat: Materializer, *, loc: str, entity_id: UUID, version: int, payload: dict, is_deleted: bool
-) -> tuple[dict, dict[str, str]]:
-    """(field values for the HQ row, {fk field: parent origin pk still missing})."""
+) -> tuple[dict, dict[str, str], dict[str, str]]:
+    """(field values for the HQ row, {fk field: missing parent origin pk}, same for NOT NULL fks)."""
     model = mat.model
     media_fields = set(SYNC_MEDIA_FIELDS.get(mat.entity_type) or [])
+    foreign_keys = mat.foreign_keys
     values: dict[str, Any] = {}
     pending: dict[str, str] = {}
+    required: dict[str, str] = {}
 
     for field in model._meta.concrete_fields:
         name = field.name
@@ -152,7 +258,7 @@ def _build_values(
             continue
         raw = payload[name]
         if field.is_relation:
-            target = mat.foreign_keys.get(name)
+            target = foreign_keys.get(name)
             local = None
             if target and raw not in (None, ""):
                 link = HqEntityMap.objects.filter(
@@ -160,8 +266,10 @@ def _build_values(
                 ).first()
                 if link:
                     local = link.local_pk
-                else:
+                elif field.null:
                     pending[name] = str(raw)
+                else:
+                    required[name] = str(raw)
             values[field.attname] = local
             continue
         if name in media_fields:
@@ -178,7 +286,22 @@ def _build_values(
         version=version,
         is_deleted=is_deleted or bool(payload.get("is_deleted")),
     )
-    return values, pending
+    mat.adjust(values)
+    return values, pending, required
+
+
+def _same_uuid_pk(model, payload: dict) -> dict:
+    """UUID primary keys are kept, so plain-id references (e.g. detention_memo_id) still match."""
+    pk = model._meta.pk
+    if pk.get_internal_type() != "UUIDField":
+        return {}
+    try:
+        value = UUID(str(payload.get("_pk") or ""))
+    except ValueError:
+        return {}
+    if model._base_manager.filter(pk=value).exists():
+        return {}
+    return {pk.attname: value}
 
 
 def _write(model, local_pk, values: dict, mat: Materializer, *, loc, entity_id, version, payload) -> Any:
@@ -188,20 +311,24 @@ def _write(model, local_pk, values: dict, mat: Materializer, *, loc, entity_id, 
             with transaction.atomic():
                 if local_pk is None:
                     # bulk_create: no save() signals for copied city rows.
-                    obj = model(**values)
-                    model.objects.bulk_create([obj])
+                    obj = model(**values, **_same_uuid_pk(model, payload))
+                    model._base_manager.bulk_create([obj])
                     local_pk = obj.pk
                 else:
-                    model.objects.filter(pk=local_pk).update(**values)
+                    model._base_manager.filter(pk=local_pk).update(**values)
             break
         except IntegrityError:
             keys = [model._meta.get_field(f).attname for f in mat.clear_on_clash]
             cleared = [k for k in keys if values.get(k) not in (None, "")]
-            if attempt or not cleared:
+            prefixed = [k for k in mat.prefix_on_clash if values.get(k) and not str(values[k]).startswith(f"{loc}:")]
+            if attempt or not (cleared or prefixed):
                 raise
             for f in cleared:
                 values[f] = None
-            _conflict(loc, mat.entity_type, entity_id, version, f"cleared_on_clash:{','.join(cleared)}", payload)
+            for f in prefixed:
+                values[f] = f"{loc}:{values[f]}"[: model._meta.get_field(f).max_length]
+            reason = "cleared_on_clash" if cleared else "prefixed_on_clash"
+            _conflict(loc, mat.entity_type, entity_id, version, f"{reason}:{','.join(cleared + prefixed)}", payload)
 
     # auto_now / auto_now_add were stamped with "now"; keep the city's timestamps.
     stamps = {}
@@ -211,7 +338,7 @@ def _write(model, local_pk, values: dict, mat: Materializer, *, loc, entity_id, 
             if raw:
                 stamps[field.name] = field.to_python(raw)
     if stamps:
-        model.objects.filter(pk=local_pk).update(**stamps)
+        model._base_manager.filter(pk=local_pk).update(**stamps)
     return local_pk
 
 
@@ -220,18 +347,40 @@ def _resolve_pending(loc: str, entity_type: str, origin_pk: str, local_pk: str) 
     for link in HqPendingLink.objects.filter(
         location_code=loc, target_entity_type=entity_type, target_origin_pk=origin_pk
     ):
+        if link.field.startswith(WAITING_ROW):
+            link.delete()
+            _copy_waiting_row(loc, link.entity_type, link.local_pk)
+            continue
         mat = MATERIALIZERS.get(link.entity_type)
         if mat is not None:
             attname = mat.model._meta.get_field(link.field).attname
             try:
                 with transaction.atomic():
-                    mat.model.objects.filter(pk=link.local_pk).update(**{attname: local_pk})
+                    mat.model._base_manager.filter(pk=link.local_pk).update(**{attname: local_pk})
             except IntegrityError:
                 logger.warning(
                     "Could not link %s#%s.%s to %s#%s (unique clash)",
                     link.entity_type, link.local_pk, link.field, entity_type, local_pk,
                 )
         link.delete()
+
+
+def _copy_waiting_row(loc: str, entity_type: str, entity_id: str) -> None:
+    """A required parent arrived: copy the row that was waiting for it (from its replica)."""
+    from city_sync.models import HqReplicaRow
+
+    row = HqReplicaRow.objects.filter(location_code=loc, entity_type=entity_type, entity_id=entity_id).first()
+    if row is None:
+        return
+    with transaction.atomic():
+        materialize_event(
+            loc=loc,
+            entity_type=entity_type,
+            entity_id=row.entity_id,
+            version=row.entity_version,
+            payload=row.payload,
+            tombstone=row.is_deleted,
+        )
 
 
 def materialize_event(
@@ -246,7 +395,7 @@ def materialize_event(
     if not origin_pk:
         return None
 
-    values, pending = _build_values(
+    values, pending, required = _build_values(
         mat, loc=loc, entity_id=entity_id, version=version, payload=payload, is_deleted=tombstone
     )
 
@@ -260,7 +409,7 @@ def materialize_event(
         return "linked"  # Peshawar wins
 
     if link is None:
-        owned = model.objects.filter(entity_id=entity_id).first() or mat.find_hq_owned(values)
+        owned = model._base_manager.filter(entity_id=entity_id).first() or mat.find_hq_owned(values)
         if owned is not None:
             HqEntityMap.objects.create(
                 location_code=loc,
@@ -272,6 +421,26 @@ def materialize_event(
             )
             _resolve_pending(loc, entity_type, origin_pk, str(owned.pk))
             return "linked"
+
+    foreign_keys = mat.foreign_keys
+    if required:
+        if link is None:
+            # A NOT NULL parent is missing: wait for it (the replica row keeps the data).
+            waiting_key = str(entity_id)
+            HqPendingLink.objects.filter(entity_type=entity_type, local_pk=waiting_key).delete()
+            for field, target_origin in required.items():
+                HqPendingLink.objects.create(
+                    location_code=loc,
+                    entity_type=entity_type,
+                    local_pk=waiting_key,
+                    field=f"{WAITING_ROW}{field}",
+                    target_entity_type=foreign_keys[field],
+                    target_origin_pk=target_origin,
+                )
+            return "waiting"
+        # Already copied: keep its current parent.
+        for field in required:
+            values.pop(model._meta.get_field(field).attname, None)
 
     local_pk = _write(
         model,
@@ -295,14 +464,14 @@ def materialize_event(
         link.origin_pk = origin_pk
         link.save(update_fields=["origin_pk", "updated_at"])
 
-    HqPendingLink.objects.filter(entity_type=entity_type, local_pk=str(local_pk)).delete()
+    HqPendingLink.objects.filter(entity_type=entity_type, local_pk__in=[str(local_pk), str(entity_id)]).delete()
     for field, target_origin in pending.items():
         HqPendingLink.objects.create(
             location_code=loc,
             entity_type=entity_type,
             local_pk=str(local_pk),
             field=field,
-            target_entity_type=mat.foreign_keys[field],
+            target_entity_type=foreign_keys[field],
             target_origin_pk=target_origin,
         )
     _resolve_pending(loc, entity_type, origin_pk, str(local_pk))
@@ -338,7 +507,7 @@ def attach_media(media: HqMediaObject) -> bool:
     }
     if not updates:
         return False
-    mat.model.objects.filter(pk=link.local_pk).update(**updates)
+    mat.model._base_manager.filter(pk=link.local_pk).update(**updates)
     return True
 
 

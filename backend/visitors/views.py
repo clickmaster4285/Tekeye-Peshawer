@@ -40,6 +40,7 @@ from .serializers import (
     VmsListRecordSerializer,
     VmsListBulkSerializer,
 )
+from city_sync.identity import local_rows_q
 from users.permissions import apply_location_filter, get_effective_location, resolve_location_for_write
 from .payload_utils import merge_extra_into_response
 
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 def get_visitor_queryset():
     from .face_gallery import face_stats_qs
 
-    return Visitor.objects.annotate(face_count=face_stats_qs()).order_by("-created_at")
+    return Visitor.objects.filter(is_deleted=False).annotate(face_count=face_stats_qs()).order_by("-created_at")
 
 
 def filter_visitors_by_request(queryset, request):
@@ -222,7 +223,9 @@ class ActiveVisitorsAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        # Gate operations: this server's own visitors only (not HQ copies of city visitors).
         qs = Visitor.objects.filter(
+            local_rows_q(),
             flow_stage="zone_checked_in",
             expiry_status="active",
         ).order_by("-updated_at")
@@ -236,7 +239,7 @@ class PendingApprovalsAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        qs = Visitor.objects.filter(approval_status="pending").order_by("-created_at")
+        qs = Visitor.objects.filter(local_rows_q(), approval_status="pending").order_by("-created_at")
         qs = filter_visitors_by_request(qs, request)
         return Response(serialize_visitor_list(qs))
 
@@ -461,7 +464,7 @@ class ZoneScanAPIView(APIView):
         scanner_id = ser.validated_data.get("scanner_id") or ""
 
         try:
-            visitor = Visitor.objects.get(qr_code_id=qr_code_id)
+            visitor = Visitor.objects.filter(local_rows_q()).get(qr_code_id=qr_code_id)
         except Visitor.DoesNotExist:
             SecurityAlert.objects.create(
                 visitor=None,
@@ -593,7 +596,7 @@ class SecurityAlertListAPIView(generics.ListAPIView):
     serializer_class = SecurityAlertSerializer
 
     def get_queryset(self):
-        qs = SecurityAlert.objects.all().select_related("visitor")
+        qs = SecurityAlert.objects.filter(is_deleted=False).select_related("visitor")
         acknowledged = self.request.query_params.get("acknowledged")
         if acknowledged is not None:
             if acknowledged.lower() in ("false", "0", "no"):
@@ -653,7 +656,7 @@ class VehicleListAPIView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = Vehicle.objects.select_related("visitor").all()
+        qs = Vehicle.objects.select_related("visitor").filter(is_deleted=False)
         visitor_id = self.request.query_params.get("visitor_id")
         if visitor_id:
             qs = qs.filter(visitor_id=visitor_id)
@@ -887,7 +890,8 @@ class VmsListRecordsAPIView(APIView):
         module = request.query_params.get("module", "").strip()
         if not module:
             return Response({"detail": "module query param required."}, status=400)
-        records = VmsListRecord.objects.filter(module=module)
+        # Whole-list editor: only this server's rows, so a save never rewrites city copies.
+        records = VmsListRecord.objects.filter(local_rows_q(), module=module)
         location = get_effective_location(
             request.user, request.query_params.get("location")
         )
@@ -904,10 +908,11 @@ class VmsListRecordsAPIView(APIView):
         location = resolve_location_for_write(
             request.user, ser.validated_data.get("location") or ""
         )
+        own = VmsListRecord.objects.filter(local_rows_q(), module=module)
         if location:
-            VmsListRecord.objects.filter(module=module, location=location).delete()
+            own.filter(location=location).delete()
         else:
-            VmsListRecord.objects.filter(module=module).delete()
+            own.delete()
         bulk = []
         for row in rows:
             record_id = str(row.get("id") or f"row-{timezone.now().timestamp()}")

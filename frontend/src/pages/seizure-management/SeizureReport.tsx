@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useNavigate } from "react-router-dom"
 import { Eye, Loader2, Plus, Search } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -37,16 +39,21 @@ export default function SeizureReportPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const tableColumns = 5 + (locations.enabled ? 1 : 0)
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter(
+    const byLocation = rows.filter((r) => locations.matches(r.locationCode, sourceLocation))
+    if (!q) return byLocation
+    return byLocation.filter(
       (r) =>
         r.caseNo.toLowerCase().includes(q) ||
         r.preparedBy.toLowerCase().includes(q) ||
         r.status.toLowerCase().includes(q)
     )
-  }, [rows, search])
+  }, [rows, search, sourceLocation, locations])
 
   const pdf = useBatchPdfExport<SeizureReportRecord>(`seizure-reports-${new Date().toISOString().slice(0, 10)}.pdf`)
 
@@ -97,6 +104,9 @@ export default function SeizureReportPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {locations.enabled && (
+              <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+            )}
             <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ml-auto">
               <Button asChild>
                 <Link to={ROUTES.SEIZURE_MGMT_SEIZURE_REPORT_CREATE}>
@@ -117,6 +127,7 @@ export default function SeizureReportPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[9rem]">Case No</TableHead>
+                {locations.enabled && <TableHead className="min-w-[7rem]">Location</TableHead>}
                 <TableHead className="min-w-[8rem]">Report Date</TableHead>
                 <TableHead className="min-w-[10rem]">Prepared By</TableHead>
                 <TableHead className="min-w-[7rem]">Status</TableHead>
@@ -126,14 +137,14 @@ export default function SeizureReportPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-8">
                     <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-8">
                     No seizure reports yet.
                   </TableCell>
                 </TableRow>
@@ -141,6 +152,9 @@ export default function SeizureReportPage() {
                 filtered.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium truncate" title={row.caseNo}>{row.caseNo}</TableCell>
+                    {locations.enabled && (
+                      <TableCell className="whitespace-nowrap">{locations.labelFor(row.locationCode)}</TableCell>
+                    )}
                     <TableCell className="truncate">{row.reportDate}</TableCell>
                     <TableCell className="truncate" title={row.preparedBy}>{row.preparedBy}</TableCell>
                     <TableCell>

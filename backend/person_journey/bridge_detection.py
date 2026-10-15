@@ -355,7 +355,8 @@ def backfill_from_detections(*, hours: int = 24, limit: int = 500) -> int:
 
     since = timezone.now() - timedelta(hours=max(1, hours))
     qs = (
-        DetectionEvent.objects.filter(created_at__gte=since, class_name__iexact="person")
+        # camera set = this server's own events (HQ copies of city events have none).
+        DetectionEvent.objects.filter(created_at__gte=since, class_name__iexact="person", camera__isnull=False)
         .select_related("camera", "camera__nvr", "camera__nvr__site")
         .order_by("-created_at")
     )

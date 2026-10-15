@@ -10,6 +10,8 @@ export type RegistrationStatus = "draft" | "approved" | "sent";
 
 export type VisitorRecord = {
   id: number;
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  location_code?: string;
   full_name: string;
   visitor_type: string;
   department_to_visit: string;
@@ -81,6 +83,7 @@ function mapVisitor(raw: Record<string, unknown>): VisitorRecord {
     passport_number: String(raw.passport_number ?? ""),
     created_at: String(raw.created_at ?? new Date().toISOString()),
     location: raw.location as string | undefined,
+    location_code: raw.location_code as string | undefined,
     registered_by_user_id: raw.registered_by_user_id as number | undefined,
     registered_by_username: raw.registered_by_username as string | undefined,
     created_by: (raw.created_by as string) || (raw.registered_by_username as string) || undefined,

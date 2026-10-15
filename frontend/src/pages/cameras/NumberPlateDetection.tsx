@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import {
   Car,
   ChevronLeft,
@@ -185,10 +187,16 @@ export default function NumberPlateDetectionPage() {
     return filtered.length > 0 ? filtered : cameras
   }, [cameras, siteCode])
 
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
   const queryParams = useMemo(
-    () => buildQuery(page, pageSize, applied, siteCode, snapshot),
-    [page, pageSize, applied, siteCode, snapshot]
+    () => ({
+      ...buildQuery(page, pageSize, applied, siteCode, snapshot),
+      source_location: sourceLocation === ALL_SOURCE_LOCATIONS ? undefined : sourceLocation,
+    }),
+    [page, pageSize, applied, siteCode, snapshot, sourceLocation]
   )
+  const tableColumns = 7 + (locations.enabled ? 1 : 0)
 
   const {
     data: eventsPage,
@@ -356,6 +364,20 @@ export default function NumberPlateDetectionPage() {
                 />
               </div>
             </div>
+            {locations.enabled && (
+              <div className="min-w-0 space-y-2">
+                <Label>Location</Label>
+                <SourceLocationSelect
+                  value={sourceLocation}
+                  onChange={(v) => {
+                    setSourceLocation(v)
+                    setPage(1)
+                  }}
+                  options={locations.options}
+                  className="h-10 w-full"
+                />
+              </div>
+            )}
             <div className="min-w-0 space-y-2">
               <Label>Camera</Label>
               <Select
@@ -466,6 +488,7 @@ export default function NumberPlateDetectionPage() {
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead className="w-[170px]">Date & time</TableHead>
+                    {locations.enabled && <TableHead>Location</TableHead>}
                     <TableHead>Camera</TableHead>
                     <TableHead>Class</TableHead>
                     <TableHead>Label</TableHead>
@@ -477,13 +500,13 @@ export default function NumberPlateDetectionPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-12">
                         Loading vehicle detections…
                       </TableCell>
                     </TableRow>
                   ) : events.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                      <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-12">
                         <Car className="h-8 w-8 mx-auto mb-2 opacity-40" />
                         {hasActiveFilters
                           ? "No vehicles match your filters. Try a wider date range or clear filters."
@@ -496,6 +519,9 @@ export default function NumberPlateDetectionPage() {
                         <TableCell className="font-mono text-xs whitespace-nowrap">
                           {formatDateTime(row.created_at)}
                         </TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap text-sm">{locations.labelFor(row.location_code)}</TableCell>
+                        )}
                         <TableCell>
                           <div className="font-medium">
                             {row.name ?? row.camera_name ?? row.camera_code ?? "—"}

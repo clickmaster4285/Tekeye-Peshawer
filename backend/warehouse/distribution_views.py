@@ -39,7 +39,7 @@ class WarehouseStockListAPIView(APIView):
     def get(self, request):
         case_ref = (request.query_params.get("case_ref") or "").strip()
         memo_id = (request.query_params.get("detention_memo_id") or "").strip()
-        qs = WarehouseStockItem.objects.all()
+        qs = WarehouseStockItem.objects.filter(is_deleted=False)
         if memo_id:
             qs = qs.filter(detention_memo_id=memo_id)
         if case_ref:
@@ -142,7 +142,7 @@ class MemoDistributionListAPIView(APIView):
     def get(self, request):
         memo_id = (request.query_params.get("detention_memo_id") or "").strip()
         case_ref = (request.query_params.get("case_ref") or "").strip()
-        qs = MemoDistribution.objects.select_related("camera").order_by("-created_at")
+        qs = MemoDistribution.objects.select_related("camera").filter(is_deleted=False).order_by("-created_at")
         if memo_id:
             qs = qs.filter(detention_memo_id=memo_id)
         if case_ref:
@@ -175,7 +175,7 @@ class DestructionAlertListAPIView(APIView):
         user: User = request.user
         role = getattr(user, "role", "") or ""
         location = getattr(user, "location", "") or ""
-        qs = DestructionAlert.objects.select_related("camera").order_by("-created_at")
+        qs = DestructionAlert.objects.select_related("camera").filter(is_deleted=False).order_by("-created_at")
 
         if role == "ADMIN":
             pass

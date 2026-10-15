@@ -890,7 +890,7 @@ def requeue_pending_clips(*, limit: int = 200) -> int:
     ).update(clip_status=ClipStatus.PENDING)
 
     rows = list(
-        DetectionEvent.objects.filter(clip_status=ClipStatus.PENDING, clip="")
+        DetectionEvent.objects.filter(clip_status=ClipStatus.PENDING, clip="", camera__isnull=False)
         .order_by("created_at")
         .values_list("camera_id", "id")[:limit]
     )

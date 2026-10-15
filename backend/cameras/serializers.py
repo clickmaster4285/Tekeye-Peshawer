@@ -298,10 +298,12 @@ class DetectionEventSerializer(serializers.ModelSerializer):
             "clip_url",
             "video_url",
             "created_at",
+            "location_code",
         ]
 
     def get_purpose_label(self, obj: DetectionEvent) -> str:
-        return obj.camera.purpose_label
+        # HQ copies of city events have no camera.
+        return obj.camera.purpose_label if obj.camera_id else ""
 
     def get_clip_url(self, obj: DetectionEvent) -> str:
         if not obj.clip:

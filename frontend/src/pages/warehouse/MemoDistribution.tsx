@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useNavigate } from "react-router-dom"
 import { AlertTriangle, Camera, Eye, Package, Play, Square, Video } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -77,6 +79,11 @@ export default function MemoDistributionPage() {
   const [activeAlerts, setActiveAlerts] = useState<DestructionAlertRecord[]>([])
   const [fireSmokeLogs, setFireSmokeLogs] = useState<FireSmokeLogRecord[]>([])
   const [backendStock, setBackendStock] = useState<WarehouseStockRecord[]>([])
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  // City goods are not here: only this server's memos can be destroyed on this page.
+  const localMemos = memos.filter((m) => locations.isLocal(m.locationCode))
+  const visibleHistory = history.filter((h) => locations.matches(h.locationCode, sourceLocation))
   const selectedMemo = useMemo(
     () => memos.find((m) => m.id === selectedMemoId) ?? null,
     [memos, selectedMemoId]
@@ -411,7 +418,7 @@ export default function MemoDistributionPage() {
                     <SelectValue placeholder={loading ? "Loading…" : "Select detention"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {memos.map((m) => (
+                    {localMemos.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.caseNo || m.referenceNumber || m.id.slice(0, 8)}
                         {m.dispositionStatus ? ` · ${m.dispositionStatus}` : ""}
@@ -753,12 +760,17 @@ export default function MemoDistributionPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Destruction records</CardTitle>
-              <CardDescription>Click a row to view items destroyed, camera recordings, and fire/smoke logs.</CardDescription>
+            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between sm:space-y-0">
+              <div>
+                <CardTitle className="text-base">Destruction records</CardTitle>
+                <CardDescription>Click a row to view items destroyed, camera recordings, and fire/smoke logs.</CardDescription>
+              </div>
+              {locations.enabled && (
+                <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+              )}
             </CardHeader>
             <CardContent>
-              {history.length === 0 ? (
+              {visibleHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4 text-center">No destruction records yet.</p>
               ) : (
                 <div className="overflow-x-auto rounded-md border">
@@ -766,6 +778,7 @@ export default function MemoDistributionPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Case</TableHead>
+                        {locations.enabled && <TableHead>Location</TableHead>}
                         <TableHead>Items</TableHead>
                         <TableHead>Cameras</TableHead>
                         <TableHead>Recordings</TableHead>
@@ -776,13 +789,16 @@ export default function MemoDistributionPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {history.map((h) => (
+                      {visibleHistory.map((h) => (
                         <TableRow
                           key={h.id}
                           className="cursor-pointer hover:bg-muted/50"
                           onClick={() => navigate(getDestructionDetailPath(h.id))}
                         >
                           <TableCell>{h.detentionCaseNo || h.detentionMemoId.slice(0, 8)}</TableCell>
+                          {locations.enabled && (
+                            <TableCell className="whitespace-nowrap text-xs">{locations.labelFor(h.locationCode)}</TableCell>
+                          )}
                           <TableCell className="text-xs">{h.selectedItems.length || "—"}</TableCell>
                           <TableCell className="text-xs">{h.cameraIds.length || (h.camera ? 1 : 0)}</TableCell>
                           <TableCell className="text-xs">

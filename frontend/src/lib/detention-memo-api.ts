@@ -74,6 +74,8 @@ export type DetentionMemoCreateMedia = {
 /** Record shape returned by the API (camelCase). */
 export type DetentionMemoApiRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   caseNo: string
   referenceNumber: string
   firNumber?: string

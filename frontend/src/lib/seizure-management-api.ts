@@ -188,6 +188,8 @@ export type NoteSheetTimelineStep = {
 
 export type NoteSheetRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   noteSheetNo: string
   referenceNumber: string
   dateTime: string
@@ -275,6 +277,8 @@ export type AssessmentGoodsValuation = {
 
 export type DetentionAssessmentRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   detentionMemoId: string
   caseNo: string
   referenceNumber: string
@@ -307,6 +311,8 @@ export type DetentionAssessmentRecord = {
 
 export type RecoveryMemoRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   detentionMemoId: string
   assessmentId: string
   caseNo: string
@@ -332,6 +338,8 @@ export type RecoveryMemoRecord = {
 
 export type SeizureReportRecord = {
   id: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  locationCode?: string
   detentionMemoId: string
   assessmentId: string
   recoveryMemoId: string

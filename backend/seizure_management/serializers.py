@@ -187,6 +187,7 @@ def note_sheet_to_dict(obj: NoteSheet, request=None) -> dict:
     user = getattr(request, "user", None) if request is not None else None
     return {
         "id": str(obj.id),
+        "locationCode": obj.location_code or "",
         # Basic
         "noteSheetNo": obj.note_sheet_no or "",
         "referenceNumber": obj.reference_number or obj.note_sheet_no or "",
@@ -258,6 +259,7 @@ def assessment_to_dict(obj: DetentionAssessment, request=None) -> dict:
     attachments = list(obj.attachments.all()) if hasattr(obj, "attachments") else []
     return {
         "id": str(obj.id),
+        "locationCode": obj.location_code or "",
         "detentionMemoId": str(obj.detention_memo_id),
         "caseNo": memo.case_no if memo else "",
         "referenceNumber": memo.reference_number if memo else "",
@@ -338,6 +340,7 @@ def recovery_memo_to_dict(obj: RecoveryMemo) -> dict:
     memo = obj.detention_memo
     return {
         "id": str(obj.id),
+        "locationCode": obj.location_code or "",
         "detentionMemoId": str(obj.detention_memo_id),
         "assessmentId": str(obj.assessment_id) if obj.assessment_id else "",
         "caseNo": memo.case_no if memo else "",
@@ -366,6 +369,7 @@ def seizure_report_to_dict(obj: SeizureReport) -> dict:
     memo = obj.detention_memo
     return {
         "id": str(obj.id),
+        "locationCode": obj.location_code or "",
         "detentionMemoId": str(obj.detention_memo_id),
         "assessmentId": str(obj.assessment_id) if obj.assessment_id else "",
         "recoveryMemoId": str(obj.recovery_memo_id) if obj.recovery_memo_id else "",

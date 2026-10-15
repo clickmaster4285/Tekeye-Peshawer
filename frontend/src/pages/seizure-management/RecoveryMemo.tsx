@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Link, useNavigate } from "react-router-dom"
 import { Loader2, Plus, Search, Eye } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -44,16 +46,21 @@ export default function RecoveryMemoPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const tableColumns = 6 + (locations.enabled ? 1 : 0)
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter(
+    const byLocation = rows.filter((r) => locations.matches(r.locationCode, sourceLocation))
+    if (!q) return byLocation
+    return byLocation.filter(
       (r) =>
         r.caseNo.toLowerCase().includes(q) ||
         r.category.toLowerCase().includes(q) ||
         r.recoveryOfficer.toLowerCase().includes(q)
     )
-  }, [rows, search])
+  }, [rows, search, sourceLocation, locations])
 
   const pdf = useBatchPdfExport<RecoveryMemoRecord>(`recovery-memos-${new Date().toISOString().slice(0, 10)}.pdf`)
 
@@ -121,6 +128,9 @@ export default function RecoveryMemoPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {locations.enabled && (
+              <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+            )}
             <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ml-auto">
               <Button asChild>
                 <Link to={ROUTES.SEIZURE_MGMT_RECOVERY_MEMO_CREATE}>
@@ -141,6 +151,7 @@ export default function RecoveryMemoPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[8rem]">Case No</TableHead>
+                {locations.enabled && <TableHead className="min-w-[7rem]">Location</TableHead>}
                 <TableHead className="min-w-[8rem]">Category</TableHead>
                 <TableHead className="min-w-[8rem]">Recovery Date</TableHead>
                 <TableHead className="min-w-[10rem]">Officer</TableHead>
@@ -151,14 +162,14 @@ export default function RecoveryMemoPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-8">
                     <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={tableColumns} className="text-center text-muted-foreground py-8">
                     No recovery memos yet.
                   </TableCell>
                 </TableRow>
@@ -166,6 +177,9 @@ export default function RecoveryMemoPage() {
                 filtered.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium truncate" title={row.caseNo}>{row.caseNo}</TableCell>
+                    {locations.enabled && (
+                      <TableCell className="whitespace-nowrap">{locations.labelFor(row.locationCode)}</TableCell>
+                    )}
                     <TableCell className="truncate" title={row.category}>{row.category}</TableCell>
                     <TableCell className="truncate">{row.recoveryDate}</TableCell>
                     <TableCell className="truncate" title={row.recoveryOfficer}>{row.recoveryOfficer}</TableCell>

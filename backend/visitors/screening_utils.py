@@ -9,6 +9,8 @@ from typing import Any
 
 from django.utils import timezone
 
+from city_sync.identity import local_rows_q
+
 from .models import SecurityAlert, Visitor, VmsListRecord
 
 WATCHLIST_MODULE = "vms_watchlist_screening_rows"
@@ -31,7 +33,8 @@ def _name_ratio(a: str, b: str) -> float:
 
 
 def _load_list_rows(module: str, location: str = "") -> list[dict[str, Any]]:
-    qs = VmsListRecord.objects.filter(module=module)
+    # This server's own lists only (HQ copies of city lists do not screen HQ visitors).
+    qs = VmsListRecord.objects.filter(local_rows_q(), module=module)
     if location:
         qs = qs.filter(location=location)
     return [dict(r.data or {}, id=r.record_id) for r in qs]
@@ -229,7 +232,7 @@ def visitor_blocks_entry(visitor: Visitor) -> tuple[bool, str]:
 
 
 def rescreen_all_visitors(*, location: str = "") -> int:
-    qs = Visitor.objects.all().order_by("id")
+    qs = Visitor.objects.filter(local_rows_q()).order_by("id")
     if location:
         qs = qs.filter(location=location)
     count = 0
@@ -256,7 +259,7 @@ def _upsert_list_record(
     record_id: str,
     data: dict[str, Any],
 ) -> None:
-    qs = VmsListRecord.objects.filter(module=module, record_id=record_id)
+    qs = VmsListRecord.objects.filter(local_rows_q(), module=module, record_id=record_id)
     if location:
         qs = qs.filter(location=location)
     existing = qs.first()

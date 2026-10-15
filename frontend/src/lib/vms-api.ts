@@ -155,6 +155,8 @@ export async function zoneScan(payload: ZoneScanPayload): Promise<ZoneScanResult
 // ----- Vehicles -----
 export type VehicleRecord = {
   id: number
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  location_code?: string
   visitor: number
   visitor_name?: string
   plate_number: string
@@ -239,6 +241,8 @@ export async function notifyHost(visitorId: number, recipient?: string): Promise
 // ----- Security alerts -----
 export type SecurityAlertRecord = {
   id: number
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  location_code?: string
   visitor?: number | null
   visitor_name?: string | null
   alert_type: string

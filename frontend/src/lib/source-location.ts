@@ -39,6 +39,8 @@ export function useSourceLocations() {
       labelFor: (code: string | null | undefined) => labels.get(code || hqCode) ?? code ?? hqCode,
       matches: (code: string | null | undefined, selected: string) =>
         selected === ALL_SOURCE_LOCATIONS || (code || hqCode) === selected,
+      /** This server's own record (not a copy from a city). True for everything until the sites load. */
+      isLocal: (code: string | null | undefined) => !hqCode || !code || code === hqCode,
     }
   }, [data])
 }

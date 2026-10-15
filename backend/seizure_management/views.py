@@ -134,7 +134,7 @@ class NoteSheetListAPIView(APIView):
             "items__located_camera__ml_server",
             "items__detection_event",
             "attachments",
-        ).all()
+        ).filter(is_deleted=False)
         if status_filter:
             qs = qs.filter(status=status_filter)
         available = request.query_params.get("available") == "1"
@@ -620,7 +620,7 @@ class AssessmentListAPIView(APIView):
         status_filter = (request.query_params.get("status") or "").strip()
         qs = DetentionAssessment.objects.select_related("detention_memo").prefetch_related(
             "attachments"
-        )
+        ).filter(is_deleted=False)
         if memo_id:
             qs = qs.filter(detention_memo_id=memo_id)
         if status_filter:
@@ -871,7 +871,9 @@ class RecoveryMemoListAPIView(APIView):
 
     def get(self, request):
         memo_id = (request.query_params.get("detentionMemoId") or "").strip()
-        qs = RecoveryMemo.objects.select_related("detention_memo", "assessment", "deposit_account").all()
+        qs = RecoveryMemo.objects.select_related("detention_memo", "assessment", "deposit_account").filter(
+            is_deleted=False
+        )
         if memo_id:
             qs = qs.filter(detention_memo_id=memo_id)
         return Response([recovery_memo_to_dict(o) for o in qs])
@@ -1063,7 +1065,9 @@ class SeizureReportListAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        qs = SeizureReport.objects.select_related("detention_memo", "assessment", "recovery_memo").all()
+        qs = SeizureReport.objects.select_related("detention_memo", "assessment", "recovery_memo").filter(
+            is_deleted=False
+        )
         return Response([seizure_report_to_dict(o) for o in qs])
 
 

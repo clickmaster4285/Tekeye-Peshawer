@@ -40,7 +40,7 @@ from .serializers import (
     purpose_options,
 )
 from .stream_utils import capture_jpeg_frame, ffmpeg_available, generate_mjpeg_frames
-from users.permissions import IsGlobalAdmin, is_global_admin
+from users.permissions import IsGlobalAdmin, apply_source_location_filter, is_global_admin
 
 
 def _token_key_from_request(request) -> str | None:
@@ -182,8 +182,10 @@ class CameraViewSet(viewsets.ModelViewSet):
 
         qs = (
             DetectionEvent.objects.select_related("camera", "camera__nvr", "camera__nvr__site")
+            .filter(is_deleted=False)
             .order_by("-created_at", "-id")
         )
+        qs = apply_source_location_filter(qs, request.user, request.query_params.get("source_location"))
         camera_id = request.query_params.get("camera")
         if camera_id:
             qs = qs.filter(camera_id=camera_id)

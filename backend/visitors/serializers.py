@@ -117,8 +117,9 @@ class VisitorSerializer(serializers.ModelSerializer):
             "guard_name",
             "host_notified_at",
             "extra_data",
+            "location_code",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "qr_code_id", "scan_count"]
+        read_only_fields = ["id", "created_at", "updated_at", "qr_code_id", "scan_count", "location_code"]
         extra_kwargs = {
             "gender": {"allow_blank": True},
             "host_officer_designation": {"allow_blank": True},
@@ -308,8 +309,9 @@ class SecurityAlertSerializer(serializers.ModelSerializer):
             "acknowledged",
             "acknowledged_at",
             "acknowledged_by",
+            "location_code",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "created_at", "location_code"]
 
 
 class ApproveDenySerializer(serializers.Serializer):
@@ -338,8 +340,9 @@ class VehicleSerializer(serializers.ModelSerializer):
             "remarks",
             "extra_data",
             "created_at",
+            "location_code",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "created_at", "location_code"]
 
 
 class VisitorNotificationSerializer(serializers.ModelSerializer):
@@ -363,8 +366,8 @@ class VisitorNotificationSerializer(serializers.ModelSerializer):
 class VmsListRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = VmsListRecord
-        fields = ["id", "module", "record_id", "data", "location", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = ["id", "module", "record_id", "data", "location", "created_at", "updated_at", "location_code"]
+        read_only_fields = ["id", "created_at", "updated_at", "location_code"]
 
 
 class VmsListBulkSerializer(serializers.Serializer):
