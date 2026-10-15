@@ -744,6 +744,8 @@ def collapse_visits(person: JourneyPerson) -> int:
     """
     if bool(getattr(settings, "JOURNEY_KEEP_ALL_EVENTS", False)):
         return 0
+    from city_sync.outbox import soft_delete_instance
+
     gap = float(getattr(settings, "JOURNEY_VISIT_GAP_SECONDS", 120))
     camera_event_types = [
         JourneyEventType.CAMERA_DETECTION,
@@ -752,7 +754,11 @@ def collapse_visits(person: JourneyPerson) -> int:
         JourneyEventType.UNKNOWN_CREATED,
     ]
     visits = list(
-        JourneyEvent.objects.filter(journey_person=person, event_type__in=camera_event_types)
+        JourneyEvent.objects.filter(
+            journey_person=person,
+            event_type__in=camera_event_types,
+            is_deleted=False,
+        )
         .select_related("camera")
         .order_by("created_at")
     )
@@ -780,7 +786,7 @@ def collapse_visits(person: JourneyPerson) -> int:
                 stay = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
                 keep.description = f"On {keep.camera.name if keep.camera_id else 'camera'} for {stay} ({meta['sightings']} sightings)"
                 keep.save(update_fields=["metadata", "snapshot_path", "description"])
-                ev.delete()
+                soft_delete_instance(ev)
                 folded += 1
                 open_by_camera[ev.camera_id] = (keep, new_end)
                 continue
@@ -790,7 +796,11 @@ def collapse_visits(person: JourneyPerson) -> int:
                 last_camera_switch[cam] = start
     # Titles: "First seen" only on the earliest remaining visit.
     remaining = list(
-        JourneyEvent.objects.filter(journey_person=person, event_type__in=camera_event_types)
+        JourneyEvent.objects.filter(
+            journey_person=person,
+            event_type__in=camera_event_types,
+            is_deleted=False,
+        )
         .select_related("camera")
         .order_by("created_at")
     )

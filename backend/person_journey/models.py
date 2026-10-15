@@ -53,6 +53,13 @@ class JourneyEventType(models.TextChoices):
     ALERT = "alert", "Alert"
 
 
+class NotDeletedManager(models.Manager):
+    """Hide city-sync tombstones. Hard delete is forbidden on synced rows."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+
+
 class JourneyPerson(models.Model):
     """
     Global cross-camera person identity.
@@ -61,6 +68,9 @@ class JourneyPerson(models.Model):
     visitor / unknown) is metadata — never encoded into the person ID.
     Camera-local ByteTrack sessions live on CameraTrack.tracklet_id.
     """
+
+    all_objects = models.Manager()
+    objects = NotDeletedManager()
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
     code = models.CharField(
@@ -125,8 +135,17 @@ class JourneyPerson(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         ordering = ["-latest_seen_at", "-created_at"]
+        default_manager_name = "objects"
+        base_manager_name = "all_objects"
         indexes = [
             models.Index(fields=["person_type", "status", "-latest_seen_at"]),
         ]
@@ -232,6 +251,9 @@ class CameraTrack(models.Model):
 class JourneyEvent(models.Model):
     """Timeline entry for a person journey."""
 
+    all_objects = models.Manager()
+    objects = NotDeletedManager()
+
     journey_person = models.ForeignKey(
         JourneyPerson,
         on_delete=models.CASCADE,
@@ -266,8 +288,17 @@ class JourneyEvent(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
+
+    # City → HQ sync (city_sync)
+    entity_id = models.UUIDField(null=True, blank=True, unique=True, db_index=True, editable=False)
+    location_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         ordering = ["-created_at"]
+        default_manager_name = "objects"
+        base_manager_name = "objects"
         indexes = [
             models.Index(fields=["journey_person", "-created_at"]),
             models.Index(fields=["event_type", "-created_at"]),

@@ -1,4 +1,10 @@
+import logging
+
+from django.contrib.auth import get_user_model
+
 from .models import UserActivityLog
+
+logger = logging.getLogger(__name__)
 
 try:
     import requests
@@ -23,6 +29,7 @@ SKIP_LOG_PATHS = (
     "/api/gps/heartbeat/",
     "/favicon.ico",
     "/media/",
+    "/api/sync/",
 )
 
 
@@ -97,12 +104,19 @@ class ActivityLogMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-
-        if request.user.is_authenticated:
+        try:
+            user = getattr(request, "user", None)
+            # Sync calls authenticate as SyncPrincipal, not a User. Logging that
+            # raised ValueError and turned a successful HQ response into HTTP 500.
+            if not isinstance(user, get_user_model()):
+                return response
+            if not user.is_authenticated:
+                return response
             path = request.path.rstrip("/") or "/"
             if any(path.startswith(p.rstrip("/")) for p in SKIP_LOG_PATHS):
                 return response
             action = f"{request.method} {path}"
-            create_activity_log(request.user, request, action)
-
+            create_activity_log(user, request, action)
+        except Exception:
+            logger.exception("Activity log failed for %s", getattr(request, "path", ""))
         return response

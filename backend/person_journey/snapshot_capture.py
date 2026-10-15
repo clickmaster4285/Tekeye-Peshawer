@@ -588,8 +588,12 @@ def _discard_empty_unknown_journey(journey_event) -> bool:
         return False
 
     code = person.code
-    JourneyPerson.objects.filter(pk=person.pk).delete()
-    logger.info("Deleted empty unknown journey %s (no person in captures)", code)
+    from city_sync.outbox import soft_delete_instance
+
+    for ev in list(JourneyEvent.objects.filter(journey_person=person)):
+        soft_delete_instance(ev)
+    soft_delete_instance(person)
+    logger.info("Tombstoned empty unknown journey %s (no person in captures)", code)
     return True
 
 
