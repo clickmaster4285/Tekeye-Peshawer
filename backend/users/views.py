@@ -860,7 +860,7 @@ class LeaveTypeViewSet(viewsets.ModelViewSet):
 
 
 class LeaveRequestViewSet(viewsets.ModelViewSet):
-    queryset = LeaveRequest.objects.all().order_by("-from_date")
+    queryset = LeaveRequest.objects.filter(is_deleted=False).order_by("-from_date")
     permission_classes = [IsAdminOrHR]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["staff", "leave_type", "status"]
@@ -944,7 +944,8 @@ class PayrollRunViewSet(viewsets.ModelViewSet):
                 {"error": "Run already processed or locked."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        staff_with_salary = Staff.objects.exclude(salary__isnull=True).exclude(salary=0)
+        # All locations (HQ copies of city staff included); deleted staff are not paid.
+        staff_with_salary = Staff.objects.filter(is_deleted=False).exclude(salary__isnull=True).exclude(salary=0)
         total_gross = Decimal("0")
         total_net = Decimal("0")
         for staff in staff_with_salary:

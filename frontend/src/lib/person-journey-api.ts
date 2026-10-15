@@ -26,6 +26,8 @@ export type JourneyPersonRecord = {
   active_tracklet_count?: number;
   /** Per-camera tracklets linked to this global person, e.g. C01-T18492 */
   tracklet_ids?: string[];
+  /** Server the person came from (Locations & Sync); empty = this server. */
+  location_code?: string;
 };
 
 export type JourneyEventRecord = {
@@ -108,6 +110,8 @@ export type JourneyPersonsQuery = {
   active_only?: boolean;
   page?: number;
   page_size?: number;
+  /** Location code from Locations & Sync (HQ Super Admin only). */
+  source_location?: string;
 };
 
 export type JourneyPersonsPage = {
@@ -143,6 +147,7 @@ export async function fetchJourneyPersons(query: JourneyPersonsQuery = {}): Prom
       active_only: query.active_only ? "true" : undefined,
       page: query.page ?? 1,
       page_size: query.page_size ?? 20,
+      source_location: query.source_location,
     })}`,
     { headers: getAuthHeaders() }
   );

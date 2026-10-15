@@ -37,7 +37,16 @@ class JourneyPersonListSerializer(serializers.ModelSerializer):
             "created_at",
             "active_tracklet_count",
             "tracklet_ids",
+            "location_code",
         ]
+
+    def to_representation(self, instance: JourneyPerson):
+        data = super().to_representation(instance)
+        if instance.latest_camera_id is None:
+            name = _city_camera_name(instance, self.context)
+            if name:
+                data["latest_camera_name"] = name
+        return data
 
     def get_name_locked(self, obj: JourneyPerson) -> bool:
         meta = obj.metadata if isinstance(obj.metadata, dict) else {}
@@ -77,6 +86,17 @@ class JourneyPersonNameUpdateSerializer(serializers.Serializer):
     display_name = serializers.CharField(max_length=200, allow_blank=False, trim_whitespace=True)
 
 
+def _city_camera_name(obj, context) -> str:
+    """HQ copies of city journeys: camera name from the city's camera list."""
+    source_id = (obj.metadata or {}).get("source_camera_id") if isinstance(obj.metadata, dict) else None
+    if not source_id or not obj.location_code:
+        return ""
+    from city_sync.city_cameras import cache_for, city_camera
+
+    cam = city_camera(obj.location_code, source_id, cache_for(context))
+    return cam.name if cam is not None else ""
+
+
 class JourneyEventSerializer(serializers.ModelSerializer):
     camera_name = serializers.CharField(source="camera.name", read_only=True, default="")
     camera_code = serializers.CharField(source="camera.code", read_only=True, default="")
@@ -111,7 +131,16 @@ class JourneyEventSerializer(serializers.ModelSerializer):
             "local_track_id",
             "metadata",
             "created_at",
+            "location_code",
         ]
+
+    def to_representation(self, instance: JourneyEvent):
+        data = super().to_representation(instance)
+        if instance.camera_id is None:
+            name = _city_camera_name(instance, self.context)
+            if name:
+                data["camera_name"] = name
+        return data
 
     def get_snapshot_url(self, obj: JourneyEvent) -> str:
         path = (obj.snapshot_path or "").strip()

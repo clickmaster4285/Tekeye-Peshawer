@@ -3,15 +3,20 @@
 The city already calls HQ every SYNC_HEARTBEAT_INTERVAL seconds, so HQ answers
 each heartbeat with a small "control" dict instead of calling into the city:
 
-    {"paused": bool, "full_history_request_id": str}
+    {"paused": bool, "full_history_request_id": str, "camera_directory_hash": str}
 
 The city stores it in CityControlState. Workers skip pushing while paused, and a
 new full_history_request_id starts a one-time bootstrap of all existing rows
 (and their media). The city reports the finished id back on the next heartbeat.
+
+Camera names travel the other way: when the city's camera list differs from the
+hash HQ last stored, the next heartbeat carries the list (no NVR address/password).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 from typing import Callable
@@ -21,12 +26,13 @@ from django.db import close_old_connections, transaction
 from django.utils import timezone
 
 from city_sync.identity import is_city, location_code
-from city_sync.models import CityControlState, MediaQueue, SyncSite
+from city_sync.models import CityCamera, CityControlState, MediaQueue, SyncSite
 from city_sync.outbox import enqueue_outbox, model_to_payload
 from city_sync.syncable import (
     EVIDENCE_ENTITY_TYPES,
     SYNC_MEDIA_FIELDS,
     SYNCED_ENTITY_TYPES,
+    media_field_path,
     new_entity_id,
     resolve_model,
 )
@@ -42,23 +48,55 @@ logger = logging.getLogger(__name__)
 def control_for_location(loc: str) -> dict:
     site = SyncSite.objects.filter(location_code=loc.upper()).first()
     if site is None:
-        return {"paused": False, "full_history_request_id": ""}
+        return {"paused": False, "full_history_request_id": "", "camera_directory_hash": ""}
     return {
         "paused": site.is_paused,
         "full_history_request_id": site.full_history_request_id,
+        "camera_directory_hash": site.camera_directory_hash,
     }
 
 
 def record_heartbeat_ack(loc: str, body: dict) -> None:
-    """Mark the full-history request done when the city echoes its id back."""
+    """Mark the full-history request done when the city echoes its id back; store camera names."""
+    loc = loc.upper()
+    cameras = body.get("camera_directory")
+    if isinstance(cameras, list):
+        _store_camera_directory(loc, cameras, str(body.get("camera_directory_hash") or ""))
     done_id = str(body.get("full_history_done_id") or "")
     if not done_id:
         return
     SyncSite.objects.filter(
-        location_code=loc.upper(),
+        location_code=loc,
         full_history_request_id=done_id,
         full_history_done_at__isnull=True,
     ).update(full_history_done_at=timezone.now())
+
+
+def _store_camera_directory(loc: str, cameras: list, digest: str) -> None:
+    rows = {}
+    for cam in cameras:
+        if not isinstance(cam, dict):
+            continue
+        try:
+            origin_pk = int(cam.get("id"))
+        except (TypeError, ValueError):
+            continue
+        channel = cam.get("channel")
+        rows[origin_pk] = CityCamera(
+            location_code=loc,
+            origin_pk=origin_pk,
+            code=str(cam.get("code") or "")[:64],
+            name=str(cam.get("name") or "")[:255],
+            zone=str(cam.get("zone") or "")[:128],
+            location=str(cam.get("location") or "")[:128],
+            channel=channel if isinstance(channel, int) and 0 <= channel < 32768 else None,
+            site_code=str(cam.get("site_code") or "")[:64],
+            site_name=str(cam.get("site_name") or "")[:255],
+        )
+    with transaction.atomic():
+        CityCamera.objects.filter(location_code=loc).delete()
+        CityCamera.objects.bulk_create(rows.values())
+        SyncSite.objects.filter(location_code=loc).update(camera_directory_hash=digest[:64])
 
 
 def is_location_paused(loc: str) -> bool:
@@ -76,15 +114,52 @@ def city_is_paused() -> bool:
     return CityControlState.objects.filter(pk=1, is_paused=True).exists()
 
 
+# Camera-list hash HQ reported on the last heartbeat (None until HQ answers once).
+_hq_camera_hash: str | None = None
+
+
+def camera_directory() -> tuple[list[dict], str]:
+    """This city's cameras as names only, and a hash of the list."""
+    from cameras.models import Camera
+
+    cameras = [
+        {
+            "id": c.pk,
+            "code": c.code,
+            "name": c.name,
+            "zone": c.zone,
+            "location": c.location,
+            "channel": c.channel,
+            "site_code": c.nvr.site.code if c.nvr_id and c.nvr.site_id else "",
+            "site_name": c.nvr.site.name if c.nvr_id and c.nvr.site_id else "",
+        }
+        for c in Camera.objects.select_related("nvr__site").order_by("pk")
+    ]
+    digest = hashlib.sha256(json.dumps(cameras, sort_keys=True).encode()).hexdigest()
+    return cameras, digest
+
+
 def heartbeat_extras() -> dict:
     state = CityControlState.objects.filter(pk=1).first()
-    return {"full_history_done_id": state.full_history_done_id if state else ""}
+    extras = {"full_history_done_id": state.full_history_done_id if state else ""}
+    try:
+        cameras, digest = camera_directory()
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not build camera list for HQ")
+        return extras
+    if digest != _hq_camera_hash:
+        extras["camera_directory"] = cameras
+        extras["camera_directory_hash"] = digest
+    return extras
 
 
 def apply_hq_control(control: dict) -> None:
     """Save HQ's commands from a heartbeat response and start full history if asked."""
+    global _hq_camera_hash
     if not isinstance(control, dict):
         return
+    if "camera_directory_hash" in control:
+        _hq_camera_hash = str(control.get("camera_directory_hash") or "")
     state = CityControlState.load()
     state.is_paused = bool(control.get("paused"))
     state.full_history_request_id = str(control.get("full_history_request_id") or "")[:64]
@@ -142,8 +217,7 @@ def _enqueue_existing_media(obj, entity_type: str) -> int:
     )
     queued = 0
     for fname in fields:
-        f = getattr(obj, fname, None)
-        name = getattr(f, "name", "") if f else ""
+        name = media_field_path(obj, fname)
         if not name:
             continue
         # Running full history twice must not upload the same file twice.

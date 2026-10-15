@@ -28,6 +28,8 @@ export type LeaveRequestRecord = {
   rejection_reason: string | null
   created_at: string
   updated_at: string
+  /** Server the record came from (Locations & Sync); empty = this server. */
+  location_code?: string
 }
 
 const BASE = `${API_BASE_URL}/api`

@@ -265,6 +265,8 @@ class DetectionEvent(models.Model):
     camera = models.ForeignKey(
         Camera, on_delete=models.CASCADE, related_name="detection_events", null=True, blank=True
     )
+    # HQ copies of city events: the city's camera id (name via city_sync.CityCamera).
+    source_camera_id = models.PositiveIntegerField(null=True, blank=True)
     class_name = models.CharField(max_length=80)
     label = models.CharField(max_length=120)
     employee_name = models.CharField(

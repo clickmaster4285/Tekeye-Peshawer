@@ -119,7 +119,8 @@ class SyncHeartbeatView(APIView):
                     dt = timezone.make_aware(dt, timezone.get_current_timezone())
                 row.last_business_event_at = dt
         row.last_heartbeat_at = timezone.now()
-        row.raw = body
+        # The camera list is stored in CityCamera; keep the raw status small.
+        row.raw = {k: v for k, v in body.items() if k != "camera_directory"}
         row.save()
         record_heartbeat_ack(loc, body)
         return Response({"ok": True, "location_code": loc, "control": control_for_location(loc)})

@@ -11,6 +11,8 @@ from django.utils import timezone
 
 from cameras.detection_utils import resolve_staff_identity
 
+from city_sync.identity import local_rows_q
+
 from .bridge_detection import (
     _GENERIC_LABELS,
     _is_person_detection,
@@ -138,7 +140,7 @@ def ingest_camera_detections(camera, detections: list[dict]) -> int:
         if not staff_id and personal_number:
             from users.models import Staff
 
-            staff = Staff.objects.filter(personal_number=personal_number).first()
+            staff = Staff.objects.filter(local_rows_q(), personal_number=personal_number).first()
             if staff:
                 staff_id = staff.pk
                 staff_name = staff.full_name or staff_name
@@ -154,6 +156,7 @@ def ingest_camera_detections(camera, detections: list[dict]) -> int:
                 register_visitor_journey_person(visitor)
                 if visitor
                 else JourneyPerson.objects.filter(
+                    local_rows_q(),
                     visitor_id=visitor_id, status=PersonStatus.ACTIVE
                 ).first()
             )

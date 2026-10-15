@@ -424,6 +424,8 @@ class SyncSite(models.Model):
     last_test_at = models.DateTimeField(null=True, blank=True)
     last_test_ok = models.BooleanField(null=True, blank=True)
     last_test_detail = models.CharField(max_length=500, blank=True, default="")
+    # Hash of the camera list last received from this city (see CityCamera).
+    camera_directory_hash = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -432,6 +434,32 @@ class SyncSite(models.Model):
 
     def __str__(self) -> str:
         return f"SyncSite({self.location_code})"
+
+
+class CityCamera(models.Model):
+    """
+    HQ: names of a city's cameras, sent on the heartbeat. No NVR address or password.
+    Used to label city detections and journeys; never streamed or processed at HQ.
+    """
+
+    location_code = models.CharField(max_length=64)
+    origin_pk = models.PositiveIntegerField()
+    code = models.CharField(max_length=64, blank=True, default="")
+    name = models.CharField(max_length=255, blank=True, default="")
+    zone = models.CharField(max_length=128, blank=True, default="")
+    location = models.CharField(max_length=128, blank=True, default="")
+    channel = models.PositiveSmallIntegerField(null=True, blank=True)
+    site_code = models.CharField(max_length=64, blank=True, default="")
+    site_name = models.CharField(max_length=255, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["location_code", "origin_pk"], name="ux_city_camera"),
+        ]
+
+    def __str__(self) -> str:
+        return f"CityCamera({self.location_code}#{self.origin_pk} {self.name})"
 
 
 class CityControlState(models.Model):

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { Calendar, Clock, CheckCircle, Send } from "lucide-react"
 import { ROUTES } from "@/routes/config"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -71,6 +73,10 @@ export default function LeaveManagementPage() {
   useEffect(() => {
     load()
   }, [])
+
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
+  const visibleRequests = requests.filter((r) => locations.matches(r.location_code, sourceLocation))
 
   const today = new Date().toISOString().slice(0, 10)
   const pending = requests.filter((r) => r.status === "PENDING")
@@ -191,13 +197,18 @@ export default function LeaveManagementPage() {
               <CardTitle>Leave Requests</CardTitle>
               <CardDescription>Pending and recent leave applications</CardDescription>
             </div>
-            <Button
-              className="w-full bg-[#3b82f6] text-white hover:bg-[#2563eb] sm:w-auto"
-              onClick={() => setNewOpen(true)}
-            >
-              <Send className="h-4 w-4 mr-2" />
-              New Request
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {locations.enabled && (
+                <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+              )}
+              <Button
+                className="w-full bg-[#3b82f6] text-white hover:bg-[#2563eb] sm:w-auto"
+                onClick={() => setNewOpen(true)}
+              >
+                <Send className="h-4 w-4 mr-2" />
+                New Request
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {error && <p className="text-sm text-destructive mb-4">{error}</p>}
@@ -209,6 +220,7 @@ export default function LeaveManagementPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Employee</TableHead>
+                    {locations.enabled && <TableHead>Location</TableHead>}
                     <TableHead>Leave Type</TableHead>
                     <TableHead>From</TableHead>
                     <TableHead>To</TableHead>
@@ -218,16 +230,19 @@ export default function LeaveManagementPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {requests.length === 0 ? (
+                  {visibleRequests.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                      <TableCell colSpan={locations.enabled ? 8 : 7} className="text-center text-muted-foreground py-10">
                         No leave requests. Click &quot;New Request&quot; to create one.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    requests.map((row) => (
+                    visibleRequests.map((row) => (
                       <TableRow key={row.id}>
                         <TableCell className="font-medium">{row.staff_name}</TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap">{locations.labelFor(row.location_code)}</TableCell>
+                        )}
                         <TableCell>{row.leave_type_name}</TableCell>
                         <TableCell>{row.from_date}</TableCell>
                         <TableCell>{row.to_date}</TableCell>

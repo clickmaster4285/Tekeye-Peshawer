@@ -111,7 +111,9 @@ class SitesAdminApiTests(TestCase):
         key = self._add().json()["api_key"]
         hb = APIClient().post("/api/sync/v1/heartbeat", {}, format="json", HTTP_AUTHORIZATION=f"Bearer {key}")
         self.assertEqual(hb.status_code, 200, hb.content)
-        self.assertEqual(hb.json()["control"], {"paused": False, "full_history_request_id": ""})
+        self.assertEqual(
+            hb.json()["control"], {"paused": False, "full_history_request_id": "", "camera_directory_hash": ""}
+        )
 
         new_key = self.client.post("/api/sync/v1/sites/ABBOTTABAD/rotate-key/").json()["api_key"]
         old = APIClient().post("/api/sync/v1/heartbeat", {}, format="json", HTTP_AUTHORIZATION=f"Bearer {key}")
@@ -226,7 +228,7 @@ class CityControlTests(TestCase):
         state = CityControlState.load()
         self.assertEqual(state.full_history_done_id, "req-1")
         self.assertFalse(state.full_history_running)
-        self.assertEqual(control.heartbeat_extras(), {"full_history_done_id": "req-1"})
+        self.assertEqual(control.heartbeat_extras()["full_history_done_id"], "req-1")
 
     def test_heartbeat_saves_control_from_hq(self):
         reply = _FakeResponse(200, {"ok": True, "control": {"paused": True, "full_history_request_id": ""}})

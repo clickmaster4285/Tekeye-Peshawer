@@ -19,6 +19,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -27,7 +28,14 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from city_sync.models import HqConflict, HqEntityMap, HqMediaObject, HqPendingLink
-from city_sync.syncable import SYNC_MEDIA_FIELDS, SYNCED_ENTITY_TYPES, entity_type_for_model, resolve_model
+from city_sync.syncable import (
+    MEDIA_URL_FIELDS,
+    SYNC_MEDIA_FIELDS,
+    SYNCED_ENTITY_TYPES,
+    entity_type_for_model,
+    media_url_to_path,
+    resolve_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +77,7 @@ class Materializer:
         """An existing HQ row that is the same real-world record (Peshawar wins)."""
         return None
 
-    def adjust(self, values: dict) -> None:
+    def adjust(self, values: dict, payload: dict, loc: str) -> None:
         """Last changes to the HQ copy before it is written."""
 
 
@@ -114,11 +122,49 @@ class DetectionEventMaterializer(Materializer):
     # City cameras are not at HQ; camera stays empty (city copies are skipped by HQ workers).
     overrides = {"camera": None, "person_identity_id": None}
 
-    def adjust(self, values: dict) -> None:
+    def adjust(self, values: dict, payload: dict, loc: str) -> None:
         from cameras.models import ClipStatus
 
         # Never let HQ's snapshot worker pick up a city event.
         values["clip_status"] = ClipStatus.READY if values.get("clip") else ClipStatus.SKIPPED
+        values["source_camera_id"] = _int_or_none(payload.get("camera"))
+
+
+class LeaveRequestMaterializer(Materializer):
+    entity_type = "leave_request"
+    overrides = {"approved_by": None}
+
+    def adjust(self, values: dict, payload: dict, loc: str) -> None:
+        values["leave_type_id"] = _hq_leave_type_id(payload.get("_ref_leave_type") or {})
+
+
+class JourneyPersonMaterializer(Materializer):
+    entity_type = "journey_person"
+    # Embeddings are cleared so HQ's live matching can never pick a city person.
+    overrides = {"face_embedding": [], "reid_embedding": [], "latest_camera": None}
+
+    def adjust(self, values: dict, payload: dict, loc: str) -> None:
+        # Every city numbers people from PJ-00001 too; "ABBOTTABAD:PJ-00042" keeps codes unique.
+        code = str(values.get("code") or "")
+        if code and not code.startswith(f"{loc}:"):
+            values["code"] = f"{loc}:{code}"[:32]
+        values["metadata"] = _with_source_camera(values.get("metadata"), payload.get("latest_camera"))
+
+
+class JourneyEventMaterializer(Materializer):
+    entity_type = "journey_event"
+    overrides = {"camera": None, "track": None}
+    # Plain id columns that point at other synced rows.
+    id_links = {
+        "detection_event_id": "detection_event",
+        "zone_access_log_id": "zone_access_log",
+        "attendance_id": "attendance",
+    }
+
+    def adjust(self, values: dict, payload: dict, loc: str) -> None:
+        for field, target in self.id_links.items():
+            values[field] = _local_pk(loc, target, payload.get(field))
+        values["metadata"] = _with_source_camera(values.get("metadata"), payload.get("camera"))
 
 
 class NoteSheetMaterializer(Materializer):
@@ -156,11 +202,14 @@ class VmsListRecordMaterializer(Materializer):
 ENTITY_ORDER = [
     "staff",
     "attendance",
+    "leave_request",
     "detection_event",
     "visitor",
     "vehicle",
     "security_alert",
     "zone_access_log",
+    "journey_person",
+    "journey_event",
     "vms_list_record",
     "detention_memo",
     "detention_goods_line",
@@ -191,12 +240,64 @@ _CUSTOM = {
         MemoDistributionMaterializer(),
         DestructionAlertMaterializer(),
         VmsListRecordMaterializer(),
+        LeaveRequestMaterializer(),
+        JourneyPersonMaterializer(),
+        JourneyEventMaterializer(),
     )
 }
 
-# Not copied yet: leave_request (needs leave types), journey_person / journey_event
-# (would mix into HQ live person matching). They stay in HqReplicaRow only.
 MATERIALIZERS: dict[str, Materializer] = {t: _CUSTOM.get(t) or Materializer(t) for t in ENTITY_ORDER}
+
+
+def _int_or_none(raw) -> int | None:
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_pk(loc: str, entity_type: str, origin_pk) -> int | None:
+    """HQ pk of a copied city row, from the city's pk (None if it has not arrived)."""
+    if origin_pk in (None, ""):
+        return None
+    link = HqEntityMap.objects.filter(location_code=loc, entity_type=entity_type, origin_pk=str(origin_pk)).first()
+    return _int_or_none(link.local_pk) if link else None
+
+
+def _with_source_camera(metadata, camera_id) -> dict:
+    """Keep the city's camera id in metadata (its name comes from CityCamera)."""
+    meta = dict(metadata) if isinstance(metadata, dict) else {}
+    cam = _int_or_none(camera_id)
+    if cam is not None:
+        meta["source_camera_id"] = cam
+    return meta
+
+
+def _hq_leave_type_id(ref: dict) -> int:
+    """HQ leave type with the city's code (or name); created inactive if HQ has none."""
+    from users.models import LeaveType
+
+    code = str(ref.get("code") or "").strip()
+    name = str(ref.get("name") or "").strip()
+    found = None
+    if code:
+        found = LeaveType.objects.filter(code__iexact=code).first()
+    if found is None and name:
+        found = LeaveType.objects.filter(name__iexact=name).first()
+    if found is None:
+        # Inactive: shown on city leave requests but not offered in HQ forms. code is unique.
+        new_code = (code or re.sub(r"[^A-Z0-9]+", "_", name.upper()).strip("_") or "CITY_LEAVE")[:20]
+        found, _ = LeaveType.objects.get_or_create(
+            code=new_code, defaults={"name": (name or new_code)[:80], "is_active": False}
+        )
+    return found.pk
+
+
+def _media_ref(entity_type: str, field: str, rel: str) -> str:
+    """Value to store for a media field: the path, or a /media/ URL for URL-string fields."""
+    if field in MEDIA_URL_FIELDS.get(entity_type, ()):
+        return f"{settings.MEDIA_URL.rstrip('/')}/{rel}"
+    return rel
 
 
 def hq_media_relative_path(storage_path: str) -> str | None:
@@ -209,6 +310,7 @@ def hq_media_relative_path(storage_path: str) -> str | None:
 
 
 def _media_value(loc: str, entity_id: UUID, city_path: str | None) -> str | None:
+    city_path = media_url_to_path(city_path or "")
     if not city_path:
         return None
     obj = (
@@ -273,7 +375,12 @@ def _build_values(
             values[field.attname] = local
             continue
         if name in media_fields:
-            values[name] = _media_value(loc, entity_id, raw)
+            rel = _media_value(loc, entity_id, raw)
+            if rel:
+                values[name] = _media_ref(mat.entity_type, name, rel)
+            else:
+                # Not received yet; attach_media fills it in when the file arrives.
+                values[name] = "" if name in MEDIA_URL_FIELDS.get(mat.entity_type, ()) else None
             continue
         if field.get_internal_type() in {"FileField", "ImageField"}:
             values[name] = None
@@ -286,7 +393,7 @@ def _build_values(
         version=version,
         is_deleted=is_deleted or bool(payload.get("is_deleted")),
     )
-    mat.adjust(values)
+    mat.adjust(values, payload, loc)
     return values, pending, required
 
 
@@ -501,9 +608,9 @@ def attach_media(media: HqMediaObject) -> bool:
     ).first()
     payload = replica.payload if replica else {}
     updates = {
-        name: rel
+        name: _media_ref(media.record_entity_type, name, rel)
         for name in SYNC_MEDIA_FIELDS.get(media.record_entity_type) or []
-        if payload.get(name) == media.source_path
+        if media_url_to_path(str(payload.get(name) or "")) == media.source_path
     }
     if not updates:
         return False

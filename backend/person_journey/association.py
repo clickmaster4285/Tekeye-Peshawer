@@ -19,6 +19,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from city_sync.identity import local_rows_q
+
 from .identities import format_tracklet_id
 from .models import (
     CameraTopologyEdge,
@@ -156,7 +158,7 @@ def find_best_global_match(
     """Known staff/visitor ids are definitive; otherwise the calibrated re-identification engine decides."""
     from .identity import identify
 
-    active = JourneyPerson.objects.filter(status=PersonStatus.ACTIVE)
+    active = JourneyPerson.objects.filter(local_rows_q(), status=PersonStatus.ACTIVE)
     if staff_id:
         hit = active.filter(staff_id=staff_id).first()
         if hit:

@@ -11,6 +11,8 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from city_sync.identity import local_rows_q
+
 from .models import JourneyPerson, PersonStatus, PersonType
 
 
@@ -186,6 +188,7 @@ def resolve_staff_from_face_label(label: str) -> tuple[int | None, str]:
 
     staff = (
         Staff.objects.filter(
+            local_rows_q(),
             Q(face_identity_label__iexact=lbl)
             | Q(full_name__iexact=lbl)
             | Q(user__username__iexact=lbl)
@@ -212,10 +215,11 @@ def resolve_visitor_from_face_label(label: str) -> tuple[int | None, str]:
     if low.startswith("t") and low[1:].isdigit():
         return None, ""
 
-    visitor = Visitor.objects.filter(Q(full_name__iexact=lbl)).order_by("-id").first()
+    visitor = Visitor.objects.filter(local_rows_q(), Q(full_name__iexact=lbl)).order_by("-id").first()
     if visitor is None:
         person = (
             JourneyPerson.objects.filter(
+                local_rows_q(),
                 person_type=PersonType.VISITOR,
                 status=PersonStatus.ACTIVE,
                 display_name__iexact=lbl,

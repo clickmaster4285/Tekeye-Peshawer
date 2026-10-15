@@ -717,9 +717,9 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
             "id", "staff", "staff_name", "leave_type", "leave_type_name", "leave_type_code",
             "from_date", "to_date", "days", "reason", "status",
             "approved_by", "approved_at", "rejection_reason",
-            "created_at", "updated_at",
+            "created_at", "updated_at", "location_code",
         ]
-        read_only_fields = ["approved_by", "approved_at"]
+        read_only_fields = ["approved_by", "approved_at", "location_code"]
 
 
 class LeaveRequestCreateSerializer(serializers.ModelSerializer):
@@ -734,11 +734,13 @@ class LeaveRequestCreateSerializer(serializers.ModelSerializer):
 class PayrollEntrySerializer(serializers.ModelSerializer):
     staff_name = serializers.CharField(source="staff.full_name", read_only=True)
     employee_id = serializers.CharField(source="staff.employee_id", read_only=True)
+    # Server the staff member belongs to (Locations & Sync).
+    location_code = serializers.CharField(source="staff.location_code", read_only=True)
 
     class Meta:
         model = PayrollEntry
         fields = [
-            "id", "run", "staff", "staff_name", "employee_id",
+            "id", "run", "staff", "staff_name", "employee_id", "location_code",
             "basic_salary", "allowances", "gross_salary",
             "income_tax", "eobi_or_sss", "other_deductions", "net_salary",
             "created_at",

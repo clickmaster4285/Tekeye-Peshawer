@@ -15,6 +15,7 @@ from city_sync.syncable import (
     SYNC_MEDIA_FIELDS,
     SYNCED_ENTITY_TYPES,
     entity_type_for_model,
+    media_field_path,
     new_entity_id,
 )
 
@@ -83,8 +84,7 @@ def _post_save(sender, instance, created, **kwargs):
             else MediaQueue.PRIORITY_ROUTINE
         )
         for fname in fields:
-            f = getattr(instance, fname, None)
-            name = getattr(f, "name", "") if f else ""
+            name = media_field_path(instance, fname)
             if name:
                 enqueue_media_file(
                     absolute_or_media_path=name,

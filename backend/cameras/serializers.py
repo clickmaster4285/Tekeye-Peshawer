@@ -305,6 +305,23 @@ class DetectionEventSerializer(serializers.ModelSerializer):
         # HQ copies of city events have no camera.
         return obj.camera.purpose_label if obj.camera_id else ""
 
+    def to_representation(self, instance: DetectionEvent):
+        data = super().to_representation(instance)
+        if instance.camera_id is None and instance.source_camera_id:
+            from city_sync.city_cameras import cache_for, city_camera
+
+            cam = city_camera(instance.location_code, instance.source_camera_id, cache_for(self.context))
+            if cam is not None:
+                data.update(
+                    camera_code=cam.code,
+                    name=cam.name,
+                    zone=cam.zone,
+                    channel=cam.channel,
+                    site_code=cam.site_code,
+                    site_name=cam.site_name,
+                )
+        return data
+
     def get_clip_url(self, obj: DetectionEvent) -> str:
         if not obj.clip:
             return ""

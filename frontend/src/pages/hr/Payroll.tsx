@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { DollarSign, Users, FileText, Calendar } from "lucide-react"
 import { ROUTES } from "@/routes/config"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
@@ -26,6 +28,21 @@ import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { fetchPayrollRuns, createPayrollRun, processPayrollRun, type PayrollRunRecord } from "@/lib/payroll-api"
 
+/** Run totals, or the totals of one location's entries when a Location is picked. */
+function runTotals(
+  row: PayrollRunRecord,
+  selected: string,
+  matches: (code: string | null | undefined, selected: string) => boolean
+): { count: number; gross: string | number | null; net: string | number | null } {
+  if (selected === ALL_SOURCE_LOCATIONS) {
+    return { count: row.employee_count, gross: row.total_gross, net: row.total_net }
+  }
+  const entries = (row.entries ?? []).filter((e) => matches(e.location_code, selected))
+  const sum = (key: "gross_salary" | "net_salary") =>
+    entries.reduce((total, e) => total + (parseFloat(e[key]) || 0), 0)
+  return { count: entries.length, gross: sum("gross_salary"), net: sum("net_salary") }
+}
+
 function formatPkr(value: string | number | null): string {
   if (value == null) return "—"
   const n = typeof value === "string" ? parseFloat(value) : value
@@ -37,6 +54,8 @@ export default function PayrollPage() {
   const { toast } = useToast()
   const [runs, setRuns] = useState<PayrollRunRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
   const [error, setError] = useState<string | null>(null)
   const [runOpen, setRunOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -144,12 +163,17 @@ export default function PayrollPage() {
               <CardTitle>Payroll Runs</CardTitle>
               <CardDescription>History and status of payroll processing</CardDescription>
             </div>
-            <Button
-              className="bg-[#3b82f6] hover:bg-[#2563eb] text-white"
-              onClick={() => setRunOpen(true)}
-            >
-              Run Payroll
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {locations.enabled && (
+                <SourceLocationSelect value={sourceLocation} onChange={setSourceLocation} options={locations.options} />
+              )}
+              <Button
+                className="bg-[#3b82f6] hover:bg-[#2563eb] text-white"
+                onClick={() => setRunOpen(true)}
+              >
+                Run Payroll
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {error && <p className="text-sm text-destructive mb-4">{error}</p>}
@@ -175,22 +199,25 @@ export default function PayrollPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    runs.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-medium">{row.period_label}</TableCell>
-                        <TableCell>{row.employee_count}</TableCell>
-                        <TableCell>{formatPkr(row.total_gross)}</TableCell>
-                        <TableCell>{formatPkr(row.total_net)}</TableCell>
-                        <TableCell>
-                          <Badge variant={row.status === "PROCESSED" ? "default" : "secondary"}>{row.status}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {row.entries_count > 0 && (
-                            <span className="text-sm text-muted-foreground">{row.entries_count} entries</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    runs.map((row) => {
+                      const totals = runTotals(row, sourceLocation, locations.matches)
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-medium">{row.period_label}</TableCell>
+                          <TableCell>{totals.count}</TableCell>
+                          <TableCell>{formatPkr(totals.gross)}</TableCell>
+                          <TableCell>{formatPkr(totals.net)}</TableCell>
+                          <TableCell>
+                            <Badge variant={row.status === "PROCESSED" ? "default" : "secondary"}>{row.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {row.entries_count > 0 && (
+                              <span className="text-sm text-muted-foreground">{row.entries_count} entries</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
                   )}
                 </TableBody>
               </Table>

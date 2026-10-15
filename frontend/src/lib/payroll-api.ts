@@ -6,6 +6,8 @@ export type PayrollEntryRecord = {
   staff: number
   staff_name: string
   employee_id: string | null
+  /** Server the staff member belongs to (Locations & Sync); empty = this server. */
+  location_code?: string
   basic_salary: string
   allowances: string
   gross_salary: string

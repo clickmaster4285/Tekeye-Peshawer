@@ -25,6 +25,8 @@ from django.db.models import F, Window
 from django.db.models.functions import RowNumber
 from django.utils import timezone
 
+from city_sync.identity import local_rows_q
+
 from .models import CameraTrack, JourneyPerson, PersonObservation, PersonStatus, TrackStatus
 
 GALLERY_PER_PERSON = 12
@@ -141,7 +143,7 @@ def identify(
     face_memory = timedelta(days=_cfg("JOURNEY_FACE_MEMORY_DAYS", 30))
     horizon = now - (max(reid_memory, face_memory) if face is not None else reid_memory)
 
-    qs = JourneyPerson.objects.filter(status=PersonStatus.ACTIVE, latest_seen_at__gte=horizon)
+    qs = JourneyPerson.objects.filter(local_rows_q(), status=PersonStatus.ACTIVE, latest_seen_at__gte=horizon)
     if person_type:
         qs = qs.filter(person_type=person_type)
     candidates = {
@@ -228,6 +230,7 @@ def consolidate_recent_persons(*, hours: float | None = None, threshold: float |
     persons = {
         p.pk: p
         for p in JourneyPerson.objects.filter(
+            local_rows_q(),
             status=PersonStatus.ACTIVE, person_type=PersonType.UNKNOWN, latest_seen_at__gte=since
         )
     }

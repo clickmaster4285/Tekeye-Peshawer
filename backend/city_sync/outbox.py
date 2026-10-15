@@ -17,6 +17,7 @@ from django.utils.duration import duration_iso_string
 
 from city_sync.identity import location_code, schema_version
 from city_sync.models import SyncOutbox
+from city_sync.syncable import PAYLOAD_REFS
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,12 @@ def model_to_payload(instance) -> dict:
             data[name] = value.name if value else None
             continue
         data[name] = value
-    data["_model"] = f"{instance._meta.app_label}.{instance._meta.object_name}"
+    label = f"{instance._meta.app_label}.{instance._meta.object_name}"
+    for name in PAYLOAD_REFS.get(label, []):
+        target = getattr(instance, name, None)
+        if target is not None:
+            data[f"_ref_{name}"] = {"code": getattr(target, "code", ""), "name": getattr(target, "name", "")}
+    data["_model"] = label
     data["_pk"] = instance.pk
     return json.loads(json.dumps(data, default=_json_default))
 

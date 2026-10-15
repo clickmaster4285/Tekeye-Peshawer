@@ -12,6 +12,8 @@ from django.utils import timezone
 
 from cameras.models import Camera
 
+from city_sync.identity import local_rows_q
+
 from .identities import format_person_code, format_tracklet_id, parse_person_code_seq
 from .matching import (
     resolve_staff_from_face_label,
@@ -46,7 +48,8 @@ def _allocate_code_lock() -> None:
 def _max_code_seq() -> int:
     """Highest numeric sequence across PJ-##### and legacy P/V/U codes."""
     max_seq = 0
-    for code in JourneyPerson.objects.values_list("code", flat=True):
+    # This server's own people; HQ copies of city people carry "<CITY>:" codes.
+    for code in JourneyPerson.all_objects.filter(local_rows_q()).values_list("code", flat=True):
         n = parse_person_code_seq(code)
         if n is not None:
             max_seq = max(max_seq, n)
@@ -430,7 +433,7 @@ def ingest_track_observation(payload: dict[str, Any]) -> dict[str, Any]:
         person = matched_person if match_detail.get("decision") == "match" else None
         if person is not None:
             for dup_id in match_detail.get("merge_duplicates") or []:
-                dup = JourneyPerson.objects.filter(pk=dup_id, status=PersonStatus.ACTIVE).first()
+                dup = JourneyPerson.objects.filter(local_rows_q(), pk=dup_id, status=PersonStatus.ACTIVE).first()
                 if dup is not None and dup.person_type == PersonType.UNKNOWN:
                     merge_journey_person(dup, person, reason="same person split earlier (ambiguous ReID)")
             match = type(
@@ -445,9 +448,9 @@ def ingest_track_observation(payload: dict[str, Any]) -> dict[str, Any]:
         # No legacy fallback: an uncertain or ambiguous track gets its own ID rather than someone else's.
 
     if person is None and staff_id:
-        person = JourneyPerson.objects.filter(staff_id=staff_id, status=PersonStatus.ACTIVE).first()
+        person = JourneyPerson.objects.filter(local_rows_q(), staff_id=staff_id, status=PersonStatus.ACTIVE).first()
     if person is None and visitor_id:
-        person = JourneyPerson.objects.filter(visitor_id=visitor_id, status=PersonStatus.ACTIVE).first()
+        person = JourneyPerson.objects.filter(local_rows_q(), visitor_id=visitor_id, status=PersonStatus.ACTIVE).first()
         if person is None:
             from visitors.models import Visitor
 
@@ -881,7 +884,7 @@ def merge_person_to_visitor(
 @transaction.atomic
 def register_staff_journey_person(staff) -> JourneyPerson:
     """Ensure a staff member has a journey person registry entry (global PJ- id)."""
-    existing = JourneyPerson.objects.filter(staff_id=staff.pk, status=PersonStatus.ACTIVE).first()
+    existing = JourneyPerson.objects.filter(local_rows_q(), staff_id=staff.pk, status=PersonStatus.ACTIVE).first()
     if existing:
         return existing
 
@@ -901,7 +904,7 @@ def register_staff_journey_person(staff) -> JourneyPerson:
 @transaction.atomic
 def register_visitor_journey_person(visitor) -> JourneyPerson:
     """Ensure a registered visitor has a journey person entry (global PJ- id)."""
-    existing = JourneyPerson.objects.filter(visitor_id=visitor.pk, status=PersonStatus.ACTIVE).first()
+    existing = JourneyPerson.objects.filter(local_rows_q(), visitor_id=visitor.pk, status=PersonStatus.ACTIVE).first()
     if existing:
         return existing
     return create_journey_person(

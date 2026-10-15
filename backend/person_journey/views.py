@@ -8,6 +8,8 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from users.permissions import apply_source_location_filter
+
 from .models import JourneyEvent, JourneyPerson, PersonStatus, PersonType
 from .serializers import (
     IngestObservationSerializer,
@@ -73,6 +75,7 @@ class JourneyPersonListAPIView(generics.ListAPIView):
             .prefetch_related("tracks")
             .filter(person_type__in=[PersonType.STAFF, PersonType.VISITOR, PersonType.UNKNOWN])
         )
+        qs = apply_source_location_filter(qs, self.request.user, self.request.query_params.get("source_location"))
         person_type = self.request.query_params.get("person_type")
         if person_type:
             qs = qs.filter(person_type=person_type.strip())

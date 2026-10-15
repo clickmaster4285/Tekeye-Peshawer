@@ -98,7 +98,42 @@ SYNC_MEDIA_FIELDS: dict[str, list[str]] = {
     "detention_assessment_attachment": ["file"],
     "detection_event": ["clip", "video"],
     "memo_distribution": ["video"],
+    "journey_event": ["snapshot_path"],
 }
+
+# Media fields stored as a "/media/..." URL string instead of a FileField.
+MEDIA_URL_FIELDS: dict[str, frozenset[str]] = {
+    "journey_event": frozenset({"snapshot_path"}),
+}
+
+# Links to tables that are not synced: the city also sends the target's code and name
+# (as "_ref_<field>") so HQ can find its own matching row.
+PAYLOAD_REFS: dict[str, list[str]] = {
+    "users.LeaveRequest": ["leave_type"],
+}
+
+
+def media_url_to_path(value: str) -> str:
+    """'/media/a/b.jpg' (or a full URL) -> 'a/b.jpg'; '' when it is not under MEDIA_URL."""
+    from urllib.parse import urlparse
+
+    text = (value or "").strip()
+    if "://" in text:
+        text = urlparse(text).path
+    prefix = "/" + (getattr(settings, "MEDIA_URL", "") or "/media/").strip("/") + "/"
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return "" if text.startswith("/") else text
+
+
+def media_field_path(obj, field_name: str) -> str:
+    """MEDIA_ROOT-relative path of a media field (FileField or URL string), or ''."""
+    value = getattr(obj, field_name, None)
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return media_url_to_path(value)
+    return getattr(value, "name", "") or ""
 
 # Evidence-like media uses higher priority
 EVIDENCE_ENTITY_TYPES: frozenset[str] = frozenset(LEGAL_ENTITY_TYPES) | {

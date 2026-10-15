@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import {
@@ -82,6 +84,8 @@ export default function PersonJourneyPage() {
   const debouncedSearch = useDebouncedValue(search, 350)
   const [typeFilter, setTypeFilter] = useState<"all" | JourneyPersonType>("all")
   const [page, setPage] = useState(1)
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   const summaryQuery = useQuery({
@@ -95,13 +99,14 @@ export default function PersonJourneyPage() {
   })
 
   const personsQuery = useQuery({
-    queryKey: ["journey-persons", typeFilter, debouncedSearch, page, pageSize],
+    queryKey: ["journey-persons", typeFilter, debouncedSearch, page, pageSize, sourceLocation],
     queryFn: () =>
       fetchJourneyPersons({
         q: debouncedSearch.trim() || undefined,
         person_type: typeFilter === "all" ? undefined : typeFilter,
         page,
         page_size: pageSize,
+        source_location: sourceLocation === ALL_SOURCE_LOCATIONS ? undefined : sourceLocation,
       }),
   })
 
@@ -306,13 +311,24 @@ export default function PersonJourneyPage() {
                     <SelectItem value="unknown">Unknown</SelectItem>
                   </SelectContent>
                 </Select>
+                {locations.enabled && (
+                  <SourceLocationSelect
+                    value={sourceLocation}
+                    onChange={(v) => {
+                      setSourceLocation(v)
+                      setPage(1)
+                    }}
+                    options={locations.options}
+                    className="w-full sm:w-[180px]"
+                  />
+                )}
               </div>
 
               {personsQuery.isLoading ? (
                 <p className="text-sm text-muted-foreground py-8 text-center">Loading journeys...</p>
               ) : persons.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-8 text-center">
-                  {debouncedSearch.trim() || typeFilter !== "all"
+                  {debouncedSearch.trim() || typeFilter !== "all" || sourceLocation !== ALL_SOURCE_LOCATIONS
                     ? "No journeys match your search."
                     : "No people tracked yet. When cameras see someone, they will appear here."}
                 </p>
@@ -323,6 +339,7 @@ export default function PersonJourneyPage() {
                       <TableRow>
                         <TableHead className="w-[88px]">Capture</TableHead>
                         <TableHead>Person</TableHead>
+                        {locations.enabled && <TableHead>Location</TableHead>}
                         <TableHead>Type</TableHead>
                         <TableHead>Last Location</TableHead>
                         <TableHead>Last Seen</TableHead>
@@ -351,6 +368,11 @@ export default function PersonJourneyPage() {
                               </div>
                             ) : null}
                           </TableCell>
+                          {locations.enabled && (
+                            <TableCell className="whitespace-nowrap text-sm">
+                              {locations.labelFor(person.location_code)}
+                            </TableCell>
+                          )}
                           <TableCell>
                             <Badge variant={typeBadgeVariant(person.person_type)}>
                               {journeyPersonTypeLabel(person.person_type)}

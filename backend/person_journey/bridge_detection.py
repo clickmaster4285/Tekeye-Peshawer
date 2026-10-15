@@ -8,6 +8,8 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from city_sync.identity import local_rows_q
+
 from .matching import resolve_staff_from_face_label
 from .models import JourneyEvent, JourneyEventType, JourneyPerson, PersonStatus, PersonType
 from .services import _camera_zone, create_journey_person, register_staff_journey_person, register_visitor_journey_person
@@ -107,6 +109,7 @@ def _match_unknown_by_track(instance, camera, now) -> JourneyPerson | None:
     )
     if prev and prev.person_identity_id:
         return JourneyPerson.objects.filter(
+            local_rows_q(),
             pk=prev.person_identity_id,
             person_type=PersonType.UNKNOWN,
             status=PersonStatus.ACTIVE,
@@ -120,7 +123,7 @@ def _resolve_person_from_detection(instance) -> tuple[JourneyPerson | None, bool
     if not staff_id and instance.personal_number:
         from users.models import Staff
 
-        staff = Staff.objects.filter(personal_number=instance.personal_number).first()
+        staff = Staff.objects.filter(local_rows_q(), personal_number=instance.personal_number).first()
         if staff:
             staff_id = staff.pk
             staff_name = staff.full_name or staff_name
@@ -129,7 +132,7 @@ def _resolve_person_from_detection(instance) -> tuple[JourneyPerson | None, bool
     now = instance.created_at or timezone.now()
 
     if staff_id:
-        person = JourneyPerson.objects.filter(staff_id=staff_id, status=PersonStatus.ACTIVE).first()
+        person = JourneyPerson.objects.filter(local_rows_q(), staff_id=staff_id, status=PersonStatus.ACTIVE).first()
         if person is None:
             from users.models import Staff
 
@@ -142,6 +145,7 @@ def _resolve_person_from_detection(instance) -> tuple[JourneyPerson | None, bool
     label = (instance.label or "").strip()
     if label and label.lower() not in _GENERIC_LABELS:
         person = JourneyPerson.objects.filter(
+            local_rows_q(),
             display_name__iexact=label,
             status=PersonStatus.ACTIVE,
             latest_seen_at__gte=now - timedelta(minutes=30),
