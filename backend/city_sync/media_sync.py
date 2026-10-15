@@ -110,6 +110,10 @@ def push_media_once(*, limit: int = 5) -> dict:
     base = _hq_media_base()
     if not base:
         return {"skipped": True, "reason": "no_url"}
+    from city_sync.control import city_is_paused
+
+    if city_is_paused():
+        return {"skipped": True, "reason": "paused_by_hq"}
 
     chunk_size = int(getattr(settings, "SYNC_MEDIA_CHUNK_SIZE", 4 * 1024 * 1024))
     max_attempts = int(getattr(settings, "SYNC_MEDIA_MAX_ATTEMPTS", 30))

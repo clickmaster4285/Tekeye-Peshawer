@@ -402,3 +402,54 @@ class ReconcileReport(models.Model):
 
     def __str__(self) -> str:
         return f"Reconcile {self.location_code} {self.day} {self.entity_type} ok={self.ok}"
+
+
+class SyncSite(models.Model):
+    """
+    HQ registry of city servers, managed from the Locations admin page (Stage 2).
+    The site's API key lives in SyncCredential (hash only), keyed by location_code.
+    """
+
+    location_code = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=128)
+    # City backend root, e.g. http://192.168.120.13:8000 (used for Test connection).
+    base_url = models.CharField(max_length=255)
+    is_paused = models.BooleanField(default=False)
+    # Full-history request: HQ sets request_id, city echoes it back in the heartbeat when done.
+    full_history_request_id = models.CharField(max_length=64, blank=True, default="")
+    full_history_requested_at = models.DateTimeField(null=True, blank=True)
+    full_history_done_at = models.DateTimeField(null=True, blank=True)
+    last_test_at = models.DateTimeField(null=True, blank=True)
+    last_test_ok = models.BooleanField(null=True, blank=True)
+    last_test_detail = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return f"SyncSite({self.location_code})"
+
+
+class CityControlState(models.Model):
+    """
+    City-side copy of the latest HQ commands, saved from each heartbeat response.
+    Single row (pk=1). Workers read it so a pause from HQ stops pushing without
+    burning retry attempts.
+    """
+
+    is_paused = models.BooleanField(default=False)
+    full_history_request_id = models.CharField(max_length=64, blank=True, default="")
+    full_history_done_id = models.CharField(max_length=64, blank=True, default="")
+    full_history_running = models.BooleanField(default=False)
+    last_hq_contact_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def load(cls) -> "CityControlState":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self) -> str:
+        return f"CityControlState(paused={self.is_paused})"

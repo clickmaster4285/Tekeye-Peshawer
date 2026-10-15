@@ -126,6 +126,7 @@ const EXPLICIT_SUBMENU_ICONS: Record<string, SidebarIconComponent> = {
   "Attendance Dashboard": LayoutDashboard,
   "Attendance Reports": BarChart3,
   Notifications: Bell,
+  "Locations & Sync": Network,
   // Table of Contents & AI Analytics sub-modules
   "Table of Contents": List,
   "Live View": Monitor,

@@ -550,6 +550,8 @@ ALLOWED_LOCATION_CODES = _env_list(
     "PESHAWAR,ABBOTTABAD,DI_KHAN,DDK,THAKOT,MARDAN,NOWSHERA,KOHAT,HAYATABAD,SWH_RATTA_KULACHI",
 )
 HQ_SYNC_URL = os.getenv("HQ_SYNC_URL", "").strip().rstrip("/")
+# HQ only: address cities use to reach this server (shown in the Locations page .env snippet).
+HQ_PUBLIC_URL = os.getenv("HQ_PUBLIC_URL", "").strip().rstrip("/")
 SYNC_API_KEY = os.getenv("SYNC_API_KEY", "").strip()
 SYNC_API_KEY_FILE = os.getenv("SYNC_API_KEY_FILE", "").strip()
 SYNC_API_KEYS = os.getenv("SYNC_API_KEYS", "").strip()

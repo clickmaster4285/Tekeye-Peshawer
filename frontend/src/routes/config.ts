@@ -218,6 +218,7 @@ export const ROUTES = {
   NOTIFICATIONS: "/notifications",
   SECURITY_ACCESS: "/security-access",
   LOGS: "/settings/logs",
+  LOCATIONS_SYNC: "/settings/locations-sync",
 
   // Additional modules (from full module spec)
   TABLE_OF_CONTENTS: "/table-of-contents",
@@ -755,6 +756,7 @@ const ALL_NAV_ITEMS: (NavItem | NavGroup)[] = [
     children: [
       { label: "General Settings", href: ROUTES.GENERAL_SETTINGS },
       { label: "Roles & Permissions", href: ROUTES.USER_ROLE_MANAGEMENT },
+      { label: "Locations & Sync", href: ROUTES.LOCATIONS_SYNC },
       { label: "Integrations", href: ROUTES.INTEGRATIONS },
       { label: "Notifications", href: ROUTES.NOTIFICATIONS },
       { label: "Security & Access", href: ROUTES.SECURITY_ACCESS },

@@ -165,6 +165,11 @@ def push_once() -> dict:
     if not hq_url:
         return {"skipped": True, "reason": "HQ_SYNC_URL empty"}
 
+    from city_sync.control import city_is_paused
+
+    if city_is_paused():
+        return {"skipped": True, "reason": "paused_by_hq"}
+
     recover_stuck_sending()
     batch_size = int(getattr(settings, "OUTBOX_BATCH_SIZE", 200))
     min_age = float(getattr(settings, "OUTBOX_MIN_AGE_SECONDS", 2))
@@ -229,6 +234,7 @@ def send_heartbeat() -> dict:
     if not hq_url:
         return {"skipped": True, "reason": "no_url"}
 
+    from city_sync.control import apply_hq_control, heartbeat_extras
     from city_sync.media_sync import media_stats
     from city_sync.models import BackupRecord, SyncOutbox
 
@@ -260,6 +266,7 @@ def send_heartbeat() -> dict:
         "disk_percent": disk_percent,
         "last_backup_at": last_backup.isoformat() if last_backup else None,
         "last_business_event_at": last_biz.isoformat() if last_biz else None,
+        **heartbeat_extras(),
     }
     api_key = _load_api_key()
     try:
@@ -269,6 +276,14 @@ def send_heartbeat() -> dict:
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             timeout=10,
         )
-        return {"status_code": resp.status_code}
+        control = None
+        if resp.ok:
+            try:
+                control = (resp.json() or {}).get("control")
+            except ValueError:
+                control = None
+        if control is not None:
+            apply_hq_control(control)
+        return {"status_code": resp.status_code, "control": control}
     except requests.RequestException as exc:
         return {"error": str(exc)}

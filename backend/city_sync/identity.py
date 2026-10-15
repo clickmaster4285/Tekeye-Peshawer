@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Iterable
 
 from django.conf import settings
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 ROLE_CITY = "city"
 ROLE_HQ = "hq"
 ALLOWED_ROLES = frozenset({ROLE_CITY, ROLE_HQ})
+LOCATION_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 # Canonical location codes (guide + existing Ops Central keys).
 DEFAULT_ALLOWED_LOCATION_CODES = frozenset(
@@ -112,9 +114,11 @@ def validate_node_identity() -> None:
         )
     if not code:
         raise ImproperlyConfigured("LOCATION_CODE is required (e.g. ABBOTTABAD, PESHAWAR, DI_KHAN).")
-    if code not in allowed_location_codes():
+    # New cities are added from the HQ Locations page, so any well-formed code is
+    # accepted; HQ only takes data from codes it has issued a key for.
+    if code not in allowed_location_codes() and not LOCATION_CODE_RE.match(code):
         raise ImproperlyConfigured(
-            f"LOCATION_CODE={code!r} is not in ALLOWED_LOCATION_CODES."
+            f"LOCATION_CODE={code!r} must be capital letters, digits or _ (e.g. MARDAN, DI_KHAN)."
         )
     if not nid:
         raise ImproperlyConfigured("NODE_ID is required (unique per server, e.g. abt-app-01).")

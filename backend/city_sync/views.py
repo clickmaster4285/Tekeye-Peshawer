@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from city_sync.auth import SyncApiKeyAuthentication, SyncPrincipal
+from city_sync.control import control_for_location, is_location_paused, record_heartbeat_ack
 from city_sync.hq_receiver import apply_event_batch
 from city_sync.identity import identity_dict, is_hq, location_code, system_role
 from city_sync.media_sync import hq_media_chunk, hq_media_complete, hq_media_init
@@ -60,6 +61,15 @@ class SyncEventsView(APIView):
                 {"detail": f"batch too large (max {max_batch})"},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
+        if is_location_paused(principal.location_code):
+            # Backup for a city that has not seen the pause yet: "retry" keeps events
+            # pending at the city without counting toward dead-letter.
+            results = [
+                {"event_id": str(e.get("event_id") or ""), "result": "retry", "detail": "paused_by_hq"}
+                for e in events
+                if isinstance(e, dict)
+            ]
+            return Response({"results": results})
         results = apply_event_batch(events, credential_location=principal.location_code)
         return Response({"results": results})
 
@@ -111,7 +121,8 @@ class SyncHeartbeatView(APIView):
         row.last_heartbeat_at = timezone.now()
         row.raw = body
         row.save()
-        return Response({"ok": True, "location_code": loc})
+        record_heartbeat_ack(loc, body)
+        return Response({"ok": True, "location_code": loc, "control": control_for_location(loc)})
 
 
 class SyncCursorView(APIView):
@@ -212,6 +223,26 @@ class MediaCompleteView(APIView):
         return Response(result, status=code)
 
 
+def city_health_state(st: HqCityStatus, now) -> tuple[str, int | None]:
+    """(state, heartbeat_age_sec) for one city: ONLINE / DEGRADED / OFFLINE / LONG_OFFLINE / UNKNOWN."""
+    if not st.last_heartbeat_at:
+        return "UNKNOWN", None
+    offline_after = int(getattr(settings, "SYNC_GRID_OFFLINE_AFTER_SEC", 90))
+    age = int((now - st.last_heartbeat_at).total_seconds())
+    if age > 1800:
+        return "LONG_OFFLINE", age
+    if age > offline_after:
+        return "OFFLINE", age
+    if (
+        st.dead_outbox > 0
+        or st.oldest_pending_age_sec > 300
+        or st.failed_media > 0
+        or not st.last_reconcile_ok
+    ):
+        return "DEGRADED", age
+    return "ONLINE", age
+
+
 class CityStatusListView(APIView):
     """HQ Grid — HQ tables only (Phase 7)."""
 
@@ -221,27 +252,10 @@ class CityStatusListView(APIView):
         if not is_hq() and not getattr(settings, "DEBUG", False):
             return Response({"detail": "HQ only"}, status=status.HTTP_403_FORBIDDEN)
         now = timezone.now()
-        offline_after = int(getattr(settings, "SYNC_GRID_OFFLINE_AFTER_SEC", 90))
         backup_stale_h = float(getattr(settings, "SYNC_BACKUP_STALE_HOURS", 26))
         rows = []
         for st in HqCityStatus.objects.all().order_by("location_code"):
-            age = None
-            state = "UNKNOWN"
-            if st.last_heartbeat_at:
-                age = int((now - st.last_heartbeat_at).total_seconds())
-                if age > 1800:
-                    state = "LONG_OFFLINE"
-                elif age > offline_after:
-                    state = "OFFLINE"
-                elif (
-                    st.dead_outbox > 0
-                    or st.oldest_pending_age_sec > 300
-                    or st.failed_media > 0
-                    or not st.last_reconcile_ok
-                ):
-                    state = "DEGRADED"
-                else:
-                    state = "ONLINE"
+            state, age = city_health_state(st, now)
             backup_state = "UNKNOWN"
             if st.last_backup_at:
                 bak_age_h = (now - st.last_backup_at).total_seconds() / 3600.0

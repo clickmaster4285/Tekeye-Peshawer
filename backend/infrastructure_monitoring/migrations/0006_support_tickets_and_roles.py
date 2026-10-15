@@ -2,6 +2,15 @@
 
 from django.db import migrations
 
+# Some databases already ran these exact renames under an older migration name
+# (0006_rename_infrastruct_device__srvlog_idx_..._and_more), so the old index
+# names may be gone. Rename only when the old name still exists; Django state
+# is updated either way.
+RENAMES = [
+    ("infrastruct_device__srvlog_idx", "infrastruct_device__e00dc6_idx"),
+    ("infrastruct_device__srvcat_idx", "infrastruct_device__5d8f0b_idx"),
+]
+
 
 class Migration(migrations.Migration):
 
@@ -10,14 +19,24 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RenameIndex(
-            model_name='infraserverlog',
-            new_name='infrastruct_device__e00dc6_idx',
-            old_name='infrastruct_device__srvlog_idx',
-        ),
-        migrations.RenameIndex(
-            model_name='infraserverlog',
-            new_name='infrastruct_device__5d8f0b_idx',
-            old_name='infrastruct_device__srvcat_idx',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RenameIndex(
+                    model_name='infraserverlog',
+                    new_name='infrastruct_device__e00dc6_idx',
+                    old_name='infrastruct_device__srvlog_idx',
+                ),
+                migrations.RenameIndex(
+                    model_name='infraserverlog',
+                    new_name='infrastruct_device__5d8f0b_idx',
+                    old_name='infrastruct_device__srvcat_idx',
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=[f'ALTER INDEX IF EXISTS "{old}" RENAME TO "{new}";' for old, new in RENAMES],
+                    reverse_sql=[f'ALTER INDEX IF EXISTS "{new}" RENAME TO "{old}";' for old, new in RENAMES],
+                ),
+            ],
         ),
     ]

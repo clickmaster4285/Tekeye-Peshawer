@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from city_sync.models import (
     BackupRecord,
+    CityControlState,
     CityReferenceCache,
     HqCityStatus,
     HqConflict,
@@ -16,6 +17,7 @@ from city_sync.models import (
     SyncAuditLog,
     SyncCredential,
     SyncOutbox,
+    SyncSite,
 )
 
 
@@ -181,3 +183,14 @@ class HqCityStatusAdmin(admin.ModelAdmin):
         "last_reconcile_ok",
         "app_version",
     )
+
+
+@admin.register(SyncSite)
+class SyncSiteAdmin(admin.ModelAdmin):
+    list_display = ("location_code", "name", "base_url", "is_paused", "last_test_ok", "full_history_done_at")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(CityControlState)
+class CityControlStateAdmin(admin.ModelAdmin):
+    list_display = ("pk", "is_paused", "full_history_running", "full_history_done_id", "last_hq_contact_at")

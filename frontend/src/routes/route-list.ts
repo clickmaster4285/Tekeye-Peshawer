@@ -203,6 +203,7 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: toChildPath(ROUTES.NOTIFICATIONS), page: "Notifications" },
   { path: toChildPath(ROUTES.SECURITY_ACCESS), page: "SecurityAccess" },
   { path: toChildPath(ROUTES.LOGS), page: "ActivityLogs" },
+  { path: toChildPath(ROUTES.LOCATIONS_SYNC), page: "LocationsSync" },
   { path: "settings/logs/:id", page: "ActivityLogDetail" },
   // Additional modules
   { path: toChildPath(ROUTES.TABLE_OF_CONTENTS), page: "TableOfContents" },

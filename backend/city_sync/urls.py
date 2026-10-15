@@ -1,5 +1,13 @@
 from django.urls import path
 
+from city_sync.sites_api import (
+    SyncSiteDetailView,
+    SyncSiteFullHistoryView,
+    SyncSiteRotateKeyView,
+    SyncSitesView,
+    SyncSiteTestView,
+)
+
 from city_sync.views import (
     CityStatusListView,
     MediaChunkView,
@@ -37,4 +45,14 @@ urlpatterns = [
         name="sync-media-complete-slash",
     ),
     path("sync/v1/cities/", CityStatusListView.as_view(), name="sync-cities"),
+    # HQ Locations admin page (Stage 2)
+    path("sync/v1/sites/", SyncSitesView.as_view(), name="sync-sites"),
+    path("sync/v1/sites/<str:code>/", SyncSiteDetailView.as_view(), name="sync-site-detail"),
+    path("sync/v1/sites/<str:code>/rotate-key/", SyncSiteRotateKeyView.as_view(), name="sync-site-rotate-key"),
+    path("sync/v1/sites/<str:code>/test/", SyncSiteTestView.as_view(), name="sync-site-test"),
+    path(
+        "sync/v1/sites/<str:code>/full-history/",
+        SyncSiteFullHistoryView.as_view(),
+        name="sync-site-full-history",
+    ),
 ]

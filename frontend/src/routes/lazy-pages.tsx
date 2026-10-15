@@ -203,6 +203,7 @@ export const PAGE_LOADERS = {
   Notifications: () => import("@/pages/settings/Notifications").then((m) => ({ default: m.default })),
   SecurityAccess: () => import("@/pages/settings/SecurityAccess").then((m) => ({ default: m.default })),
   ActivityLogs: () => import("@/pages/settings/ActivityLogs").then((m) => ({ default: m.default })),
+  LocationsSync: () => import("@/pages/settings/LocationsSync").then((m) => ({ default: m.default })),
   ActivityLogDetail: () => import("@/pages/settings/ActivityLogDetail").then((m) => ({ default: m.default })),
   TableOfContents: () => import("@/pages/TableOfContents").then((m) => ({ default: m.default })),
   PlaybackSearch: () => import("@/pages/operations/PlaybackSearch").then((m) => ({ default: m.default })),
