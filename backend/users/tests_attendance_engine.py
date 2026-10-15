@@ -70,3 +70,23 @@ class AttendanceDecisionEngineTests(TestCase):
         self.assertEqual(action, "check_in")
         self.assertIsNotNone(record)
         self.assertEqual(record.source, Attendance.SOURCE_MANUAL)
+
+    @override_settings(ATTENDANCE_MIN_CHECKOUT_AFTER_IN_MINUTES=1)
+    def test_account_linked_after_check_in_reuses_todays_row(self):
+        now = timezone.make_aware(datetime(2026, 7, 21, 9, 0))
+        first = AttendanceDecisionEngine.process_recognition(
+            staff=self.staff, confidence=0.9, source=Attendance.SOURCE_CCTV, now=now
+        )
+        self.assertIsNone(first["record"].user_id)
+
+        # A login account is linked later the same day.
+        user = User.objects.create_user(username="linked", password="x")
+        self.staff.user = user
+        self.staff.save(update_fields=["user"])
+
+        checkout = AttendanceDecisionEngine.process_recognition(
+            staff=self.staff, confidence=0.9, source=Attendance.SOURCE_CCTV, now=now + timedelta(minutes=5)
+        )
+        self.assertEqual(checkout["record"].pk, first["record"].pk)
+        self.assertEqual(Attendance.objects.filter(staff=self.staff).count(), 1)
+        self.assertEqual(Attendance.objects.get(pk=first["record"].pk).user_id, user.pk)

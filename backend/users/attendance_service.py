@@ -8,7 +8,7 @@ from datetime import datetime, time as dt_time, timedelta
 from typing import Literal
 
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -202,28 +202,32 @@ class AttendanceDecisionEngine:
     @classmethod
     def _get_or_create_today(cls, staff: Staff, source: str, now: datetime) -> Attendance:
         today = timezone.localdate(now)
-        try:
-            if staff.user_id and staff.user and not staff.user.is_deleted:
-                record, _ = Attendance.objects.get_or_create(
-                    user=staff.user,
-                    date=today,
-                    defaults={"staff": staff, "source": source},
-                )
-                if record.staff_id is None:
-                    record.staff = staff
-                    record.save(update_fields=["staff", "updated_at"])
-                return record
-
-            record, _ = Attendance.objects.get_or_create(
-                staff=staff,
-                date=today,
-                defaults={"source": source},
-            )
+        user = staff.user if staff.user_id and staff.user and not staff.user.is_deleted else None
+        # Today's row may be keyed by staff only (marked before the account was linked) or by user only.
+        match = Q(staff=staff) | Q(user=user) if user is not None else Q(staff=staff)
+        for attempt in range(2):
+            rows = list(Attendance.objects.filter(match, date=today).order_by("pk")[:2])
+            if not rows:
+                try:
+                    with transaction.atomic():
+                        return Attendance.objects.create(user=user, staff=staff, date=today, source=source)
+                except IntegrityError:
+                    if attempt:
+                        raise
+                    continue  # created at the same moment by another camera; read it back
+            # Prefer the row that already holds the user, so filling gaps never clashes.
+            record = next((r for r in rows if user is not None and r.user_id == user.pk), rows[0])
+            updates = []
+            if record.staff_id is None:
+                record.staff = staff
+                updates.append("staff")
+            if user is not None and record.user_id is None:
+                record.user = user
+                updates.append("user")
+            if updates:
+                record.save(update_fields=[*updates, "updated_at"])
             return record
-        except IntegrityError:
-            if staff.user_id:
-                return Attendance.objects.get(user=staff.user, date=today)
-            return Attendance.objects.get(staff=staff, date=today)
+        raise RuntimeError("unreachable")
 
     @classmethod
     def process_recognition(
