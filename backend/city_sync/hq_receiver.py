@@ -36,6 +36,33 @@ def _parse_updated_at(payload: dict) -> timezone.datetime:
     return timezone.now()
 
 
+def _materialize(loc: str, entity_type: str, entity_id: UUID, version: int, payload: dict, tombstone: bool) -> None:
+    """Copy into the business table. A failure here must not lose the replica row."""
+    from city_sync.materialize import materialize_event
+
+    try:
+        with transaction.atomic():
+            materialize_event(
+                loc=loc,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                version=version,
+                payload=payload,
+                tombstone=tombstone,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("materialize failed %s/%s/%s", loc, entity_type, entity_id)
+        HqConflict.objects.create(
+            location_code=loc,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            incoming_version=version,
+            stored_version=version,
+            reason=f"materialize_failed:{type(exc).__name__}"[:64],
+            payload=payload,
+        )
+
+
 def apply_event(event: dict[str, Any], *, credential_location: str) -> dict[str, Any]:
     """
     Apply one Outbox event inside its own transaction.
@@ -164,6 +191,9 @@ def apply_event(event: dict[str, Any], *, credential_location: str) -> dict[str,
             )
             result = RESULT_STALE
             detail = "older_version"
+
+        if result == RESULT_APPLIED:
+            _materialize(loc, entity_type, entity_id, entity_version, payload, operation == "tombstone")
 
         # Always record receipt (including stale/conflict) so retries are idempotent.
         HqEventLog.objects.create(

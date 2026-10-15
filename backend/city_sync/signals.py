@@ -6,7 +6,7 @@ import logging
 
 from django.apps import apps
 from django.conf import settings
-from django.db.models.signals import post_save, pre_delete, pre_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 
 from city_sync.identity import location_code
 from city_sync.outbox import enqueue_from_instance
@@ -109,6 +109,31 @@ def _forbid_hard_delete(sender, instance, **kwargs):
     )
 
 
+def _post_delete(sender, instance, **kwargs):
+    """A normal delete at a city still reaches HQ as a tombstone; HQ keeps its copy marked deleted."""
+    entity_type = entity_type_for_model(sender)
+    if not entity_type or getattr(instance, _SYNC_SKIP_ATTR, False):
+        return
+    if not getattr(settings, "SYNC_OUTBOX_ENABLED", True) or not getattr(instance, "entity_id", None):
+        return
+    from city_sync.identity import is_city
+    from city_sync.outbox import enqueue_outbox, model_to_payload
+
+    if not is_city():
+        return
+    instance.is_deleted = True
+    instance.version = int(getattr(instance, "version", 1) or 1) + 1
+    # Runs inside the delete's transaction, so the tombstone and the delete commit together.
+    enqueue_outbox(
+        entity_type=entity_type,
+        entity_id=instance.entity_id,
+        entity_version=instance.version,
+        operation="tombstone",
+        payload=model_to_payload(instance),
+        location=getattr(instance, "location_code", None) or location_code(),
+    )
+
+
 def connect_signals() -> None:
     global _CONNECTED
     if _CONNECTED:
@@ -133,6 +158,11 @@ def connect_signals() -> None:
             _forbid_hard_delete,
             sender=model,
             dispatch_uid=f"city_sync.pre_delete.{entity_type}",
+        )
+        post_delete.connect(
+            _post_delete,
+            sender=model,
+            dispatch_uid=f"city_sync.post_delete.{entity_type}",
         )
     _CONNECTED = True
     logger.info("city_sync signals connected for %s entities", len(SYNCED_ENTITY_TYPES))

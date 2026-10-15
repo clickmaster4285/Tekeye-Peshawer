@@ -154,6 +154,22 @@ def apply_location_filter(queryset, user, field: str = "location", query_param: 
     return queryset
 
 
+def apply_source_location_filter(queryset, user, code: str | None):
+    """
+    Filter synced rows by the server they came from (Locations & Sync).
+    Only unscoped users (Super Admin) choose; scoped users keep their existing filter.
+    The HQ's own code also matches untagged local rows.
+    """
+    from city_sync.identity import local_rows_q, location_code
+
+    code = (code or "").strip().upper()
+    if not code or get_location_scope(user):
+        return queryset
+    if code == location_code():
+        return queryset.filter(local_rows_q())
+    return queryset.filter(location_code=code)
+
+
 def resolve_location_for_write(user, requested_location: str = "") -> str:
     """On create/update: location-scoped users always write to their own site."""
     scope = get_location_scope(user)

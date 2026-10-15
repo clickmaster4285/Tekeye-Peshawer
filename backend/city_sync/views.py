@@ -176,6 +176,7 @@ class MediaInitView(APIView):
                     size_bytes=int(body.get("size_bytes") or 0),
                     entity_type=str(body.get("record_entity_type") or ""),
                     entity_id=body.get("record_entity_id"),
+                    source_path=str(body.get("source_path") or ""),
                 )
         except Exception as exc:  # noqa: BLE001
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

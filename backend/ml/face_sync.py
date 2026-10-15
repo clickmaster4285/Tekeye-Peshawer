@@ -8,6 +8,7 @@ from typing import Any
 
 from django.core.files.storage import default_storage
 
+from city_sync.identity import local_rows_q
 from users.models import Staff
 from users.staff_photos import staff_photo_paths
 
@@ -116,7 +117,8 @@ def _sync_primary_embedding_fields(staff: Staff, entries: list[dict[str, Any]], 
 
 def collect_db_face_embeddings() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for staff in Staff.objects.iterator():
+    # City copies at HQ (other location_code) never feed this server's ML matching.
+    for staff in Staff.objects.filter(local_rows_q()).iterator():
         identity = (staff.face_identity_label or staff_identity_label(staff)).strip()
         if not identity:
             continue
@@ -211,7 +213,7 @@ def enroll_staff_face(staff: Staff, *, push_ml: bool = True, force: bool = False
 def enroll_missing_staff_faces(*, push_ml: bool = True) -> tuple[int, int]:
     enrolled = 0
     skipped = 0
-    for staff in Staff.objects.select_related("user").iterator():
+    for staff in Staff.objects.filter(local_rows_q()).select_related("user").iterator():
         if not staff_needs_face_enrollment(staff):
             skipped += 1
             continue
@@ -232,7 +234,7 @@ def enroll_missing_staff_faces(*, push_ml: bool = True) -> tuple[int, int]:
 def enroll_all_staff_faces(*, push_ml: bool = True, force: bool = False) -> tuple[int, int]:
     enrolled = 0
     skipped = 0
-    for staff in Staff.objects.select_related("user").iterator():
+    for staff in Staff.objects.filter(local_rows_q()).select_related("user").iterator():
         if not staff_photo_paths(staff):
             skipped += 1
             continue

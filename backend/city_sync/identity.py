@@ -68,6 +68,13 @@ def is_hq() -> bool:
     return system_role() == ROLE_HQ
 
 
+def local_rows_q():
+    """Rows this server owns: its own LOCATION_CODE (or untagged). On HQ this excludes city copies."""
+    from django.db.models import Q
+
+    return Q(location_code="") | Q(location_code=location_code())
+
+
 def allowed_location_codes() -> frozenset[str]:
     raw = getattr(settings, "ALLOWED_LOCATION_CODES", None)
     if raw:

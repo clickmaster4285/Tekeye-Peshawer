@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/select"
 import { ROUTES, getEmployeeDetailPath } from "@/routes/config"
 import { useToast } from "@/hooks/use-toast"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 20
@@ -40,6 +42,8 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(Number(value))
@@ -82,7 +86,8 @@ export default function EmployeesPage() {
     () =>
       staff.filter(
         (s) =>
-          !search.trim() ||
+          locations.matches(s.location_code, sourceLocation) &&
+          (!search.trim() ||
           s.full_name?.toLowerCase().includes(search.toLowerCase()) ||
           s.father_name?.toLowerCase().includes(search.toLowerCase()) ||
           (s.personal_number?.toString() || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -92,14 +97,14 @@ export default function EmployeesPage() {
           s.cnic?.includes(search) ||
           s.phone?.includes(search) ||
           s.transferred_from?.toLowerCase().includes(search.toLowerCase()) ||
-          s.transferred_to?.toLowerCase().includes(search.toLowerCase())
+          s.transferred_to?.toLowerCase().includes(search.toLowerCase()))
       ),
-    [staff, search]
+    [staff, search, sourceLocation, locations.matches]
   )
 
   useEffect(() => {
     setPage(1)
-  }, [search])
+  }, [search, sourceLocation])
 
   const count = filtered.length
   const totalPages = Math.max(1, Math.ceil(count / pageSize))
@@ -173,6 +178,13 @@ export default function EmployeesPage() {
               </CardDescription>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {locations.enabled && (
+                <SourceLocationSelect
+                  value={sourceLocation}
+                  onChange={setSourceLocation}
+                  options={locations.options}
+                />
+              )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
@@ -209,6 +221,7 @@ export default function EmployeesPage() {
                     <TableHead className="w-12 text-center">S.No.</TableHead>
                     <TableHead>Personal No.</TableHead>
                     <TableHead>Employee Name</TableHead>
+                    {locations.enabled && <TableHead>Location</TableHead>}
                     <TableHead>Father&apos;s Name</TableHead>
                     <TableHead>Designation</TableHead>
                     <TableHead className="text-center">BPS</TableHead>
@@ -225,7 +238,7 @@ export default function EmployeesPage() {
                 <TableBody>
                   {filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={15} className="text-center text-muted-foreground py-8">
                         No staff found. Click "Add Staff" to create a new record.
                       </TableCell>
                     </TableRow>
@@ -253,6 +266,9 @@ export default function EmployeesPage() {
                               <span className="truncate max-w-[150px]">{row.full_name || row.user}</span>
                           </div>
                         </TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap">{locations.labelFor(row.location_code)}</TableCell>
+                        )}
                         <TableCell className="max-w-[140px] truncate">{row.father_name || "—"}</TableCell>
                         <TableCell className="max-w-[150px] truncate">{row.designation || "—"}</TableCell>
                         <TableCell className="text-center">{row.bps || "—"}</TableCell>
@@ -330,7 +346,7 @@ export default function EmployeesPage() {
                 <div className="flex flex-wrap items-center gap-4">
                   <p className="text-sm text-muted-foreground">
                     Showing {from}–{to} of {count}
-                    {search.trim() ? ` (filtered from ${staff.length})` : ""}
+                    {search.trim() || sourceLocation !== ALL_SOURCE_LOCATIONS ? ` (filtered from ${staff.length})` : ""}
                   </p>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>

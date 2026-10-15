@@ -18,6 +18,8 @@ export type AttendanceRecord = {
   notes?: string
   image: string | null
   video?: string | null
+  /** Server the record came from (empty = this server). */
+  location_code?: string | null
   created_at?: string | null
   updated_at?: string | null
 }

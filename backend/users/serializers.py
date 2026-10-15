@@ -583,6 +583,7 @@ class StaffListSerializer(serializers.ModelSerializer):
             "record_source",
             "mobile_app_installed",
             "mobile_logged_in",
+            "location_code",
         ]
 
     def get_mobile_app_installed(self, obj):
@@ -661,9 +662,11 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "notes",
             "image",
             "video",
+            "location_code",
             "created_at",
             "updated_at",
         ]
+        read_only_fields = ["location_code"]
 
     def get_username(self, obj):
         if obj.user_id:

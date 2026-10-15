@@ -32,6 +32,8 @@ export type StaffRecord = {
   designation: string;
   department: string;
   branch_location?: string | null;
+  /** Server the record came from (empty = this server). */
+  location_code?: string | null;
   manager?: string | null;
   employment_type?: string | null;
   joining_date?: string;

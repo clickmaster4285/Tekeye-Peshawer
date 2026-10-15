@@ -152,6 +152,7 @@ def push_media_once(*, limit: int = 5) -> dict:
                     "size_bytes": row.size_bytes,
                     "record_entity_type": row.record_entity_type,
                     "record_entity_id": str(row.record_entity_id) if row.record_entity_id else None,
+                    "source_path": row.path,
                 },
                 headers=headers,
                 timeout=30,
@@ -223,7 +224,9 @@ def hq_media_root_for(loc: str) -> Path:
     return dest
 
 
-def hq_media_init(*, loc: str, media_id: str, sha256: str, size_bytes: int, entity_type: str, entity_id) -> dict:
+def hq_media_init(
+    *, loc: str, media_id: str, sha256: str, size_bytes: int, entity_type: str, entity_id, source_path: str = ""
+) -> dict:
     if not is_hq():
         raise PermissionError("HQ only")
     mid = UUID(str(media_id))
@@ -235,9 +238,13 @@ def hq_media_init(*, loc: str, media_id: str, sha256: str, size_bytes: int, enti
             "size_bytes": int(size_bytes),
             "record_entity_type": entity_type or "",
             "record_entity_id": UUID(str(entity_id)) if entity_id else None,
+            "source_path": (source_path or "")[:512],
             "status": HqMediaObject.STATUS_PARTIAL,
         },
     )
+    if source_path and obj.source_path != source_path:
+        obj.source_path = source_path[:512]
+        obj.save(update_fields=["source_path"])
     if obj.status == HqMediaObject.STATUS_VERIFIED:
         return {"offset": obj.size_bytes, "verified": True}
     if not created and obj.sha256 != sha256:
@@ -295,7 +302,9 @@ def hq_media_complete(*, loc: str, media_id: str, sha256: str) -> dict:
         audit("media_checksum_mismatch", detail={"media_id": str(media_id), "got": digest}, loc=loc)
         return {"verified": False, "detail": "checksum_mismatch"}
 
-    final = path.with_suffix("")  # drop .partial
+    # Drop .partial and keep the original extension so browsers can show the file.
+    suffix = Path(obj.source_path).suffix.lower() if obj.source_path else ""
+    final = path.with_suffix("").with_suffix(suffix) if suffix else path.with_suffix("")
     if final.exists():
         final.unlink()
     path.replace(final)
@@ -311,6 +320,12 @@ def hq_media_complete(*, loc: str, media_id: str, sha256: str) -> dict:
     obj.verified_at = timezone.now()
     obj.save()
     audit("hq_media_verified", detail={"media_id": str(media_id), "path": str(final)}, loc=loc)
+    from city_sync.materialize import attach_media
+
+    try:
+        attach_media(obj)
+    except Exception:  # noqa: BLE001
+        logger.exception("attach_media failed for %s", media_id)
     return {"verified": True, "storage_path": str(final)}
 
 

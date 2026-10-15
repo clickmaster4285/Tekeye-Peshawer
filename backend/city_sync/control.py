@@ -173,7 +173,13 @@ def bootstrap_outbox(
     loc = location_code()
     total = 0
 
-    for entity_type, label in sorted(SYNCED_ENTITY_TYPES.items()):
+    from city_sync.materialize import ENTITY_ORDER
+
+    def parents_first(item):
+        name = item[0]
+        return (ENTITY_ORDER.index(name) if name in ENTITY_ORDER else len(ENTITY_ORDER), name)
+
+    for entity_type, label in sorted(SYNCED_ENTITY_TYPES.items(), key=parents_first):
         if only and entity_type != only:
             continue
         model = resolve_model(label)

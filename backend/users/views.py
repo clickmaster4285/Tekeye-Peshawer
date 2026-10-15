@@ -29,6 +29,7 @@ from .models import (
 from .permissions import IsAdminOrHR
 from .permissions import (
     apply_location_filter,
+    apply_source_location_filter,
     can_view_all_staff,
     get_location_scope,
     is_global_admin,
@@ -210,7 +211,10 @@ class StaffViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         from logs.models import MobileAccessSession, MobileDevice
 
-        qs = Staff.objects.select_related("user", "face_enrollment")
+        qs = Staff.objects.select_related("user", "face_enrollment").filter(is_deleted=False)
+        qs = apply_source_location_filter(
+            qs, self.request.user, self.request.query_params.get("source_location")
+        )
         unlinked = (self.request.query_params.get("unlinked") or "").strip().lower()
         if unlinked in ("1", "true", "yes"):
             # Unlinked rows have no user__location; do not hide them behind that filter.
@@ -577,8 +581,13 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         return [IsAdminOrHR()]
 
     def get_queryset(self):
-        qs = Attendance.objects.all().select_related("user", "staff").order_by("-date", "-check_in")
+        qs = (
+            Attendance.objects.filter(is_deleted=False)
+            .select_related("user", "staff")
+            .order_by("-date", "-check_in")
+        )
         user = self.request.user
+        qs = apply_source_location_filter(qs, user, self.request.query_params.get("source_location"))
         if can_view_all_staff(user):
             loc = get_location_scope(user)
             if loc:

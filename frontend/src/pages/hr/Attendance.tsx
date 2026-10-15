@@ -68,6 +68,8 @@ import {
 import { fetchMLHealth, type MLHealthResponse } from "@/lib/ml-api"
 import { REALTIME_INVALIDATE_EVENT } from "@/lib/realtime-socket"
 import { ROUTES } from "@/routes/config"
+import { SourceLocationSelect } from "@/components/sync/source-location-select"
+import { ALL_SOURCE_LOCATIONS, useSourceLocations } from "@/lib/source-location"
 
 function formatTime(iso: string | null): string {
   if (!iso) return "—"
@@ -126,6 +128,8 @@ export default function AttendancePage() {
   const [filterDate, setFilterDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
   const [period, setPeriod] = useState<AttendancePeriod>("day")
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("all")
+  const [sourceLocation, setSourceLocation] = useState(ALL_SOURCE_LOCATIONS)
+  const locations = useSourceLocations()
   /** Drives the hidden PDF DOM (may briefly differ from table filter during export). */
   const [pdfExportPersonKey, setPdfExportPersonKey] = useState<string>("all")
   const [pdfExporting, setPdfExporting] = useState(false)
@@ -168,10 +172,14 @@ export default function AttendancePage() {
   }, [])
 
   const todayStr = new Date().toISOString().slice(0, 10)
-  const presentToday = attendance.filter((r) => r.check_in && r.date === todayStr).length
+  const locationAttendance = useMemo(
+    () => attendance.filter((r) => locations.matches(r.location_code, sourceLocation)),
+    [attendance, sourceLocation, locations.matches]
+  )
+  const presentToday = locationAttendance.filter((r) => r.check_in && r.date === todayStr).length
   const periodAttendance = useMemo(
-    () => filterAttendanceByPeriod(attendance, period, filterDate),
-    [attendance, period, filterDate]
+    () => filterAttendanceByPeriod(locationAttendance, period, filterDate),
+    [locationAttendance, period, filterDate]
   )
   const personOptions = useMemo(() => {
     const pages = buildAttendancePdfPages(periodAttendance, staff)
@@ -629,6 +637,14 @@ export default function AttendancePage() {
               </CardDescription>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+              {locations.enabled && (
+                <SourceLocationSelect
+                  value={sourceLocation}
+                  onChange={setSourceLocation}
+                  options={locations.options}
+                  className="w-full sm:w-44"
+                />
+              )}
               <Select value={period} onValueChange={(v) => setPeriod(v as AttendancePeriod)}>
                 <SelectTrigger className="w-full sm:w-36">
                   <SelectValue placeholder="Period" />
@@ -696,6 +712,7 @@ export default function AttendancePage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Employee</TableHead>
+                  {locations.enabled && <TableHead>Location</TableHead>}
                   <TableHead>Check-in</TableHead>
                   <TableHead>Check-out</TableHead>
                   <TableHead>Working time</TableHead>
@@ -721,6 +738,11 @@ export default function AttendancePage() {
                       <TableRow key={row.id}>
                         <TableCell className="font-mono text-muted-foreground">{row.date}</TableCell>
                         <TableCell className="font-medium">{row.staff_name ?? "—"}</TableCell>
+                        {locations.enabled && (
+                          <TableCell className="whitespace-nowrap text-sm">
+                            {locations.labelFor(row.location_code)}
+                          </TableCell>
+                        )}
                         <TableCell>{formatTime(row.check_in)}</TableCell>
                         <TableCell>{formatTime(row.check_out)}</TableCell>
                         <TableCell className="font-mono text-sm">

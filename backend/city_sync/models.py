@@ -261,6 +261,8 @@ class HqMediaObject(models.Model):
     location_code = models.CharField(max_length=64, db_index=True)
     record_entity_type = models.CharField(max_length=64, blank=True, default="")
     record_entity_id = models.UUIDField(null=True, blank=True)
+    # City-side path (e.g. attendance/x.jpg) — tells HQ which file field of the record this is.
+    source_path = models.CharField(max_length=512, blank=True, default="")
     sha256 = models.CharField(max_length=64)
     size_bytes = models.BigIntegerField(default=0)
     bytes_received = models.BigIntegerField(default=0)
@@ -453,3 +455,67 @@ class CityControlState(models.Model):
 
     def __str__(self) -> str:
         return f"CityControlState(paused={self.is_paused})"
+
+
+class HqEntityMap(models.Model):
+    """
+    HQ: links a city row to the HQ business-table row it was copied into (Stage 3).
+
+    City payloads reference parents by the city's own pk (e.g. attendance.staff = 12),
+    so (location_code, entity_type, origin_pk) is how HQ resolves foreign keys.
+    hq_owned=True means the city row matched a row HQ already owns (same entity_id or
+    same CNIC); HQ data then wins and city updates are not copied over it.
+    """
+
+    location_code = models.CharField(max_length=64)
+    entity_type = models.CharField(max_length=64)
+    origin_pk = models.CharField(max_length=64)
+    entity_id = models.UUIDField()
+    local_pk = models.CharField(max_length=64)
+    hq_owned = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["location_code", "entity_type", "origin_pk"],
+                name="ux_hq_entity_map_origin",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["entity_type", "entity_id"], name="ix_hq_entity_map_eid"),
+            models.Index(fields=["entity_type", "local_pk"], name="ix_hq_entity_map_local"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Map {self.location_code}/{self.entity_type}#{self.origin_pk} -> {self.local_pk}"
+
+
+class HqPendingLink(models.Model):
+    """HQ: a foreign key whose parent row has not arrived yet (e.g. attendance before its staff)."""
+
+    location_code = models.CharField(max_length=64)
+    entity_type = models.CharField(max_length=64)
+    local_pk = models.CharField(max_length=64)
+    field = models.CharField(max_length=64)
+    target_entity_type = models.CharField(max_length=64)
+    target_origin_pk = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["entity_type", "local_pk", "field"],
+                name="ux_hq_pending_link",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["location_code", "target_entity_type", "target_origin_pk"],
+                name="ix_hq_pending_target",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Pending {self.entity_type}#{self.local_pk}.{self.field} -> {self.target_entity_type}#{self.target_origin_pk}"
