@@ -37,4 +37,7 @@ class Command(BaseCommand):
                 self.stdout.write(str(stats))
             if options["once"]:
                 break
+            # A full batch went through: more is waiting (e.g. full history), so carry on at once.
+            if not stats.get("error") and stats.get("claimed", 0) >= int(getattr(settings, "OUTBOX_BATCH_SIZE", 200)):
+                continue
             time.sleep(max(0.5, interval))
