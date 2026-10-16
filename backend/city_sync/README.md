@@ -38,6 +38,9 @@ python manage.py run_sync_pilot_tests
 
 ## City startup (Abbottabad)
 
+Moving a city onto this codebase: follow `ROLLOUT.md`. Check a city server any time with
+`python manage.py city_sync_check` (read-only).
+
 ```bash
 cd ciis-abbottabad/backend
 python manage.py migrate city_sync
