@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import UUID
 
@@ -120,12 +121,15 @@ def push_media_once(*, limit: int = 5) -> dict:
     api_key = _load_api_key()
     headers = {"Authorization": f"Bearer {api_key}"}
 
+    # Newest first: fresh detections get their picture at HQ right away; a backlog
+    # (e.g. full history) fills in behind them.
     qs = (
         MediaQueue.objects.filter(status__in=[MediaQueue.STATUS_PENDING, MediaQueue.STATUS_UPLOADING])
-        .order_by("priority", "created_at")[:limit]
+        .order_by("priority", "-created_at")[:limit]
     )
     stats = {"attempted": 0, "verified": 0, "failed": 0, "waiting_outbox": 0}
 
+    ready: list[tuple[MediaQueue, Path]] = []
     for row in qs:
         if not _outbox_ready(row):
             stats["waiting_outbox"] += 1
@@ -138,81 +142,99 @@ def push_media_once(*, limit: int = 5) -> dict:
             row.save(update_fields=["status", "last_error", "attempts"])
             stats["failed"] += 1
             continue
+        ready.append((row, local))
 
-        stats["attempted"] += 1
+    # Transfers run in parallel; every database update stays on this thread.
+    for row, _local in ready:
         row.status = MediaQueue.STATUS_UPLOADING
         row.save(update_fields=["status"])
-        try:
-            init = requests.post(
-                f"{base}/media/init",
-                json={
-                    "media_id": str(row.media_id),
-                    "location_code": row.location_code,
-                    "sha256": row.sha256,
-                    "size_bytes": row.size_bytes,
-                    "record_entity_type": row.record_entity_type,
-                    "record_entity_id": str(row.record_entity_id) if row.record_entity_id else None,
-                    "source_path": row.path,
-                },
-                headers=headers,
-                timeout=30,
+    stats["attempted"] = len(ready)
+    workers = max(1, int(getattr(settings, "SYNC_MEDIA_PARALLEL", 4)))
+    with ThreadPoolExecutor(max_workers=min(workers, len(ready) or 1)) as pool:
+        errors = list(
+            pool.map(
+                lambda item: _transfer(item[0], item[1], base=base, headers=headers, chunk_size=chunk_size),
+                ready,
             )
-            if init.status_code >= 400:
-                raise RuntimeError(f"init HTTP {init.status_code}: {init.text[:300]}")
-            offset = int((init.json() or {}).get("offset") or 0)
+        )
 
-            with open(local, "rb") as fh:
-                fh.seek(offset)
-                pos = offset
-                while pos < row.size_bytes:
-                    chunk = fh.read(chunk_size)
-                    if not chunk:
-                        break
-                    put = requests.put(
-                        f"{base}/media/{row.media_id}/chunk",
-                        data=chunk,
-                        headers={
-                            **headers,
-                            "Content-Type": "application/octet-stream",
-                            "X-CIIS-Offset": str(pos),
-                            "X-CIIS-Location": row.location_code,
-                        },
-                        timeout=120,
-                    )
-                    if put.status_code >= 400:
-                        raise RuntimeError(f"chunk HTTP {put.status_code}: {put.text[:300]}")
-                    pos += len(chunk)
-                    row.bytes_uploaded = pos
-                    row.save(update_fields=["bytes_uploaded"])
-
-            complete = requests.post(
-                f"{base}/media/{row.media_id}/complete",
-                json={"sha256": row.sha256, "location_code": row.location_code},
-                headers=headers,
-                timeout=60,
-            )
-            body = complete.json() if complete.content else {}
-            if complete.status_code >= 400 or not body.get("verified"):
-                raise RuntimeError(f"complete failed: HTTP {complete.status_code} {body}")
-
+    for (row, _local), error in zip(ready, errors):
+        if error is None:
             row.status = MediaQueue.STATUS_VERIFIED
             row.verified_at = timezone.now()
+            row.bytes_uploaded = row.size_bytes
             row.last_error = ""
-            row.save(update_fields=["status", "verified_at", "last_error"])
+            row.save(update_fields=["status", "verified_at", "bytes_uploaded", "last_error"])
             stats["verified"] += 1
             audit("media_verified", detail={"media_id": str(row.media_id)})
-        except Exception as exc:  # noqa: BLE001
-            row.attempts += 1
-            row.last_error = str(exc)[:2000]
-            if row.attempts >= max_attempts:
-                row.status = MediaQueue.STATUS_FAILED
-                stats["failed"] += 1
-            else:
-                row.status = MediaQueue.STATUS_PENDING
-            row.save(update_fields=["attempts", "last_error", "status"])
-            logger.warning("media upload failed media_id=%s: %s", row.media_id, exc)
-
+            continue
+        row.attempts += 1
+        row.last_error = error[:2000]
+        if row.attempts >= max_attempts:
+            row.status = MediaQueue.STATUS_FAILED
+            stats["failed"] += 1
+        else:
+            row.status = MediaQueue.STATUS_PENDING
+        row.save(update_fields=["attempts", "last_error", "status"])
+        logger.warning("media upload failed media_id=%s: %s", row.media_id, error)
     return stats
+
+
+def _transfer(row: MediaQueue, local: Path, *, base: str, headers: dict, chunk_size: int) -> str | None:
+    """Send one file to HQ (init, chunks, complete); no database access. None on success, else the error."""
+    try:
+        init = requests.post(
+            f"{base}/media/init",
+            json={
+                "media_id": str(row.media_id),
+                "location_code": row.location_code,
+                "sha256": row.sha256,
+                "size_bytes": row.size_bytes,
+                "record_entity_type": row.record_entity_type,
+                "record_entity_id": str(row.record_entity_id) if row.record_entity_id else None,
+                "source_path": row.path,
+            },
+            headers=headers,
+            timeout=30,
+        )
+        if init.status_code >= 400:
+            return f"init HTTP {init.status_code}: {init.text[:300]}"
+        offset = int((init.json() or {}).get("offset") or 0)
+
+        with open(local, "rb") as fh:
+            fh.seek(offset)
+            pos = offset
+            while pos < row.size_bytes:
+                chunk = fh.read(chunk_size)
+                if not chunk:
+                    break
+                put = requests.put(
+                    f"{base}/media/{row.media_id}/chunk",
+                    data=chunk,
+                    headers={
+                        **headers,
+                        "Content-Type": "application/octet-stream",
+                        "X-CIIS-Offset": str(pos),
+                        "X-CIIS-Location": row.location_code,
+                    },
+                    timeout=120,
+                )
+                if put.status_code >= 400:
+                    return f"chunk HTTP {put.status_code}: {put.text[:300]}"
+                pos += len(chunk)
+
+        complete = requests.post(
+            f"{base}/media/{row.media_id}/complete",
+            json={"sha256": row.sha256, "location_code": row.location_code},
+            headers=headers,
+            timeout=60,
+        )
+        body = complete.json() if complete.content else {}
+        if complete.status_code >= 400 or not body.get("verified"):
+            return f"complete failed: HTTP {complete.status_code} {body}"
+        return None
+    except Exception as exc:  # noqa: BLE001
+        return str(exc) or exc.__class__.__name__
 
 
 def hq_media_root_for(loc: str) -> Path:
