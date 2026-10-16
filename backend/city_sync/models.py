@@ -473,6 +473,8 @@ class CityControlState(models.Model):
     full_history_request_id = models.CharField(max_length=64, blank=True, default="")
     full_history_done_id = models.CharField(max_length=64, blank=True, default="")
     full_history_running = models.BooleanField(default=False)
+    # Last HqDownlink.seq applied here (Stage 4).
+    downlink_seq = models.PositiveBigIntegerField(default=0)
     last_hq_contact_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -547,3 +549,41 @@ class HqPendingLink(models.Model):
 
     def __str__(self) -> str:
         return f"Pending {self.entity_type}#{self.local_pk}.{self.field} -> {self.target_entity_type}#{self.target_origin_pk}"
+
+
+class HqDownlink(models.Model):
+    """
+    HQ: an HR change for one city (Stage 4) - staff enrolled or edited at HQ, its face
+    data, a transfer out, an attendance correction or a leave request. Cities pull these
+    in seq order after the heartbeat says there is something new, apply them, and ack.
+    """
+
+    OP_UPSERT = "upsert"
+    OP_RETIRE = "retire"  # staff transferred away: keep the record, drop its face data
+
+    STATUS_PENDING = "pending"
+    STATUS_APPLIED = "applied"
+    STATUS_FAILED = "failed"
+
+    seq = models.BigAutoField(primary_key=True)
+    location_code = models.CharField(max_length=64)
+    entity_type = models.CharField(max_length=64)
+    entity_id = models.UUIDField()
+    operation = models.CharField(max_length=16, default=OP_UPSERT)
+    payload = models.JSONField(default=dict)
+    # [{"field": "profile_image", "path": "staff_photos/a.jpg"}, ...] - files the city downloads
+    media = models.JSONField(default=list)
+    status = models.CharField(max_length=16, default=STATUS_PENDING)
+    error = models.TextField(blank=True, default="")
+    created_by = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["location_code", "seq"], name="ix_hq_downlink_loc_seq"),
+            models.Index(fields=["location_code", "status"], name="ix_hq_downlink_loc_status"),
+        ]
+
+    def __str__(self) -> str:
+        return f"HqDownlink#{self.seq} {self.location_code} {self.entity_type} {self.operation}"

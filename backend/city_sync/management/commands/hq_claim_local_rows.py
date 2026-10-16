@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand
 from django.db.models import QuerySet
 
 from city_sync.identity import is_hq, location_code
-from city_sync.models import HqEntityMap
+from city_sync.models import HqDownlink, HqEntityMap
 from city_sync.syncable import SYNCED_ENTITY_TYPES, resolve_model
 
 
@@ -36,8 +36,15 @@ class Command(BaseCommand):
                     "local_pk", flat=True
                 )
             ]
+            # Rows HQ assigned to a city (Stage 4) keep that city.
+            assigned = HqDownlink.objects.filter(entity_type=entity_type).values_list("entity_id", flat=True)
             # Plain QuerySet: include rows hidden by soft-delete managers.
-            qs = QuerySet(model=model).exclude(pk__in=city_pks).exclude(location_code=hq)
+            qs = (
+                QuerySet(model=model)
+                .exclude(pk__in=city_pks)
+                .exclude(entity_id__in=assigned)
+                .exclude(location_code=hq)
+            )
             count = qs.count() if dry else qs.update(location_code=hq)
             if count:
                 self.stdout.write(f"{entity_type}: {count}")

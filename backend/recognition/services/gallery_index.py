@@ -110,10 +110,12 @@ _index: GalleryIndex | None = None
 
 
 def _load_index() -> GalleryIndex:
+    from city_sync.identity import local_rows_q
     from recognition.models import FaceEnrollment
 
     entries: list[tuple[str, np.ndarray]] = []
-    enrollments = FaceEnrollment.objects.filter(is_trained=True, embedding__isnull=False).only(
+    # Staff assigned to a city are recognized there only, not by this server's cameras.
+    enrollments = FaceEnrollment.objects.filter(local_rows_q("staff__"), is_trained=True, embedding__isnull=False).only(
         "staff_id", "embedding", "embeddings"
     )
     trained_staff = set()

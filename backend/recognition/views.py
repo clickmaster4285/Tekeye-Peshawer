@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
+from city_sync.identity import local_rows_q
 from recognition.models import DetectionSnapshot, FaceEnrollment, FaceSample
 from recognition.services.face_engine import get_face_engine
 from recognition.services.face_samples import review_sample
@@ -73,6 +74,7 @@ def pose_hint(coverage: dict[str, int]) -> str:
 def build_gallery() -> dict[str, list[float]]:
     gallery = {}
     enrollments = FaceEnrollment.objects.filter(
+        local_rows_q("staff__"),
         is_trained=True,
         embedding__isnull=False,
     ).select_related("staff")

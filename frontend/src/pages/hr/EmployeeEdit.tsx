@@ -29,6 +29,7 @@ import {
 } from "@/lib/staff-photo-utils"
 import { useToast } from "@/hooks/use-toast"
 import { inferLocationCode } from "@/lib/locations"
+import { AssignedLocationSelect } from "@/components/sync/assigned-location-select"
 import {
   STAFF_BPS_OPTIONS,
   STAFF_DEPARTMENT_OPTIONS,
@@ -53,6 +54,7 @@ function staffToForm(staff: StaffRecord): CreateStaffPayload {
     email: staff.email ?? "",
     role: staff.role ?? staff.user_details?.role ?? staff.role_access_level ?? "RECEPTIONIST",
     location: inferLocationCode(staff.branch_location, staff.current_posting, staff.city),
+    location_code: staff.location_code ?? "",
     phone: staff.phone_primary ?? staff.phone ?? "",
     full_name: staff.full_name ?? "",
     father_name: staff.father_name ?? "",
@@ -357,6 +359,14 @@ export default function EmployeeEditPage() {
           <div className="p-4 bg-destructive/10 border border-destructive text-destructive rounded-md text-sm mb-6">
             {submitError}
           </div>
+        )}
+
+        {currentStep === 1 && (
+          <AssignedLocationSelect
+            value={form.location_code}
+            initial={staff?.location_code ?? ""}
+            onChange={(code) => setForm((f) => (f ? { ...f, location_code: code } : f))}
+          />
         )}
 
         <div className="bg-card rounded-xl border border-border shadow-sm p-4 sm:p-6 mt-6">

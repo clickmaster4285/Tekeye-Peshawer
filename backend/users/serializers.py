@@ -366,7 +366,26 @@ class StaffSerializer(serializers.ModelSerializer):
 # Staff Create Serializer
 # Accepts full HR template payload; maps first_name+last_name -> full_name, national_id -> cnic, etc.
 # -----------------------------
-class StaffCreateSerializer(serializers.ModelSerializer):
+class AssignedLocationMixin:
+    """location_code = the server a staff member belongs to (Stage 4): set only by the HQ Super Admin."""
+
+    def validate_location_code(self, value):
+        from city_sync.downlink import location_choices
+        from city_sync.identity import is_hq
+
+        code = (value or "").strip().upper()
+        current = (getattr(self.instance, "location_code", "") or "").upper() if self.instance else ""
+        if code == current:
+            return getattr(self.instance, "location_code", "") if self.instance else code
+        request = self.context.get("request")
+        if not is_hq() or request is None or not is_global_admin(request.user):
+            raise serializers.ValidationError("Only the Super Admin at the head office can change the location.")
+        if code and code not in location_choices():
+            raise serializers.ValidationError("Unknown location. Add it in Locations & Sync first.")
+        return code
+
+
+class StaffCreateSerializer(AssignedLocationMixin, serializers.ModelSerializer):
     """Create staff. Only full_name is required; address and all other fields are optional."""
 
     first_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
@@ -406,7 +425,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             "tax_form_file", "certificates_file", "background_check_status",
             "skills_competencies", "languages_known", "performance_rating",
             "last_appraisal_date", "leave_balance", "notes", "created_at",
-            "date_of_joining", "record_source",
+            "date_of_joining", "record_source", "location_code",
         ]
         read_only_fields = ["created_at"]
         extra_kwargs = {
@@ -510,7 +529,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
 # -----------------------------
 # Staff Update Serializer
 # -----------------------------
-class StaffUpdateSerializer(serializers.ModelSerializer):
+class StaffUpdateSerializer(AssignedLocationMixin, serializers.ModelSerializer):
     national_id = serializers.CharField(source="cnic", read_only=True)
 
     class Meta:

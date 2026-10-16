@@ -482,6 +482,7 @@ export default function LocationsSyncPage() {
                       <TableHead>Last heartbeat</TableHead>
                       <TableHead className="text-right">Waiting at city</TableHead>
                       <TableHead className="text-right">Received here</TableHead>
+                      <TableHead className="text-right">Sent to city</TableHead>
                       <TableHead>Full history</TableHead>
                       <TableHead>Last test</TableHead>
                       <TableHead className="w-12" />
@@ -516,6 +517,18 @@ export default function LocationsSyncPage() {
                             <div className="text-xs text-muted-foreground">
                               {site.media_received.toLocaleString()} images
                             </div>
+                          </TableCell>
+                          <TableCell className="text-right text-sm">
+                            {site.downlink_pending > 0 ? (
+                              <span className="text-amber-600">{site.downlink_pending} waiting</span>
+                            ) : (
+                              <span className="text-muted-foreground">Up to date</span>
+                            )}
+                            {site.downlink_failed > 0 && (
+                              <div className="text-xs text-destructive" title={site.downlink_last_error}>
+                                {site.downlink_failed} failed
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm">
                             {site.full_history === "DONE" ? (

@@ -710,6 +710,8 @@ export type CreateStaffPayload = {
   password?: string;
   role?: string;
   location?: string;
+  /** Server the staff member belongs to (HQ or a city code); Super Admin at HQ only. */
+  location_code?: string;
   role_access_level?: string;
   system_permissions?: string;
   has_login?: boolean;

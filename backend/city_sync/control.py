@@ -47,12 +47,16 @@ logger = logging.getLogger(__name__)
 
 def control_for_location(loc: str) -> dict:
     site = SyncSite.objects.filter(location_code=loc.upper()).first()
+    from city_sync.downlink import latest_seq
+
     if site is None:
-        return {"paused": False, "full_history_request_id": "", "camera_directory_hash": ""}
+        return {"paused": False, "full_history_request_id": "", "camera_directory_hash": "", "downlink_seq": 0}
     return {
         "paused": site.is_paused,
         "full_history_request_id": site.full_history_request_id,
         "camera_directory_hash": site.camera_directory_hash,
+        # Newest HQ HR change for this city; the city pulls when it is behind.
+        "downlink_seq": latest_seq(site.location_code),
     }
 
 
@@ -171,6 +175,16 @@ def apply_hq_control(control: dict) -> None:
     request_id = state.full_history_request_id
     if request_id and request_id != state.full_history_done_id and not state.full_history_running:
         _start_full_history(request_id)
+
+    target = int(control.get("downlink_seq") or 0)
+    if target > state.downlink_seq and not state.is_paused:
+        from city_sync.downlink import pull_downlink
+
+        try:
+            result = pull_downlink(target)
+            logger.info("HQ changes applied: %s", result)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not pull HQ changes; will retry on the next heartbeat")
 
 
 _full_history_lock = threading.Lock()

@@ -33,7 +33,9 @@ def _pre_save(sender, instance, **kwargs):
         return
 
     if not getattr(instance, "location_code", None):
-        instance.location_code = location_code()
+        from city_sync.downlink import default_location_for
+
+        instance.location_code = default_location_for(instance) or location_code()
     if not getattr(instance, "entity_id", None):
         # Reuse UUID primary keys when present
         pk = getattr(instance, "pk", None)
@@ -164,8 +166,22 @@ def connect_signals() -> None:
             sender=model,
             dispatch_uid=f"city_sync.post_delete.{entity_type}",
         )
+    _connect_downlink()
     _CONNECTED = True
     logger.info("city_sync signals connected for %s entities", len(SYNCED_ENTITY_TYPES))
+
+
+def _connect_downlink() -> None:
+    """HQ -> city HR changes (Stage 4)."""
+    from city_sync.downlink import on_hq_post_save, on_hq_pre_save
+
+    for label in ("users.Staff", "users.Attendance", "users.LeaveRequest", "recognition.FaceEnrollment"):
+        try:
+            model = apps.get_model(label)
+        except LookupError:
+            continue
+        pre_save.connect(on_hq_pre_save, sender=model, dispatch_uid=f"city_sync.downlink.pre_save.{label}")
+        post_save.connect(on_hq_post_save, sender=model, dispatch_uid=f"city_sync.downlink.post_save.{label}")
 
 
 try:

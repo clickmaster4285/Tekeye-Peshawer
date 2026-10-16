@@ -1,6 +1,7 @@
 """Build the attendance face gallery from trained FaceEnrollment rows."""
 from __future__ import annotations
 
+from city_sync.identity import local_rows_q
 from recognition.models import FaceEnrollment
 
 
@@ -18,7 +19,8 @@ def vectors_for_enrollment(enrollment: FaceEnrollment) -> list[list[float]]:
 
 def build_gallery() -> dict[str, list[list[float]]]:
     gallery: dict[str, list[list[float]]] = {}
-    for enrollment in FaceEnrollment.objects.filter(is_trained=True).only(
+    # Staff assigned to a city are recognized there only, not by this server's cameras.
+    for enrollment in FaceEnrollment.objects.filter(local_rows_q("staff__"), is_trained=True).only(
         "staff_id", "embedding", "embeddings"
     ):
         vectors = vectors_for_enrollment(enrollment)

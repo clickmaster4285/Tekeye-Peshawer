@@ -19,6 +19,7 @@ import {
 } from "@/lib/staff-photo-utils"
 import { useToast } from "@/hooks/use-toast"
 import { inferLocationCode } from "@/lib/locations"
+import { AssignedLocationSelect } from "@/components/sync/assigned-location-select"
 import {
   STAFF_BPS_OPTIONS,
   STAFF_DEPARTMENT_OPTIONS,
@@ -459,6 +460,13 @@ export default function AddStaffPage() {
             {submitError}
                         </div>
                       )}
+
+        {currentStep === 1 && (
+          <AssignedLocationSelect
+            value={form.location_code}
+            onChange={(code) => setForm((f) => ({ ...f, location_code: code }))}
+          />
+        )}
 
         <div className="bg-card rounded-xl border border-border shadow-sm p-4 sm:p-6 mt-6">
           {currentStep === 1 && (

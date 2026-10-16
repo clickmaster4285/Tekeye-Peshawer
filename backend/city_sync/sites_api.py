@@ -23,7 +23,7 @@ from rest_framework.views import APIView
 
 from city_sync.audit import audit
 from city_sync.identity import location_code as hq_location_code
-from city_sync.models import HqCityStatus, HqMediaObject, HqReplicaRow, SyncCredential, SyncSite
+from city_sync.models import HqCityStatus, HqDownlink, HqMediaObject, HqReplicaRow, SyncCredential, SyncSite
 from city_sync.views import IsHqRole, city_health_state
 from users.models import User
 from users.permissions import IsGlobalAdmin
@@ -112,7 +112,19 @@ def serialize_site(site: SyncSite, *, status_row, record_count: int, media_count
         "last_test_at": site.last_test_at,
         "last_test_ok": site.last_test_ok,
         "last_test_detail": site.last_test_detail,
+        **_downlink_counts(site.location_code),
         "created_at": site.created_at,
+    }
+
+
+def _downlink_counts(loc: str) -> dict:
+    """HQ -> city HR changes (Stage 4): waiting for the city, and failed there."""
+    rows = HqDownlink.objects.filter(location_code=loc)
+    failed = rows.filter(status=HqDownlink.STATUS_FAILED).order_by("-seq").first()
+    return {
+        "downlink_pending": rows.filter(status=HqDownlink.STATUS_PENDING).count(),
+        "downlink_failed": rows.filter(status=HqDownlink.STATUS_FAILED).count(),
+        "downlink_last_error": failed.error[:300] if failed else "",
     }
 
 

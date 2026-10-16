@@ -36,6 +36,10 @@ export type SyncSite = {
   last_test_at: string | null
   last_test_ok: boolean | null
   last_test_detail: string
+  /** HQ -> city HR changes (Stage 4) */
+  downlink_pending: number
+  downlink_failed: number
+  downlink_last_error: string
   created_at: string
 }
 

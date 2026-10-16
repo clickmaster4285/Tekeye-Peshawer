@@ -68,11 +68,15 @@ def is_hq() -> bool:
     return system_role() == ROLE_HQ
 
 
-def local_rows_q():
-    """Rows this server owns: its own LOCATION_CODE (or untagged). On HQ this excludes city copies."""
+def local_rows_q(prefix: str = ""):
+    """Rows this server owns: its own LOCATION_CODE (or untagged). On HQ this excludes city copies.
+
+    prefix follows a relation, e.g. local_rows_q("staff__") on FaceEnrollment.
+    """
     from django.db.models import Q
 
-    return Q(location_code="") | Q(location_code=location_code())
+    field = f"{prefix}location_code"
+    return Q(**{field: ""}) | Q(**{field: location_code()})
 
 
 def allowed_location_codes() -> frozenset[str]:

@@ -10,6 +10,9 @@ from city_sync.sites_api import (
 
 from city_sync.views import (
     CityStatusListView,
+    DownlinkAckView,
+    DownlinkMediaView,
+    DownlinkPullView,
     MediaChunkView,
     MediaCompleteView,
     MediaInitView,
@@ -45,6 +48,10 @@ urlpatterns = [
         name="sync-media-complete-slash",
     ),
     path("sync/v1/cities/", CityStatusListView.as_view(), name="sync-cities"),
+    # HQ -> city HR changes (Stage 4)
+    path("sync/v1/downlink", DownlinkPullView.as_view(), name="sync-downlink"),
+    path("sync/v1/downlink/ack", DownlinkAckView.as_view(), name="sync-downlink-ack"),
+    path("sync/v1/downlink/media", DownlinkMediaView.as_view(), name="sync-downlink-media"),
     # HQ Locations admin page (Stage 2)
     path("sync/v1/sites/", SyncSitesView.as_view(), name="sync-sites"),
     path("sync/v1/sites/<str:code>/", SyncSiteDetailView.as_view(), name="sync-site-detail"),

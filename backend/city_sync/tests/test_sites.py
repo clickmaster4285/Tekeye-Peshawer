@@ -112,7 +112,7 @@ class SitesAdminApiTests(TestCase):
         hb = APIClient().post("/api/sync/v1/heartbeat", {}, format="json", HTTP_AUTHORIZATION=f"Bearer {key}")
         self.assertEqual(hb.status_code, 200, hb.content)
         self.assertEqual(
-            hb.json()["control"], {"paused": False, "full_history_request_id": "", "camera_directory_hash": ""}
+            hb.json()["control"], {"paused": False, "full_history_request_id": "", "camera_directory_hash": "", "downlink_seq": 0}
         )
 
         new_key = self.client.post("/api/sync/v1/sites/ABBOTTABAD/rotate-key/").json()["api_key"]

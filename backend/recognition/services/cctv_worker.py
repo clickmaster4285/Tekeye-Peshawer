@@ -14,6 +14,7 @@ from django.db import close_old_connections
 
 from config.db import release_db
 
+from city_sync.identity import local_rows_q
 from recognition.models import FaceEnrollment
 from recognition.services.face_engine import get_face_engine
 from recognition.services.rtsp_utils import open_rtsp_capture
@@ -376,7 +377,9 @@ class CCTVWorkerManager:
         close_old_connections()
         gallery = {}
         try:
+            # Staff assigned to a city are recognized there only, not by this server's cameras.
             enrollments = FaceEnrollment.objects.filter(
+                local_rows_q("staff__"),
                 is_trained=True,
                 embedding__isnull=False,
             ).select_related("staff")

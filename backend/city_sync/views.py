@@ -158,6 +158,59 @@ class ReferencePullView(APIView):
         return Response({"items": items, "count": len(items)})
 
 
+class DownlinkPullView(APIView):
+    """GET /downlink?after=<seq> - a city pulls its HQ HR changes (Stage 4)."""
+
+    authentication_classes = [SyncApiKeyAuthentication]
+    permission_classes = [IsHqRole, IsSyncPrincipal]
+
+    def get(self, request):
+        from city_sync.downlink import items_after
+
+        try:
+            after = int(request.query_params.get("after") or 0)
+        except (TypeError, ValueError):
+            after = 0
+        items = items_after(request.user.location_code, after)
+        return Response({"items": items, "count": len(items)})
+
+
+class DownlinkAckView(APIView):
+    """POST /downlink/ack {results: [{seq, status, error}]} - the city reports what it applied."""
+
+    authentication_classes = [SyncApiKeyAuthentication]
+    permission_classes = [IsHqRole, IsSyncPrincipal]
+
+    def post(self, request):
+        from city_sync.downlink import record_acks
+
+        body = request.data if isinstance(request.data, dict) else {}
+        results = body.get("results")
+        if not isinstance(results, list):
+            return Response({"detail": "results must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True, "updated": record_acks(request.user.location_code, results)})
+
+
+class DownlinkMediaView(APIView):
+    """GET /downlink/media?seq=&path= - a photo listed on one of this city's downlink rows."""
+
+    authentication_classes = [SyncApiKeyAuthentication]
+    permission_classes = [IsHqRole, IsSyncPrincipal]
+
+    def get(self, request):
+        from django.core.files.storage import default_storage
+        from django.http import FileResponse
+
+        from city_sync.downlink import media_allowed
+
+        path = str(request.query_params.get("path") or "")
+        if not media_allowed(request.user.location_code, request.query_params.get("seq"), path):
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not default_storage.exists(path):
+            return Response({"detail": "file missing at HQ"}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(default_storage.open(path, "rb"))
+
+
 class MediaInitView(APIView):
     authentication_classes = [SyncApiKeyAuthentication]
     permission_classes = [IsHqRole, IsSyncPrincipal]
