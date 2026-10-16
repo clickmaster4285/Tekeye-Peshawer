@@ -522,6 +522,31 @@ export type CityControlBoardCity = {
   ops_source?: string
   error?: string
   bars?: { cameras: number; ai: number; seizures: number; detentions: number }
+  /** Cities that sync to this HQ (Locations & Sync) */
+  sync_state?: string
+  last_sync_at?: string
+  ai_delta?: string
+  seizure_delta?: string
+  detention_delta?: string
+  detail?: CityControlBoardDetail
+}
+
+export type CityControlBoardDetection = {
+  id: number
+  time: string
+  at: string
+  type: string
+  object: string
+  camera: string
+  image: string
+  location_code: string
+  is_alert: boolean
+}
+
+export type CityControlBoardDetail = {
+  detections: CityControlBoardDetection[]
+  trend: { day: string; people: number; vehicles: number; weapons: number; plates: number }[]
+  ops_bars: { day: string; seizures: number; detentions: number }[]
 }
 
 export type CityControlBoard = {
@@ -541,6 +566,8 @@ export type CityControlBoard = {
     city: string
     title: string
     severity: "High" | "Critical" | "Medium" | "Info" | string
+    image?: string
+    camera?: string
   }>
   server_count: number
   city_count: number

@@ -45,6 +45,8 @@ export type CityControlAlert = {
   city: string
   title: string
   severity: AlertSeverity
+  /** Detection picture (media path) for AI alerts */
+  image?: string
 }
 
 export const CITY_CONTROL_KPIS: CityControlKpi[] = [
@@ -223,6 +225,7 @@ export type CityRecentDetection = {
   type: CityDetectionType
   object: string
   camera: string
+  image?: string
 }
 
 export type CityDetailExtras = {
@@ -347,6 +350,9 @@ export function zeroCityControlKpis(): CityControlKpi[] {
   ]
 }
 
+/** How often the grid and city pages refresh themselves. */
+export const CITY_CONTROL_REFRESH_MS = 30_000
+
 /** Short in-memory cache so grid ↔ summary navigation does not re-hit every API. */
 let cityControlLiveCache: { at: number; data: CityControlGridLive } | null = null
 const CITY_CONTROL_CACHE_MS = 45_000
@@ -374,6 +380,31 @@ function mapBoardCity(city: CityControlBoardCity): CityControlRow {
     lastSyncRelative: city.last_sync_relative || "No sync",
     connectivity,
     bars: city.bars || { cameras: 0, ai: 0, seizures: 0, detentions: 0 },
+  }
+}
+
+const DETECTION_TYPES: CityDetectionType[] = ["License Plate", "Person", "Vehicle", "Weapon"]
+
+/** Fill the detail page from data the city synced to this HQ (recent detections, 7-day charts). */
+function withSyncedDetail(base: CityDetailExtras, city: CityControlBoardCity): CityDetailExtras {
+  const detail = city.detail
+  if (!detail) return base
+  return {
+    ...base,
+    staffOnline: city.staff_online ?? base.staffOnline,
+    staffTotal: city.staff_total ?? base.staffTotal,
+    aiDelta: city.ai_delta || base.aiDelta,
+    seizureDelta: city.seizure_delta || base.seizureDelta,
+    detentionDelta: city.detention_delta || base.detentionDelta,
+    detections: detail.detections.map((d) => ({
+      time: d.time,
+      type: (DETECTION_TYPES.includes(d.type as CityDetectionType) ? d.type : "Person") as CityDetectionType,
+      object: d.object,
+      camera: d.camera,
+      image: d.image || undefined,
+    })),
+    trend: detail.trend.length ? detail.trend : base.trend,
+    opsBars: detail.ops_bars.length ? detail.ops_bars : base.opsBars,
   }
 }
 
@@ -425,9 +456,17 @@ export async function fetchCityControlGridLive(opts?: {
     severity: (["High", "Critical", "Medium", "Info"].includes(a.severity)
       ? a.severity
       : "Info") as AlertSeverity,
+    // "" = AI alert whose picture has not arrived yet (placeholder shown); undefined = no picture.
+    image: a.image ?? undefined,
   }))
 
   const extrasById: Record<string, CityDetailExtras> = {}
+  for (const city of board.cities || []) {
+    if (city.detail) {
+      const row = mapBoardCity(city)
+      extrasById[row.id] = withSyncedDetail(getCityDetailExtras(row), city)
+    }
+  }
 
   if (includeExtras) {
     const [infraDevices] = await Promise.all([
@@ -453,7 +492,7 @@ export async function fetchCityControlGridLive(opts?: {
         infraHealth = "Degraded"
       }
 
-      const base = getCityDetailExtras(row)
+      const base = extrasById[row.id] ?? getCityDetailExtras(row)
       extrasById[row.id] = {
         ...base,
         staffOnline: city.staff_online ?? 0,

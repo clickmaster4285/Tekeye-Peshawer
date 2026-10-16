@@ -153,6 +153,15 @@ def _format_sync(iso: str | None) -> tuple[str, str]:
 
 def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> dict[str, Any]:
     """Aggregate cameras + Django DB stats per city location."""
+    from .synced_board import synced_alerts, synced_city_rows
+
+    # HQ + cities on Locations & Sync come from the data synced here; remote servers
+    # only fill in locations that do not sync.
+    synced = synced_city_rows()
+    synced_keys = {row["location_code"] for row in synced}
+    if synced:
+        synced_keys.add("LOCAL")  # this HQ's own ML server: already in the HQ row
+
     servers = list(
         RemoteServer.objects.filter(is_active=True).select_related("site").order_by("name")
     )
@@ -160,7 +169,10 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
     groups: dict[str, list[RemoteServer]] = {}
     for server in servers:
         key = location_key_for_server(server)
+        if key in synced_keys:
+            continue
         groups.setdefault(key, []).append(server)
+    servers = [s for members in groups.values() for s in members]
 
     # Parallel per-server camera fetch + django ops fetch (one django per location preferred).
     camera_jobs: dict[int, Any] = {}
@@ -335,6 +347,9 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
                 }
             )
 
+    cities.extend(synced)
+    alerts = synced_alerts(synced) + alerts
+
     cities.sort(key=lambda c: (0 if c.get("is_hq") else 1, c.get("city") or ""))
     for i, city in enumerate(cities, start=1):
         city["rank"] = i
@@ -385,14 +400,14 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
             "id": "seizures",
             "label": "Seizures (30d)",
             "value": f"{total_sz:,}",
-            "support": "From each city Django DB",
+            "support": "All cities combined",
             "tone": "red",
         },
         {
             "id": "detentions",
             "label": "Detentions (30d)",
             "value": f"{total_dt:,}",
-            "support": "From each city Django DB",
+            "support": "All cities combined",
             "tone": "orange",
         },
         {
@@ -404,13 +419,13 @@ def build_city_control_board(*, request_user, overall_timeout: float = 12.0) -> 
         },
     ]
 
-    alerts.sort(key=lambda a: a.get("time") or "", reverse=True)
+    alerts.sort(key=lambda a: a.get("at") or a.get("time") or "", reverse=True)
 
     return {
         "ok": True,
         "cities": cities,
         "kpis": kpis,
-        "alerts": alerts[:12],
+        "alerts": alerts[:30],
         "server_count": len(servers),
         "city_count": len(cities),
         "generated_at": timezone.now().isoformat(),

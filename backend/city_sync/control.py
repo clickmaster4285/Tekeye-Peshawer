@@ -147,6 +147,13 @@ def heartbeat_extras() -> dict:
     state = CityControlState.objects.filter(pk=1).first()
     extras = {"full_history_done_id": state.full_history_done_id if state else ""}
     try:
+        from cameras.live_status import camera_counts
+
+        # Live camera numbers for HQ's City Control Grid.
+        extras.update(camera_counts())
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not count live cameras for HQ")
+    try:
         cameras, digest = camera_directory()
     except Exception:  # noqa: BLE001
         logger.exception("Could not build camera list for HQ")

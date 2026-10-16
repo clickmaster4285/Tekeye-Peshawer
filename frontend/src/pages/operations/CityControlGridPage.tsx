@@ -27,7 +27,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { CityStatusMap } from "@/components/city-control/CityStatusMap"
+import { DetectionThumb } from "@/components/city-control/detection-thumb"
 import {
+  CITY_CONTROL_REFRESH_MS,
   fetchCityControlGridLive,
   zeroCityControlKpis,
   type CityControlAlert,
@@ -100,23 +102,26 @@ export default function CityControlGridPage() {
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
-    fetchCityControlGridLive({ signal: ac.signal })
-      .then((live) => {
-        if (ac.signal.aborted) return
-        setRows(live.rows)
-        setKpis(live.kpis)
-        setAlerts(live.alerts)
-      })
-      .catch(() => {
-        if (ac.signal.aborted) return
-        setRows([])
-        setKpis(zeroCityControlKpis())
-        setAlerts([])
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false)
-      })
-    return () => ac.abort()
+    const load = (force: boolean) =>
+      fetchCityControlGridLive({ signal: ac.signal, force })
+        .then((live) => {
+          if (ac.signal.aborted) return
+          setRows(live.rows)
+          setKpis(live.kpis)
+          setAlerts(live.alerts)
+        })
+        .catch(() => {
+          // Keep the last good data on a failed refresh.
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false)
+        })
+    void load(false)
+    const timer = window.setInterval(() => void load(true), CITY_CONTROL_REFRESH_MS)
+    return () => {
+      window.clearInterval(timer)
+      ac.abort()
+    }
   }, [])
 
   const cities = useMemo(() => {
@@ -373,7 +378,7 @@ export default function CityControlGridPage() {
               View All
             </Link>
           </div>
-          <ul className="flex-1 divide-y divide-[#E8F0FA]">
+          <ul className="max-h-[420px] flex-1 divide-y divide-[#E8F0FA] overflow-y-auto">
             {alerts.length === 0 ? (
               <li className="px-4 py-8 text-center text-[13px] text-[#607DA5]">
                 {loading ? "Loading alerts…" : "No recent alerts."}
@@ -391,6 +396,7 @@ export default function CityControlGridPage() {
                     <span className="w-10 shrink-0 pt-0.5 text-[11px] font-semibold tabular-nums text-[#607DA5]">
                       {alert.time}
                     </span>
+                    {alert.image !== undefined && <DetectionThumb src={alert.image} alt={alert.title} size={36} />}
                     <div className="min-w-0 flex-1">
                       <p className="text-[12px] font-semibold leading-snug text-[#102C55]">
                         {alert.city} – {alert.title}

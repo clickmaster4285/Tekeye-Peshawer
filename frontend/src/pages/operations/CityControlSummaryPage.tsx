@@ -34,7 +34,9 @@ import {
   YAxis,
 } from "recharts"
 import { CityOverviewMap } from "@/components/city-control/CityOverviewMap"
+import { DetectionThumb } from "@/components/city-control/detection-thumb"
 import {
+  CITY_CONTROL_REFRESH_MS,
   fetchCityControlGridLive,
   getCityDetailExtras,
   type CityControlRow,
@@ -152,21 +154,25 @@ export default function CityControlSummaryPage() {
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
-    fetchCityControlGridLive({ signal: ac.signal, includeExtras: true })
-      .then((live) => {
-        if (ac.signal.aborted) return
-        setRows(live.rows)
-        setExtrasById(live.extrasById)
-      })
-      .catch(() => {
-        if (ac.signal.aborted) return
-        setRows([])
-        setExtrasById({})
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false)
-      })
-    return () => ac.abort()
+    const load = (force: boolean) =>
+      fetchCityControlGridLive({ signal: ac.signal, includeExtras: true, force })
+        .then((live) => {
+          if (ac.signal.aborted) return
+          setRows(live.rows)
+          setExtrasById(live.extrasById)
+        })
+        .catch(() => {
+          // Keep the last good data on a failed refresh.
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false)
+        })
+    void load(false)
+    const timer = window.setInterval(() => void load(true), CITY_CONTROL_REFRESH_MS)
+    return () => {
+      window.clearInterval(timer)
+      ac.abort()
+    }
   }, [])
 
   const city = rows.find((c) => c.id === cityId)
@@ -445,13 +451,16 @@ export default function CityControlSummaryPage() {
               </div>
               {extras.detections.length === 0 ? (
                 <p className="mt-8 text-center text-[13px] text-[#607DA5]">
-                  No live detections — city is offline. Showing last known snapshot only.
+                  {city.status === "Offline"
+                    ? "No detections received — city is offline."
+                    : "No people, vehicles, weapons or plates detected yet."}
                 </p>
               ) : (
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full text-left text-[12px]">
                     <thead>
                       <tr className="border-b border-[#E8F0FA] text-[#607DA5]">
+                        <th className="py-2 pr-2 font-semibold">Image</th>
                         <th className="py-2 pr-2 font-semibold">Time</th>
                         <th className="py-2 pr-2 font-semibold">Type</th>
                         <th className="py-2 pr-2 font-semibold">Object</th>
@@ -459,8 +468,11 @@ export default function CityControlSummaryPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {extras.detections.map((row) => (
-                        <tr key={`${row.time}-${row.object}`} className="border-b border-[#F2F7FC]">
+                      {extras.detections.map((row, i) => (
+                        <tr key={`${i}-${row.time}-${row.object}`} className="border-b border-[#F2F7FC]">
+                          <td className="py-1.5 pr-2">
+                            <DetectionThumb src={row.image} alt={row.object} />
+                          </td>
                           <td className="py-2 pr-2 tabular-nums text-[#607DA5]">{row.time}</td>
                           <td className="py-2 pr-2">
                             <span className="inline-flex items-center gap-1.5 font-medium text-[#102C55]">
