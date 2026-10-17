@@ -11,7 +11,7 @@ from rest_framework.test import APIClient
 
 from city_sync.models import CityCamera, SyncCredential, SyncSite
 from city_sync.tests.test_sites import CITY, HQ
-from city_sync.view_pass import check_pass, issue_pass
+from city_sync.view_pass import check_pass, hq_public_key_b64, issue_pass, save_hq_public_key
 from users.models import User
 
 KEY = "k"  # CITY settings use SYNC_API_KEY="k"
@@ -22,7 +22,11 @@ def hq_pass(loc="ABBOTTABAD", ttl=300) -> str:
         SyncCredential.objects.update_or_create(
             location_code=loc, defaults={"key_hash": SyncCredential.hash_key(KEY), "is_active": True}
         )
-        return issue_pass(loc, user="sa", ttl=ttl)[0]
+        token = issue_pass(loc, user="sa", ttl=ttl)[0]
+        key = hq_public_key_b64()
+    # The city learns HQ's public key from a heartbeat answer.
+    save_hq_public_key(key)
+    return token
 
 
 @override_settings(**CITY)
@@ -40,9 +44,33 @@ class ViewPassTests(TestCase):
         self.assertIsNone(check_pass(f"{body}x.{sig}"))
         self.assertIsNone(check_pass(""))
 
-    @override_settings(SYNC_API_KEY="other-key")
-    def test_pass_signed_for_a_different_key_is_refused(self):
-        self.assertIsNone(check_pass(hq_pass()))
+    def test_hq_database_alone_cannot_forge_a_pass(self):
+        """The old scheme signed with the key hash HQ stores; that must no longer work."""
+        import hashlib
+        import hmac as _hmac
+
+        from city_sync.view_pass import _b64
+
+        hq_pass()  # city now trusts HQ's public key
+        body = _b64(b'{"loc":"ABBOTTABAD","exp":9999999999,"sub":"x"}')
+        forged = _hmac.new(SyncCredential.hash_key(KEY).encode(), body.encode(), hashlib.sha256).hexdigest()
+        self.assertIsNone(check_pass(f"{body}.{forged}"))
+
+    def test_pass_signed_by_another_key_is_refused(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        from city_sync.view_pass import _b64
+
+        hq_pass()
+        body = _b64(b'{"loc":"ABBOTTABAD","exp":9999999999,"sub":"x"}')
+        sig = _b64(Ed25519PrivateKey.generate().sign(body.encode()))
+        self.assertIsNone(check_pass(f"{body}.{sig}"))
+
+    def test_heartbeat_answer_carries_the_public_key(self):
+        from city_sync.control import control_for_location
+
+        with override_settings(**HQ):
+            self.assertEqual(control_for_location("ABBOTTABAD")["view_pass_public_key"], hq_public_key_b64())
 
 
 @override_settings(**CITY)

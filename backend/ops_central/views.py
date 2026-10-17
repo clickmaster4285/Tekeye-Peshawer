@@ -204,6 +204,38 @@ def _ml_mjpeg_upstream_candidates(
     )
 
 
+def _remote_token_fernet():
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet
+    from django.conf import settings
+
+    digest = hashlib.sha256(f"ops-quick-connect:{settings.SECRET_KEY}".encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+_REMOTE_TOKEN_TTL_SEC = 12 * 3600
+
+
+def _seal_remote_token(token: str) -> str:
+    """Encrypt a remote server's token for a browser URL, so the URL never shows it."""
+    return _remote_token_fernet().encrypt(token.encode()).decode() if token else ""
+
+
+def _open_remote_token(sealed: str) -> str:
+    """Token from _seal_remote_token, or "" when it was changed or is older than 12 hours."""
+    from cryptography.fernet import InvalidToken
+
+    sealed = (sealed or "").strip()
+    if not sealed:
+        return ""
+    try:
+        return _remote_token_fernet().decrypt(sealed.encode(), ttl=_REMOTE_TOKEN_TTL_SEC).decode()
+    except InvalidToken:
+        return ""
+
+
 def _browser_camera_row(cam: dict) -> dict:
     """Copy of a camera row without the RTSP URL (it carries the NVR username and password)."""
     row = dict(cam)
@@ -1061,7 +1093,7 @@ class QuickConnectView(APIView):
                         f"&ml_base_url={quote(ml_root, safe='')}"
                         f"&stream_key={quote(key, safe='')}"
                         f"&kind=live"
-                        f"&remote_token={quote(token, safe='')}"
+                        f"&remote_token={quote(_seal_remote_token(token), safe='')}"
                     )
                 cameras.append(row)
 
@@ -1391,7 +1423,7 @@ class EphemeralMjpegProxyView(APIView):
         ml_base = (request.query_params.get("ml_base_url") or "").strip().rstrip("/") or base
         stream_key = (request.query_params.get("stream_key") or "").strip()
         kind = (request.query_params.get("kind") or "live").strip().lower()
-        token = (request.query_params.get("remote_token") or "").strip()
+        token = _open_remote_token(request.query_params.get("remote_token") or "")
 
         if not stream_key:
             return Response(

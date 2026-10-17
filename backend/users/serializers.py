@@ -185,8 +185,15 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def validate_password(self, value):
         if not value:
             return value
-        if len(value) < 6:
-            raise serializers.ValidationError("Password must be at least 6 characters.")
+        # settings.AUTH_PASSWORD_VALIDATORS: 8+ characters, not common, not all digits,
+        # not too close to the user's name.
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        try:
+            validate_password(value, user=self.instance)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages)) from exc
         return value
 
     def validate(self, attrs):

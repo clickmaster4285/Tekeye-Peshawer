@@ -232,12 +232,12 @@ export default function UserFormPage() {
         toast({ title: "Username required", variant: "destructive" })
         return
       }
-      if (form.password.length < 6) {
-        toast({ title: "Password must be at least 6 characters", variant: "destructive" })
+      if (form.password.length < 8) {
+        toast({ title: "Password must be at least 8 characters", variant: "destructive" })
         return
       }
-    } else if (form.password && form.password.length < 6) {
-      toast({ title: "Password must be at least 6 characters", variant: "destructive" })
+    } else if (form.password && form.password.length < 8) {
+      toast({ title: "Password must be at least 8 characters", variant: "destructive" })
       return
     }
 

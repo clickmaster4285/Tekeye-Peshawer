@@ -239,3 +239,44 @@ class HrOnlyMediaTests(TestCase):
         res = self._get(_user_with_role("hr_officer", "HR"), "staff_docs/cnic.pdf")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res["X-Frame-Options"], "SAMEORIGIN")
+
+
+class StrongPasswordTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(_user_with_role("boss", "ADMIN", location=""))
+
+    def _create(self, password):
+        return self.client.post(
+            "/api/users/",
+            {"username": "newbie", "password": password, "full_name": "New Person",
+             "role": "GUARD", "phone": "0300", "location": "PESHAWAR"},
+            format="json",
+        )
+
+    def test_weak_passwords_are_refused(self):
+        for weak in ("abc123", "12345678", "password1"):
+            self.assertEqual(self._create(weak).status_code, 400, weak)
+        self.assertFalse(User.objects.filter(username="newbie").exists())
+
+    def test_strong_password_is_accepted(self):
+        self.assertEqual(self._create("Gate-Lamp-4821").status_code, 201)
+
+
+class CityStatusNeedsLoginTests(TestCase):
+    def test_anonymous_and_guard_are_refused(self):
+        client = APIClient()
+        self.assertIn(client.get("/api/sync/v1/cities/").status_code, (401, 403))
+        client.force_authenticate(_user_with_role("guard", "GUARD"))
+        self.assertEqual(client.get("/api/sync/v1/cities/").status_code, 403)
+
+
+class QuickConnectTokenSealTests(TestCase):
+    def test_remote_token_is_hidden_and_tamper_proof(self):
+        from ops_central.views import _open_remote_token, _seal_remote_token
+
+        sealed = _seal_remote_token("remote-secret-token")
+        self.assertNotIn("remote-secret-token", sealed)
+        self.assertEqual(_open_remote_token(sealed), "remote-secret-token")
+        self.assertEqual(_open_remote_token(sealed[:-2] + "xx"), "")
+        self.assertEqual(_open_remote_token("remote-secret-token"), "")

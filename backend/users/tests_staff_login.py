@@ -62,7 +62,7 @@ class StaffLoginLinkTests(TestCase):
 
         created = self.client.post(
             f"/api/staff/{staff.id}/create_user/",
-            {"password": "secret12"},
+            {"password": "Gate-Lamp-4821"},
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)
@@ -76,7 +76,7 @@ class StaffLoginLinkTests(TestCase):
         staff = _staff(designation="Officer", personal_number="EMP9002")
         res = self.client.post(
             f"/api/staff/{staff.id}/create_user/",
-            {"password": "secret12"},
+            {"password": "Gate-Lamp-4821"},
             format="json",
         )
         self.assertEqual(res.status_code, 400)
@@ -84,7 +84,7 @@ class StaffLoginLinkTests(TestCase):
 
         res = self.client.post(
             f"/api/staff/{staff.id}/create_user/",
-            {"password": "secret12", "role": "GUARD", "location": "KOHAT"},
+            {"password": "Gate-Lamp-4821", "role": "GUARD", "location": "KOHAT"},
             format="json",
         )
         self.assertEqual(res.status_code, 201, res.content)
@@ -100,7 +100,7 @@ class StaffLoginLinkTests(TestCase):
         )
         created = self.client.post(
             f"/api/staff/{staff.id}/create_user/",
-            {"password": "secret12", "username": "umar.farooq"},
+            {"password": "Gate-Lamp-4821", "username": "umar.farooq"},
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)

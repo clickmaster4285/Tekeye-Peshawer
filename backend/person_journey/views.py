@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import timedelta
 
 from django.db.models import Count, Q
@@ -50,7 +51,7 @@ class JourneyIngestAPIView(APIView):
             or request.META.get("HTTP_X_JOURNEY_INGEST_TOKEN")
             or ""
         ).strip()
-        if not expected or token != expected:
+        if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
             return Response({"detail": "Invalid ingest token."}, status=status.HTTP_403_FORBIDDEN)
 
         ser = IngestObservationSerializer(data=request.data)

@@ -250,8 +250,10 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # Large CCTV recordings (up to 1 hour) are streamed to disk, not held in RAM.
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(
     os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(8 * 1024 * 1024)))  # 8MB
+# Form/JSON body only (uploaded files are streamed to disk and not counted). Big enough
+# for sync media chunks and base64 webcam images; an 8GB body would fill the RAM.
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(8 * 1024 * 1024 * 1024)))  # 8GB total POST
+    os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(64 * 1024 * 1024)))  # 64MB
 
 # Images are automatically compressed on the backend before storage
 # This reduces stored file sizes significantly (typically 70-85% reduction)
@@ -591,6 +593,8 @@ HQ_PUBLIC_URL = os.getenv("HQ_PUBLIC_URL", "").strip().rstrip("/")
 SYNC_API_KEY = os.getenv("SYNC_API_KEY", "").strip()
 SYNC_API_KEY_FILE = os.getenv("SYNC_API_KEY_FILE", "").strip()
 SYNC_API_KEYS = os.getenv("SYNC_API_KEYS", "").strip()
+# HQ: Ed25519 key that signs camera view passes. City: HQ's public key. Never in the DB.
+VIEW_PASS_KEY_DIR = os.getenv("VIEW_PASS_KEY_DIR", str(BASE_DIR / ".keys")).strip()
 SYNC_OUTBOX_ENABLED = os.getenv("SYNC_OUTBOX_ENABLED", "True").lower() in ("true", "1", "yes")
 # False: normal deletes work and are sent to HQ as tombstones. True: block deletes of synced rows.
 SYNC_FORBID_HARD_DELETE = os.getenv("SYNC_FORBID_HARD_DELETE", "False").lower() in ("true", "1", "yes")

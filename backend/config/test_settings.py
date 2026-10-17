@@ -1,5 +1,7 @@
 """Test settings: build schema from models so stale SeparateDatabaseAndState migrations do not block CIIS tests."""
 
+import tempfile
+
 from config.settings import *  # noqa: F403
 
 
@@ -17,3 +19,5 @@ CACHES = {
     "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
     "login_guard": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "login-guard-tests"},
 }
+
+VIEW_PASS_KEY_DIR = tempfile.mkdtemp(prefix="view-pass-keys-")

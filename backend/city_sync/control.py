@@ -50,14 +50,23 @@ def control_for_location(loc: str) -> dict:
     from city_sync.downlink import latest_seq
 
     if site is None:
-        return {"paused": False, "full_history_request_id": "", "camera_directory_hash": "", "downlink_seq": 0}
-    return {
-        "paused": site.is_paused,
-        "full_history_request_id": site.full_history_request_id,
-        "camera_directory_hash": site.camera_directory_hash,
-        # Newest HQ HR change for this city; the city pulls when it is behind.
-        "downlink_seq": latest_seq(site.location_code),
-    }
+        control = {"paused": False, "full_history_request_id": "", "camera_directory_hash": "", "downlink_seq": 0}
+    else:
+        control = {
+            "paused": site.is_paused,
+            "full_history_request_id": site.full_history_request_id,
+            "camera_directory_hash": site.camera_directory_hash,
+            # Newest HQ HR change for this city; the city pulls when it is behind.
+            "downlink_seq": latest_seq(site.location_code),
+        }
+    # Cities check HQ's camera view passes with this key (city_sync/view_pass.py).
+    try:
+        from city_sync.view_pass import hq_public_key_b64
+
+        control["view_pass_public_key"] = hq_public_key_b64()
+    except Exception:  # noqa: BLE001 - a key problem must not stop the heartbeat
+        logger.exception("Could not load the view-pass signing key")
+    return control
 
 
 def record_heartbeat_ack(loc: str, body: dict) -> None:
@@ -171,6 +180,10 @@ def apply_hq_control(control: dict) -> None:
         return
     if "camera_directory_hash" in control:
         _hq_camera_hash = str(control.get("camera_directory_hash") or "")
+    if control.get("view_pass_public_key"):
+        from city_sync.view_pass import save_hq_public_key
+
+        save_hq_public_key(str(control["view_pass_public_key"]))
     state = CityControlState.load()
     state.is_paused = bool(control.get("paused"))
     state.full_history_request_id = str(control.get("full_history_request_id") or "")[:64]

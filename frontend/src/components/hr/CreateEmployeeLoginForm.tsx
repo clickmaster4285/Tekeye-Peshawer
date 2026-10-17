@@ -133,8 +133,8 @@ export function CreateEmployeeLoginForm({
       setError("User ID must be at least 3 characters (e.g. first.last).")
       return
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.")
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.")
       return
     }
     if (showRole && !role) {

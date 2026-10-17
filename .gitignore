@@ -12,6 +12,7 @@
 .pytest_cache/
 .mypy_cache/
 backend/.cache/
+backend/.keys/
 
 # Secrets
 .env

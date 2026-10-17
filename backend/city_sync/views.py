@@ -327,12 +327,15 @@ def city_health_state(st: HqCityStatus, now) -> tuple[str, int | None]:
 
 
 class CityStatusListView(APIView):
-    """HQ Grid — HQ tables only (Phase 7)."""
+    """HQ Grid — HQ tables only (Phase 7). Same viewers as the City Control pages."""
 
-    permission_classes = [AllowAny]
+    def get_permissions(self):
+        from ops_central.permissions import IsOpsViewer
+
+        return [IsOpsViewer()]
 
     def get(self, request):
-        if not is_hq() and not getattr(settings, "DEBUG", False):
+        if not is_hq():
             return Response({"detail": "HQ only"}, status=status.HTTP_403_FORBIDDEN)
         now = timezone.now()
         backup_stale_h = float(getattr(settings, "SYNC_BACKUP_STALE_HOURS", 26))
