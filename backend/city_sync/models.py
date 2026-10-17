@@ -8,6 +8,8 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
+from config.field_crypto import EncryptedJSONField
+
 
 def new_uuid() -> uuid.UUID:
     return uuid.uuid4()
@@ -42,7 +44,7 @@ class SyncOutbox(models.Model):
     operation = models.CharField(max_length=16, choices=OP_CHOICES)
     entity_version = models.PositiveIntegerField()
     schema_version = models.PositiveIntegerField(default=1)
-    payload = models.JSONField()
+    payload = EncryptedJSONField()
     payload_hash = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     status = models.CharField(
@@ -136,7 +138,7 @@ class HqConflict(models.Model):
     incoming_version = models.PositiveIntegerField()
     stored_version = models.PositiveIntegerField()
     reason = models.CharField(max_length=64, default="stale_or_mismatch")
-    payload = models.JSONField()
+    payload = EncryptedJSONField()
     detected_at = models.DateTimeField(auto_now_add=True)
     resolved_by = models.CharField(max_length=128, blank=True, default="")
     resolved_at = models.DateTimeField(null=True, blank=True)
@@ -159,7 +161,7 @@ class HqReplicaRow(models.Model):
     entity_id = models.UUIDField()
     entity_version = models.PositiveIntegerField()
     is_deleted = models.BooleanField(default=False)
-    payload = models.JSONField()
+    payload = EncryptedJSONField()
     payload_hash = models.CharField(max_length=64, blank=True, default="")
     updated_at = models.DateTimeField()
     received_at = models.DateTimeField(auto_now=True)
@@ -287,7 +289,7 @@ class HqReferenceItem(models.Model):
     entity_key = models.CharField(max_length=128)
     version = models.PositiveIntegerField(default=1)
     is_deleted = models.BooleanField(default=False)
-    payload = models.JSONField(default=dict)
+    payload = EncryptedJSONField(default=dict)
     updated_at = models.DateTimeField(auto_now=True)
     urgent = models.BooleanField(default=False)
 
@@ -325,7 +327,7 @@ class CityReferenceCache(models.Model):
     entity_key = models.CharField(max_length=128)
     version = models.PositiveIntegerField(default=1)
     is_deleted = models.BooleanField(default=False)
-    payload = models.JSONField(default=dict)
+    payload = EncryptedJSONField(default=dict)
     updated_at = models.DateTimeField()
 
     class Meta:
@@ -573,7 +575,7 @@ class HqDownlink(models.Model):
     entity_type = models.CharField(max_length=64)
     entity_id = models.UUIDField()
     operation = models.CharField(max_length=16, default=OP_UPSERT)
-    payload = models.JSONField(default=dict)
+    payload = EncryptedJSONField(default=dict)
     # [{"field": "profile_image", "path": "staff_photos/a.jpg"}, ...] - files the city downloads
     media = models.JSONField(default=list)
     status = models.CharField(max_length=16, default=STATUS_PENDING)

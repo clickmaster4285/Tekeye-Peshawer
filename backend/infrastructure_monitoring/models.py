@@ -1,5 +1,7 @@
 from django.db import models
 
+from config.field_crypto import EncryptedCharField
+
 
 class DeviceType(models.TextChoices):
     CAMERA = "camera", "Camera"
@@ -109,7 +111,7 @@ class InfraDevice(models.Model):
 
     # Credentials (optional)
     username = models.CharField(max_length=128, blank=True, default="")
-    password = models.CharField(max_length=256, blank=True, default="")
+    password = EncryptedCharField(max_length=256, blank=True, default="")
 
     # SNMP
     snmp_version = models.CharField(

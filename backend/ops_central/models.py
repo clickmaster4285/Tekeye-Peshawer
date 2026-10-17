@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from config.field_crypto import EncryptedCharField
+
 
 class ConnectionMode(models.TextChoices):
     ML = "ml", "ML service only"
@@ -35,7 +37,7 @@ class RemoteServer(models.Model):
         default="",
         help_text="ML service root e.g. http://192.168.199.12:8100",
     )
-    auth_token = models.CharField(
+    auth_token = EncryptedCharField(
         max_length=255,
         blank=True,
         default="",

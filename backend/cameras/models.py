@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from config.field_crypto import EncryptedCharField
+
 
 class CameraPurpose(models.TextChoices):
     """Each value maps to one ML model (or one focused pipeline). Multi-select = union."""
@@ -87,7 +89,7 @@ class Nvr(models.Model):
     ip_address = models.CharField(max_length=45)
     port = models.PositiveIntegerField(default=554)
     username = models.CharField(max_length=64, default="admin")
-    password = models.CharField(max_length=128, blank=True, default="")
+    password = EncryptedCharField(max_length=128, blank=True, default="")
     brand = models.CharField(max_length=32, choices=NvrBrand.choices, default=NvrBrand.HIKVISION)
     stream_path_template = models.CharField(
         max_length=255,

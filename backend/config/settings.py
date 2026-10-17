@@ -595,6 +595,10 @@ SYNC_API_KEY_FILE = os.getenv("SYNC_API_KEY_FILE", "").strip()
 SYNC_API_KEYS = os.getenv("SYNC_API_KEYS", "").strip()
 # HQ: Ed25519 key that signs camera view passes. City: HQ's public key. Never in the DB.
 VIEW_PASS_KEY_DIR = os.getenv("VIEW_PASS_KEY_DIR", str(BASE_DIR / ".keys")).strip()
+# Key for encrypted DB columns (config/field_crypto.py). Empty = backend/.keys/field_encryption.key.
+# One key per site. BACK IT UP: without it encrypted data cannot be read.
+FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "").strip()
+FIELD_ENCRYPTION_OLD_KEYS = os.getenv("FIELD_ENCRYPTION_OLD_KEYS", "").strip()
 SYNC_OUTBOX_ENABLED = os.getenv("SYNC_OUTBOX_ENABLED", "True").lower() in ("true", "1", "yes")
 # False: normal deletes work and are sent to HQ as tombstones. True: block deletes of synced rows.
 SYNC_FORBID_HARD_DELETE = os.getenv("SYNC_FORBID_HARD_DELETE", "False").lower() in ("true", "1", "yes")

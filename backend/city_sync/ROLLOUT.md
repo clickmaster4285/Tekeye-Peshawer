@@ -58,6 +58,21 @@ Later updates on this server: `git pull peshawar multi-site-sync`.
 python manage.py migrate
 ```
 
+`migrate` encrypts NVR passwords, staff bank/salary details and sync copies. The first time,
+it creates this site's own key in `backend/.keys/field_encryption.key`.
+
+**Copy `backend/.keys/` to a safe place now (USB / another server), not next to the DB backup.**
+Without `field_encryption.key` the encrypted data can never be read again. At Peshawar the
+folder also holds `view_pass_ed25519.pem` (signs City Cameras passes).
+
+Then, once, encrypt the old sync rows (it can take a while on a big database; it is safe to
+stop with Ctrl+C and run again):
+
+```bash
+python manage.py encrypt_fields
+python manage.py encrypt_fields --status   # every line should show "plain": 0
+```
+
 ## 6. Run the pre-flight check
 
 ```bash
@@ -112,6 +127,7 @@ pg_restore --clean -U postgres -d "TEKEYE(ABBOTTABAD)" abbottabad_before_sync.du
 ```
 
 Anything entered at the city after step 7 is lost by the restore, so roll back early or not at all.
+Keep `backend/.keys/` after a restore: rows encrypted before the backup still need that key.
 Then on Peshawar's Locations page, **Pause** the city until the problem is fixed.
 
 ---

@@ -4,6 +4,8 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
+from config.field_crypto import EncryptedCharField, EncryptedDecimalField
+
 
 class User(AbstractUser):
     USERNAME_FIELD = "username"
@@ -132,11 +134,11 @@ class Staff(models.Model):
     work_shift_end = models.TimeField(null=True, blank=True)
     job_status = models.CharField(max_length=50, null=True, blank=True)
     # Salary
-    salary = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    bank_account = models.CharField(max_length=100, null=True, blank=True)
-    iban = models.CharField(max_length=50, null=True, blank=True)
+    salary = EncryptedDecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    bank_account = EncryptedCharField(max_length=100, null=True, blank=True)
+    iban = EncryptedCharField(max_length=50, null=True, blank=True)
     salary_type = models.CharField(max_length=30, null=True, blank=True)
-    tax_id = models.CharField(max_length=50, null=True, blank=True)
+    tax_id = EncryptedCharField(max_length=50, null=True, blank=True)
     allowances = models.TextField(null=True, blank=True)
     # Access (summary; actual auth is on User)
     role_access_level = models.CharField(max_length=50, null=True, blank=True)

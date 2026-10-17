@@ -982,7 +982,10 @@ class PayrollRunViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # All locations (HQ copies of city staff included); deleted staff are not paid.
-        staff_with_salary = Staff.objects.filter(is_deleted=False).exclude(salary__isnull=True).exclude(salary=0)
+        # Salary is encrypted in the DB, so "not zero" is checked in Python, not SQL.
+        staff_with_salary = [
+            s for s in Staff.objects.filter(is_deleted=False).exclude(salary__isnull=True) if s.salary
+        ]
         total_gross = Decimal("0")
         total_net = Decimal("0")
         for staff in staff_with_salary:
@@ -1008,7 +1011,7 @@ class PayrollRunViewSet(viewsets.ModelViewSet):
             )
             total_gross += gross
             total_net += net
-        run.employee_count = staff_with_salary.count()
+        run.employee_count = len(staff_with_salary)
         run.total_gross = total_gross
         run.total_net = total_net
         run.status = "PROCESSED"
