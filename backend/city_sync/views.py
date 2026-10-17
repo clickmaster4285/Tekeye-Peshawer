@@ -211,6 +211,34 @@ class DownlinkMediaView(APIView):
         return FileResponse(default_storage.open(path, "rb"))
 
 
+class CityCameraStreamView(APIView):
+    """
+    City: GET /view/<camera_id>/?pass=&kind=live|jpeg - one camera's video for a browser at HQ.
+    The HQ-signed pass replaces a city login; the video comes from this city's own ML server.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, camera_id: int):
+        from cameras.models import Camera
+        from city_sync.view_pass import check_pass
+        from ops_central.views import proxy_ml_stream
+
+        if check_pass(str(request.query_params.get("pass") or "")) is None:
+            return Response({"detail": "View pass missing, expired or not for this city."}, status=status.HTTP_403_FORBIDDEN)
+        camera = Camera.objects.filter(pk=camera_id, is_active=True).select_related("ml_server").first()
+        if camera is None:
+            return Response({"detail": "Camera not found."}, status=status.HTTP_404_NOT_FOUND)
+        if camera.ml_server is None or not camera.ml_server.is_active:
+            return Response(
+                {"detail": "This camera is not assigned to an ML server at the city."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        kind = "jpeg" if request.query_params.get("kind") == "jpeg" else "live"
+        return proxy_ml_stream(camera.ml_server, camera.stream_key, kind)
+
+
 class MediaInitView(APIView):
     authentication_classes = [SyncApiKeyAuthentication]
     permission_classes = [IsHqRole, IsSyncPrincipal]

@@ -37,6 +37,7 @@ import { CityOverviewMap } from "@/components/city-control/CityOverviewMap"
 import { DetectionThumb } from "@/components/city-control/detection-thumb"
 import {
   CITY_CONTROL_REFRESH_MS,
+  cityCamerasPath,
   fetchCityControlGridLive,
   getCityDetailExtras,
   type CityControlRow,
@@ -260,6 +261,13 @@ export default function CityControlSummaryPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={cityCamerasPath(city)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#D9E6F5] bg-white px-3 text-[12px] font-semibold text-[#102C55] hover:bg-[#F4F8FD]"
+          >
+            <Camera className="h-3.5 w-3.5" />
+            Cameras
+          </Link>
           <button
             type="button"
             onClick={() =>

@@ -40,6 +40,9 @@ export type SyncSite = {
   downlink_pending: number
   downlink_failed: number
   downlink_last_error: string
+  /** Office pin on the City Status Map; null = city centre */
+  latitude: number | null
+  longitude: number | null
   created_at: string
 }
 
@@ -74,13 +77,15 @@ export function addSyncSite(body: {
   location_code: string
   name: string
   base_url: string
+  /** Google Maps link or "lat, lng"; empty = none */
+  map_location?: string
 }): Promise<{ site: SyncSite } & SyncSiteKey> {
   return request(`${BASE}/`, { method: "POST", body: JSON.stringify(body) })
 }
 
 export function updateSyncSite(
   code: string,
-  body: Partial<Pick<SyncSite, "name" | "base_url" | "is_paused">>
+  body: Partial<Pick<SyncSite, "name" | "base_url" | "is_paused">> & { map_location?: string }
 ): Promise<{ site: SyncSite }> {
   return request(siteUrl(code), { method: "PATCH", body: JSON.stringify(body) })
 }

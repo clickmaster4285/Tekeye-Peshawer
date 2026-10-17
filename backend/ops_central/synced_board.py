@@ -266,6 +266,9 @@ def synced_city_rows(*, with_detail: bool = True) -> list[dict[str, Any]]:
             "last_sync_relative": relative,
             "last_sync_at": iso,
             "ops_source": "synced",
+            # Office pin from Locations & Sync; None = the map uses the city centre (HQ: its customs office).
+            "latitude": site.latitude if site is not None else None,
+            "longitude": site.longitude if site is not None else None,
             "sync_errors": (st.dead_outbox + st.failed_media) if st and not is_hq_row else 0,
             **_city_numbers(code, hq, now),
         }

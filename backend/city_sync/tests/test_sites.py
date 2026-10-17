@@ -238,3 +238,34 @@ class CityControlTests(TestCase):
             result = send_heartbeat()
         self.assertEqual(result["status_code"], 200)
         self.assertTrue(CityControlState.load().is_paused)
+
+
+@override_settings(**HQ)
+class MapLocationTests(TestCase):
+    """Office pin for the City Status Map: Google Maps link or "lat, lng"."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(User.objects.create_user(username="sa", password="x", role="ADMIN"))
+        SyncSite.objects.create(location_code="HAYATABAD", name="Hayatabad", base_url="http://x")
+
+    def test_parse_formats(self):
+        from city_sync.sites_api import parse_map_location as parse
+
+        self.assertEqual(parse("34.008, 71.5789"), (34.008, 71.5789))
+        link = "https://www.google.com/maps/place/Customs/@34.0001,71.5002,17z/data=!3m1!4b1!3d34.00812!4d71.57895"
+        self.assertEqual(parse(link), (34.00812, 71.57895))  # the place pin, not the view centre
+        self.assertEqual(parse("https://maps.google.com/?q=33.9946,71.4365"), (33.9946, 71.4365))
+        self.assertIsNone(parse(""))
+        for bad in ("hello", "200, 71"):
+            with self.assertRaises(ValueError):
+                parse(bad)
+
+    def test_set_and_clear_pin(self):
+        url = "/api/sync/v1/sites/HAYATABAD/"
+        res = self.client.patch(url, {"map_location": "33.9946, 71.4365"}, format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual((res.json()["site"]["latitude"], res.json()["site"]["longitude"]), (33.9946, 71.4365))
+        self.assertEqual(self.client.patch(url, {"map_location": "nonsense"}, format="json").status_code, 400)
+        res = self.client.patch(url, {"map_location": ""}, format="json")
+        self.assertIsNone(res.json()["site"]["latitude"])

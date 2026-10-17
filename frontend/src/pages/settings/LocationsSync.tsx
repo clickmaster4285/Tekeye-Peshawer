@@ -165,6 +165,24 @@ function EnvSnippetDialog({
   )
 }
 
+function MapLocationField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>Map location (optional)</Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Google Maps link of the office, or 34.008, 71.5789"
+      />
+      <p className="text-xs text-muted-foreground">
+        In Google Maps, right-click the office and click the numbers at the top to copy them, or copy the place link.
+        Empty = the city centre is shown on the City Status Map.
+      </p>
+    </div>
+  )
+}
+
 function AddSiteDialog({
   open,
   onOpenChange,
@@ -182,18 +200,21 @@ function AddSiteDialog({
   const [newCode, setNewCode] = useState("")
   const [name, setName] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
+  const [mapLocation, setMapLocation] = useState("")
 
   const available = options.filter((o) => !existing.has(o.code))
   const code = choice === NEW_LOCATION ? newCode.trim().toUpperCase().replace(/\s+/g, "_") : choice
 
   const mutation = useMutation({
-    mutationFn: () => addSyncSite({ location_code: code, name: name.trim(), base_url: baseUrl.trim() }),
+    mutationFn: () =>
+      addSyncSite({ location_code: code, name: name.trim(), base_url: baseUrl.trim(), map_location: mapLocation.trim() }),
     onSuccess: (data) => {
       onAdded(data.site, data.env_snippet)
       setChoice("")
       setNewCode("")
       setName("")
       setBaseUrl("")
+      setMapLocation("")
       onOpenChange(false)
     },
     onError: showError,
@@ -260,6 +281,7 @@ function AddSiteDialog({
             />
             <p className="text-xs text-muted-foreground">IP only means port 8000.</p>
           </div>
+          <MapLocationField id="site-map" value={mapLocation} onChange={setMapLocation} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -279,15 +301,22 @@ function EditSiteDialog({ site, onClose }: { site: SyncSite | null; onClose: () 
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
+  const [mapLocation, setMapLocation] = useState("")
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   if (site && loadedFor !== site.location_code) {
     setLoadedFor(site.location_code)
     setName(site.name)
     setBaseUrl(site.base_url)
+    setMapLocation(site.latitude != null && site.longitude != null ? `${site.latitude}, ${site.longitude}` : "")
   }
 
   const mutation = useMutation({
-    mutationFn: () => updateSyncSite(site!.location_code, { name: name.trim(), base_url: baseUrl.trim() }),
+    mutationFn: () =>
+      updateSyncSite(site!.location_code, {
+        name: name.trim(),
+        base_url: baseUrl.trim(),
+        map_location: mapLocation.trim(),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY })
       setLoadedFor(null)
@@ -309,7 +338,7 @@ function EditSiteDialog({ site, onClose }: { site: SyncSite | null; onClose: () 
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit {site?.location_code}</DialogTitle>
-          <DialogDescription>Change the display name or the server address.</DialogDescription>
+          <DialogDescription>Change the display name, server address or map location.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -320,6 +349,7 @@ function EditSiteDialog({ site, onClose }: { site: SyncSite | null; onClose: () 
             <Label htmlFor="edit-url">Server address</Label>
             <Input id="edit-url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </div>
+          <MapLocationField id="edit-map" value={mapLocation} onChange={setMapLocation} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

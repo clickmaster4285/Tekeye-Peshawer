@@ -30,6 +30,7 @@ import { CityStatusMap } from "@/components/city-control/CityStatusMap"
 import { DetectionThumb } from "@/components/city-control/detection-thumb"
 import {
   CITY_CONTROL_REFRESH_MS,
+  cityCamerasPath,
   fetchCityControlGridLive,
   zeroCityControlKpis,
   type CityControlAlert,
@@ -339,7 +340,7 @@ export default function CityControlGridPage() {
                             <DropdownMenuItem onClick={() => openCity(row)}>City summary</DropdownMenuItem>
                             <DropdownMenuItem
                               disabled={row.status === "Offline"}
-                              onClick={() => navigate(ROUTES.ALL_CITIES_CAMERAS)}
+                              onClick={() => navigate(cityCamerasPath(row))}
                             >
                               Open cameras
                             </DropdownMenuItem>

@@ -1,159 +1,210 @@
-import { useState } from "react"
-import { Calendar } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Calendar, RefreshCw } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { DashboardOverviewPanel } from "@/components/dashboard/dashboard-overview-panel"
 import { DashboardQuickActions } from "@/components/dashboard/dashboard-quick-actions"
 import { DashboardNotifications } from "@/components/dashboard/dashboard-notifications"
 import { DashboardAlertFeed } from "@/components/dashboard/dashboard-alert-feed"
 import { DashboardStatisticsWidgets } from "@/components/dashboard/dashboard-statistics-widgets"
-import { DashboardThermalSummary } from "@/components/dashboard/dashboard-thermal-summary"
 import { DashboardLiveCameraGrid } from "@/components/dashboard/dashboard-live-camera-grid"
-import { DashboardMapView } from "@/components/dashboard/dashboard-map-view"
+import { CityStatusMap } from "@/components/city-control/CityStatusMap"
+import { AiAnalyticsPanel } from "@/components/analytics/ai-analytics-panel"
+import { EventLog } from "@/components/analytics/event-log"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { fetchCityControlGridLive, type CityControlRow } from "@/data/city-control-grid-data"
+import { ALL_LOCATIONS, fetchAnalytics, type AnalyticsData } from "@/lib/analytics-api"
+
+const REFRESH_MS = 30_000
+
+function isoDay(d: Date): string {
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 10)
+}
+
+function daysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return isoDay(d)
+}
+
+function rangeLabel(from: string, to: string): string {
+  const fmt = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+  return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`
+}
 
 export default function AnalyticsDashboardPage() {
-  const [lastRefresh] = useState(() =>
-    new Date().toLocaleTimeString("en-US", { hour12: true, hour: "2-digit", minute: "2-digit" })
+  const [location, setLocation] = useState(ALL_LOCATIONS)
+  const [from, setFrom] = useState(() => daysAgo(6))
+  const [to, setTo] = useState(() => isoDay(new Date()))
+  const [data, setData] = useState<AnalyticsData | undefined>()
+  const [mapRows, setMapRows] = useState<CityControlRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const query = useMemo(() => ({ location, from, to }), [location, from, to])
+
+  const load = useCallback(
+    (signal?: AbortSignal) => {
+      setLoading(true)
+      return fetchAnalytics(query, signal)
+        .then((res) => {
+          setData(res)
+          setError("")
+          setLastRefresh(new Date())
+        })
+        .catch((err: unknown) => {
+          if (!signal?.aborted) setError(err instanceof Error ? err.message : "Could not load the dashboard.")
+        })
+        .finally(() => {
+          if (!signal?.aborted) setLoading(false)
+        })
+    },
+    [query]
   )
+
+  // Load on filter change, then refresh quietly every 30s while the tab is visible.
+  useEffect(() => {
+    const ac = new AbortController()
+    void load(ac.signal)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void load(ac.signal)
+        setRefreshKey((k) => k + 1)
+      }
+    }, REFRESH_MS)
+    return () => {
+      window.clearInterval(timer)
+      ac.abort()
+    }
+  }, [load])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    fetchCityControlGridLive({ signal: ac.signal })
+      .then((live) => setMapRows(live.rows))
+      .catch(() => {})
+    return () => ac.abort()
+  }, [refreshKey])
+
+  const label = rangeLabel(from, to)
+  const scopeName =
+    location === ALL_LOCATIONS ? "All locations" : data?.locations.find((l) => l.code === location)?.name || location
+  const mapRowsInScope =
+    location === ALL_LOCATIONS ? mapRows : mapRows.filter((r) => (r.locationCode || "").toUpperCase() === location)
 
   return (
     <ModulePageLayout
-      title="Main Dashboard — Real-time situational awareness overview"
-      description="Required: mandatory fields. Field Type defines input widget. Developer Notes: implementation context."
+      title="Analytics Dashboard"
+      description="Live overview of cameras, AI detections and alerts across Peshawar and every connected city."
       breadcrumbs={[{ label: "AI Analytics" }, { label: "Analytics Dashboard" }]}
     >
-      <div className="flex flex-col gap-4 mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div />
+      <div className="mb-6 flex flex-col gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1">
+              <Label className="text-xs text-muted-foreground">Location</Label>
+              <Select value={location} onValueChange={setLocation}>
+                <SelectTrigger className="h-9 w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+                  {(data?.locations ?? []).map((l) => (
+                    <SelectItem key={l.code} value={l.code}>
+                      {l.name}
+                      {l.is_hq ? " (head office)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <Input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} className="h-9 w-40" />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input
+                type="date"
+                value={to}
+                min={from}
+                max={isoDay(new Date())}
+                onChange={(e) => e.target.value && setTo(e.target.value)}
+                className="h-9 w-40"
+              />
+            </div>
+            <div className="flex gap-1">
+              {[
+                { label: "Today", days: 0 },
+                { label: "7 days", days: 6 },
+                { label: "30 days", days: 29 },
+              ].map((p) => (
+                <Button
+                  key={p.label}
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={() => {
+                    setFrom(daysAgo(p.days))
+                    setTo(isoDay(new Date()))
+                  }}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground flex items-center gap-2">
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
               <Calendar className="h-4 w-4" />
-              Last refresh: {lastRefresh}
+              {lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString("en-GB")}` : "Loading…"}
             </span>
-            <DashboardNotifications />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                void load()
+                setRefreshKey((k) => k + 1)
+              }}
+              aria-label="Refresh now"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            <DashboardNotifications alerts={data?.alerts ?? []} incidents={data?.overview.incidents_today ?? 0} />
           </div>
         </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
         <DashboardQuickActions />
       </div>
 
       <div className="space-y-6">
-        <DashboardOverviewPanel />
+        <DashboardOverviewPanel overview={data?.overview} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <DashboardLiveCameraGrid />
-          <DashboardAlertFeed />
+          <DashboardAlertFeed alerts={data?.alerts ?? []} loading={loading && !data} />
         </div>
 
-        <DashboardStatisticsWidgets />
+        <DashboardStatisticsWidgets stats={data?.stats} rangeLabel={`${scopeName} · ${label}`} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <DashboardMapView />
-          <DashboardThermalSummary />
-        </div>
-
-        {/* AI Detection & Analytics Dashboard */}
         <Card>
           <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <CardTitle className="text-base">AI Detection & Analytics Dashboard</CardTitle>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground">Date range *</Label>
-                <Input type="date" className="w-40 h-8" />
-                <span className="text-muted-foreground">to</span>
-                <Input type="date" className="w-40 h-8" />
-              </div>
-            </div>
+            <CardTitle className="text-base">Locations map</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Detections count by type</Label>
-                <div className="h-24 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Bar chart</div>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Top alert cameras</Label>
-                <div className="h-24 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Bar chart</div>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">False positive rate</Label>
-                <p className="text-xl font-semibold mt-1">2.1%</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">False negative rate</Label>
-                <p className="text-xl font-semibold mt-1">1.4%</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Activity heat map (on camera view)</Label>
-                <div className="h-32 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Heat map</div>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Model performance trend</Label>
-                <div className="h-32 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Line chart</div>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Detection count over time</Label>
-                <div className="h-28 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Line chart</div>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Object type distribution</Label>
-                <div className="h-28 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">Pie chart</div>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <Label className="text-xs text-muted-foreground">Anomaly detection score</Label>
-                <p className="text-2xl font-semibold mt-1">87</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Face recognition accuracy</Label><p className="text-lg font-semibold mt-1">96.2%</p></div>
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">LPR accuracy</Label><p className="text-lg font-semibold mt-1">94.8%</p></div>
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Behavioral analytics</Label><div className="h-16 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Bar</div></div>
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Zone occupancy trends</Label><div className="h-16 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Line</div></div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Person / vehicle count trend</Label><div className="h-24 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Line chart</div></div>
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Hourly / daily / weekly / monthly activity</Label><div className="h-24 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Bar chart</div></div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Age distribution</Label><div className="h-20 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Bar</div></div>
-              <div className="rounded-lg border border-border p-3"><Label className="text-xs text-muted-foreground">Gender distribution</Label><div className="h-20 mt-1 rounded bg-muted/30 flex items-center justify-center text-xs">Pie</div></div>
-            </div>
-            <div className="rounded-lg border border-border p-3">
-              <Label className="text-xs text-muted-foreground">Event log (searchable)</Label>
-              <div className="flex flex-wrap gap-2 mt-2 mb-2">
-                <Input placeholder="Search events" className="w-48 h-8" />
-                <div className="flex gap-2"><label className="flex items-center gap-1 text-xs"><Checkbox />Critical</label><label className="flex items-center gap-1 text-xs"><Checkbox />High</label><label className="flex items-center gap-1 text-xs"><Checkbox />Medium</label><label className="flex items-center gap-1 text-xs"><Checkbox />Low</label></div>
-                <div className="flex gap-2"><label className="flex items-center gap-1 text-xs"><Checkbox />Intrusion</label><label className="flex items-center gap-1 text-xs"><Checkbox />Face</label><label className="flex items-center gap-1 text-xs"><Checkbox />LPR</label></div>
-                <Select><SelectTrigger className="w-32 h-8"><SelectValue placeholder="Time range" /></SelectTrigger><SelectContent><SelectItem value="24h">Last 24h</SelectItem><SelectItem value="7d">Last 7 days</SelectItem></SelectContent></Select>
-              </div>
-              <div className="rounded border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border bg-muted/30"><th className="text-left p-2">Time</th><th className="text-left p-2">Type</th><th className="text-left p-2">Camera</th><th className="text-left p-2">Severity</th></tr></thead>
-                  <tbody>
-                    <tr className="border-b border-border"><td className="p-2">10:32:01</td><td className="p-2">Intrusion</td><td className="p-2">Gate-01</td><td className="p-2">High</td></tr>
-                    <tr className="border-b border-border"><td className="p-2">10:28:44</td><td className="p-2">Face match</td><td className="p-2">Entrance</td><td className="p-2">Medium</td></tr>
-                    <tr className="border-b border-border"><td className="p-2">10:15:22</td><td className="p-2">LPR</td><td className="p-2">Parking-A</td><td className="p-2">Low</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <CardContent>
+            <CityStatusMap rows={mapRowsInScope} />
           </CardContent>
         </Card>
 
+        <AiAnalyticsPanel data={data} rangeLabel={`${scopeName} · ${label}`} />
+
+        <EventLog query={query} refreshKey={refreshKey} />
       </div>
     </ModulePageLayout>
   )

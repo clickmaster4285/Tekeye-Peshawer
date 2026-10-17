@@ -7,6 +7,7 @@ import {
   fetchCityControlBoard,
   type CityControlBoardCity,
 } from "@/lib/ops-central-api"
+import { ROUTES } from "@/routes/config"
 
 export type CityStatus = "Online" | "Offline" | "Degraded"
 export type AlertSeverity = "High" | "Critical" | "Medium" | "Info"
@@ -28,6 +29,16 @@ export type CityControlRow = {
   lastSyncRelative: string
   connectivity: Connectivity
   bars: { cameras: number; ai: number; seizures: number; detentions: number }
+  /** City on Locations & Sync: its cameras open straight from the city server */
+  synced?: boolean
+  /** Office pin from Locations & Sync (null = city centre on the map) */
+  latitude?: number | null
+  longitude?: number | null
+}
+
+/** Where "Cameras" goes: a synced city's own page (video direct from the city), else All Cities Cameras. */
+export function cityCamerasPath(row: CityControlRow): string {
+  return row.synced && !row.isHq ? `${ROUTES.CITY_CONTROL_GRID}/${row.id}/cameras` : ROUTES.ALL_CITIES_CAMERAS
 }
 
 export type CityControlKpi = {
@@ -380,6 +391,9 @@ function mapBoardCity(city: CityControlBoardCity): CityControlRow {
     lastSyncRelative: city.last_sync_relative || "No sync",
     connectivity,
     bars: city.bars || { cameras: 0, ai: 0, seizures: 0, detentions: 0 },
+    synced: city.ops_source === "synced",
+    latitude: city.latitude ?? null,
+    longitude: city.longitude ?? null,
   }
 }
 

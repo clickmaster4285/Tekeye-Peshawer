@@ -548,6 +548,108 @@ class CityControlGridAPIView(APIView):
         return Response(board)
 
 
+class AnalyticsDashboardAPIView(APIView):
+    """GET /ops/analytics/?location=ALL|CODE&from=YYYY-MM-DD&to=YYYY-MM-DD - Analytics Dashboard data."""
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request):
+        from django.core.cache import cache
+
+        from .analytics import build_dashboard
+
+        p = request.query_params
+        scope, raw_from, raw_to = p.get("location") or "ALL", p.get("from"), p.get("to")
+        key = f"ops-analytics:{scope}:{raw_from}:{raw_to}"
+        data = cache.get(key)
+        if data is None:
+            data = build_dashboard(scope=scope, raw_from=raw_from, raw_to=raw_to)
+            cache.set(key, data, 20)  # many viewers, one build every 20s
+        return Response(data)
+
+
+class AnalyticsEventLogAPIView(APIView):
+    """GET /ops/analytics/events/?location=&from=&to=&q=&severity=High,Low&type=Person&page= - searchable log."""
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request):
+        from .analytics import event_log
+
+        p = request.query_params
+
+        def listed(name: str) -> list[str]:
+            return [v.strip() for v in (p.get(name) or "").split(",") if v.strip()]
+
+        try:
+            page = int(p.get("page") or 1)
+        except ValueError:
+            page = 1
+        return Response(
+            event_log(
+                scope=p.get("location") or "ALL",
+                raw_from=p.get("from"),
+                raw_to=p.get("to"),
+                q=p.get("q") or "",
+                severities=listed("severity"),
+                types=listed("type"),
+                page=page,
+            )
+        )
+
+
+class CityCamerasAPIView(APIView):
+    """
+    HQ: GET /ops/city-cameras/<code>/ - a synced city's cameras and a short view pass.
+    The browser then loads video straight from the city server (city_sync CityCameraStreamView),
+    so watching a city's cameras puts no load on HQ.
+    """
+
+    permission_classes = [IsOpsViewer]
+
+    def get(self, request, code: str):
+        from city_sync.models import CityCamera, HqCityStatus, SyncSite
+        from city_sync.view_pass import PASS_TTL_SEC, issue_pass
+        from city_sync.views import city_health_state
+
+        site = SyncSite.objects.filter(location_code=code.upper()).first()
+        if site is None:
+            return Response({"detail": "Location not found."}, status=status.HTTP_404_NOT_FOUND)
+        issued = issue_pass(site.location_code, user=getattr(request.user, "username", "") or "")
+        if issued is None:
+            return Response(
+                {"detail": "This location has no active sync key. Create one on Locations & Sync."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        view_pass, expires_at = issued
+        st = HqCityStatus.objects.filter(location_code=site.location_code).first()
+        state = city_health_state(st, timezone.now())[0] if st else "UNKNOWN"
+        cameras = [
+            {
+                "id": c.origin_pk,
+                "name": c.name or c.code or f"Camera {c.origin_pk}",
+                "code": c.code,
+                "zone": c.zone,
+                "location": c.location,
+                "site_name": c.site_name,
+                "channel": c.channel,
+            }
+            for c in CityCamera.objects.filter(location_code=site.location_code).order_by("origin_pk")
+        ]
+        return Response(
+            {
+                "location_code": site.location_code,
+                "name": site.name,
+                "base_url": site.base_url.rstrip("/"),
+                "state": state,
+                "pass": view_pass,
+                "expires_at": expires_at,
+                "pass_ttl_sec": PASS_TTL_SEC,
+                "cameras": cameras,
+            }
+        )
+
+
 class AllCitiesStreamsAPIView(APIView):
     """Aggregate live cameras from every active connected Central Ops server."""
 
@@ -1002,80 +1104,84 @@ class RemoteMjpegProxyView(APIView):
                 {"detail": "stream_key or camera_id is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        return proxy_ml_stream(server, stream_key, kind)
 
-        ml_base = server.resolved_ml_base_url()
-        rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
-        candidates = _ml_stream_upstream_candidates(
-            ml_base=ml_base,
-            django_base=server.normalized_base_url(),
-            stream_key=stream_key,
-            kind=kind,
-            rtsp_url=rtsp_url,
-        )
-        is_jpeg = kind in ("jpeg", "snapshot", "jpeg_raw", "raw_jpeg")
 
-        def open_upstream():
-            last_err = ""
-            not_registered = False
-            for url in candidates:
-                try:
-                    resp = requests.get(
-                        url,
-                        stream=not is_jpeg,
-                        timeout=(8, 12) if is_jpeg else (10, 60),
-                        headers={"Accept": "image/jpeg,*/*" if is_jpeg else "*/*"},
-                    )
-                except requests.RequestException as exc:
-                    last_err = str(exc)
-                    continue
-                if resp.status_code == 200:
-                    return resp, "", False
-                # ML answers 409/404 when the camera is missing from its live registry
-                if resp.status_code in (404, 409):
-                    not_registered = True
-                last_err = f"{url} → HTTP {resp.status_code}"
-                resp.close()
-            return None, last_err, not_registered
+def proxy_ml_stream(server: RemoteServer, stream_key: str, kind: str = "live"):
+    """Stream MJPEG (or one JPEG for kind=jpeg) of one camera from a server's ML service."""
+    ml_base = server.resolved_ml_base_url()
+    rtsp_url = _resolve_stream_rtsp_url(server, stream_key)
+    candidates = _ml_stream_upstream_candidates(
+        ml_base=ml_base,
+        django_base=server.normalized_base_url(),
+        stream_key=stream_key,
+        kind=kind,
+        rtsp_url=rtsp_url,
+    )
+    is_jpeg = kind in ("jpeg", "snapshot", "jpeg_raw", "raw_jpeg")
 
-        upstream, last_err, not_registered = open_upstream()
-        if upstream is None and not_registered and _reregister_ml_camera(
-            server, ml_base, stream_key, rtsp_url
-        ):
-            upstream, last_err, _ = open_upstream()
-
-        if upstream is None:
-            return Response(
-                {"detail": f"Could not open remote stream: {last_err}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        if is_jpeg:
+    def open_upstream():
+        last_err = ""
+        not_registered = False
+        for url in candidates:
             try:
-                body = upstream.content
-            finally:
-                upstream.close()
-            response = HttpResponse(body, content_type="image/jpeg")
-            response["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response["Pragma"] = "no-cache"
-            return response
+                resp = requests.get(
+                    url,
+                    stream=not is_jpeg,
+                    timeout=(8, 12) if is_jpeg else (10, 60),
+                    headers={"Accept": "image/jpeg,*/*" if is_jpeg else "*/*"},
+                )
+            except requests.RequestException as exc:
+                last_err = str(exc)
+                continue
+            if resp.status_code == 200:
+                return resp, "", False
+            # ML answers 409/404 when the camera is missing from its live registry
+            if resp.status_code in (404, 409):
+                not_registered = True
+            last_err = f"{url} → HTTP {resp.status_code}"
+            resp.close()
+        return None, last_err, not_registered
 
-        content_type = upstream.headers.get(
-            "Content-Type", "multipart/x-mixed-replace; boundary=frame"
+    upstream, last_err, not_registered = open_upstream()
+    if upstream is None and not_registered and _reregister_ml_camera(
+        server, ml_base, stream_key, rtsp_url
+    ):
+        upstream, last_err, _ = open_upstream()
+
+    if upstream is None:
+        return Response(
+            {"detail": f"Could not open remote stream: {last_err}"},
+            status=status.HTTP_502_BAD_GATEWAY,
         )
 
-        def generate():
-            try:
-                for chunk in upstream.iter_content(chunk_size=16 * 1024):
-                    if chunk:
-                        yield chunk
-            finally:
-                upstream.close()
-
-        response = StreamingHttpResponse(generate(), content_type=content_type)
+    if is_jpeg:
+        try:
+            body = upstream.content
+        finally:
+            upstream.close()
+        response = HttpResponse(body, content_type="image/jpeg")
         response["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response["Pragma"] = "no-cache"
-        response["X-Accel-Buffering"] = "no"
         return response
+
+    content_type = upstream.headers.get(
+        "Content-Type", "multipart/x-mixed-replace; boundary=frame"
+    )
+
+    def generate():
+        try:
+            for chunk in upstream.iter_content(chunk_size=16 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    response = StreamingHttpResponse(generate(), content_type=content_type)
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response["Pragma"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 class RemoteWebRtcProxyView(APIView):

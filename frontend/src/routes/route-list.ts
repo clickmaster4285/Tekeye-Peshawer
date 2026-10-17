@@ -151,6 +151,7 @@ export const DASHBOARD_ROUTES: { index?: true; path?: string; page: string }[] =
   { path: toChildPath(ROUTES.ALL_CITIES_CAMERAS), page: "AllCitiesCameras" },
   { path: toChildPath(ROUTES.CITY_CONTROL_GRID), page: "CityControlGridPage" },
   { path: "city-control-grid/:cityId", page: "CityControlSummaryPage" },
+  { path: "city-control-grid/:cityId/cameras", page: "CityCamerasPage" },
   { path: toChildPath(ROUTES.ASSISTANT), page: "Assistant" },
   { path: toChildPath(ROUTES.PERSON_JOURNEY), page: "PersonJourney" },
   { path: "person-journey/:uuid", page: "PersonJourneyDetail" },

@@ -1,78 +1,43 @@
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { loadLeaflet } from "@/components/gps/officer-gps-map"
 import { type CityControlRow, type CityStatus } from "@/data/city-control-grid-data"
+import { ROUTES } from "@/routes/config"
 import { cn } from "@/lib/utils"
+import { mapPosition } from "./city-map-positions"
 
-const MAP_CSS = `
-.city-status-map {
-  --map-background: oklch(0.991 0.005 230);
-  --map-land: oklch(0.968 0.012 230);
-  --map-border: oklch(0.92 0.025 245);
-  --map-heading: oklch(0.29 0.07 260);
-  --map-city: oklch(0.37 0.045 210);
-  --map-online: oklch(0.69 0.145 158);
-  --map-online-text: oklch(0.65 0.12 158);
-  --map-degraded: oklch(0.77 0.17 65);
-  --map-degraded-text: oklch(0.77 0.13 65);
-  --map-offline: oklch(0.66 0.22 25);
-  --map-legend: oklch(0.58 0.065 260);
-  width: 100%;
-  aspect-ratio: 648 / 438;
-  margin: 0;
-  border: 2px solid var(--map-border);
-  border-radius: 7px;
-  overflow: hidden;
-  background: var(--map-background);
-  font-family: Inter, Arial, Helvetica, sans-serif;
+type Leaflet = Awaited<ReturnType<typeof loadLeaflet>>
+type LeafletMap = ReturnType<Leaflet["map"]>
+type LeafletMarker = ReturnType<Leaflet["marker"]>
+
+const STATUS_COLOR: Record<CityStatus, string> = {
+  Online: "#0ca30c",
+  Degraded: "#fab219",
+  Offline: "#d03b3b",
 }
-.city-status-map svg { display: block; width: 100%; height: 100%; }
-.city-status-map text { letter-spacing: 0; }
-.city-status-map .land { fill: var(--map-land); stroke: var(--map-border); stroke-width: 2; stroke-linejoin: round; }
-.city-status-map .boundary { fill: none; stroke: var(--map-border); stroke-width: 2; stroke-linejoin: round; }
-.city-status-map .heading { fill: var(--map-heading); font-size: 23px; font-weight: 700; }
-.city-status-map .city { fill: var(--map-city); font-size: 16px; font-weight: 600; }
-.city-status-map .major { fill: var(--map-heading); font-size: 17px; font-weight: 700; }
-.city-status-map .status { font-size: 16px; }
-.city-status-map .online { fill: var(--map-online); }
-.city-status-map .online-label { fill: var(--map-online-text); }
-.city-status-map .degraded { fill: var(--map-degraded); }
-.city-status-map .degraded-label { fill: var(--map-degraded-text); }
-.city-status-map .offline { fill: var(--map-offline); }
-.city-status-map .legend { fill: var(--map-legend); font-size: 16px; }
-.city-status-map .halo { opacity: .16; }
-`
-
-const OUTLINE =
-  "M 60,207 L 69,199 68,190 80,185 92,186 100,180 108,185 119,178 128,179 136,170 151,168 157,160 167,157 165,146 170,139 166,132 170,117 177,108 187,102 198,104 205,101 218,103 229,110 238,106 242,96 253,90 264,93 276,87 279,77 279,68 289,58 299,55 307,50 316,52 321,57 328,52 338,52 344,61 355,66 365,66 371,72 382,68 394,68 400,60 407,60 409,53 417,54 422,50 433,57 433,70 440,76 452,78 458,84 460,95 469,101 482,98 493,106 497,116 507,108 520,104 530,98 539,101 544,114 552,122 559,134 556,145 561,158 553,164 550,175 538,176 532,170 521,176 509,175 500,181 488,175 478,181 467,183 456,183 441,176 433,181 429,193 414,202 411,216 405,223 406,229 398,237 382,235 373,230 363,235 359,248 350,258 340,261 334,271 337,285 332,296 327,303 318,302 308,314 307,329 298,337 297,346 287,357 275,355 267,358 255,358 246,361 239,357 226,365 220,372 212,377 201,372 193,374 185,367 177,373 168,368 158,373 155,390 144,397 132,401 119,391 108,398 102,397 100,411 92,417 83,417 77,411 66,412 58,404 54,393 50,381 52,371 60,360 59,349 66,338 63,330 69,319 57,314 58,307 52,302 58,290 70,287 80,277 91,271 99,262 96,250 101,243 91,233 78,232 64,226 59,215 Z"
-
-const BOUNDARIES = [
-  "M 237,107 L 232,124 238,142 232,151 238,170 231,184 234,194 220,199 210,208 196,203 189,204 184,195 172,194 169,180 156,170",
-  "M 234,194 L 246,202 258,201 263,209 271,211 275,225 280,238 275,248 264,256 261,273 255,288 260,301 274,307 277,321 287,326 290,342 296,348",
-  "M 99,263 L 110,273 123,272 134,266 146,266 154,256 166,251 179,240 188,228 201,216 211,206",
-  "M 280,238 L 293,239 304,247 311,262 324,270 336,267",
-  "M 397,120 L 407,137 397,149 391,161 382,170 371,173",
-]
-
-type MapCity = {
-  id: string
-  name: string
-  x: number
-  y: number
-  tx: number
-  ty: number
-  anchor?: "start" | "end" | "middle"
-  major?: boolean
-}
-
-const MAP_CITIES: MapCity[] = [
-  { id: "peshawar", name: "Peshawar", x: 169, y: 177, tx: 149, ty: 159, anchor: "end", major: true },
-  { id: "mardan", name: "Mardan", x: 233, y: 136, tx: 253, ty: 128 },
-  { id: "nowshera", name: "Nowshera", x: 321, y: 171, tx: 341, ty: 162 },
-  { id: "kohat", name: "Kohat", x: 162, y: 239, tx: 183, ty: 235 },
-  { id: "di-khan", name: "DI Khan", x: 111, y: 306, tx: 131, ty: 304 },
-  { id: "swat", name: "Swat", x: 371, y: 89, tx: 390, ty: 84 },
-  { id: "abbottabad", name: "Abbottabad", x: 493, y: 154, tx: 512, ty: 146, major: true },
-]
 
 const LEGEND: CityStatus[] = ["Online", "Degraded", "Offline"]
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+/** Status dot + label card; the status is written out, never shown by colour alone. */
+function pinHtml(row: CityControlRow): string {
+  const color = STATUS_COLOR[row.status] ?? STATUS_COLOR.Offline
+  return `
+    <div style="display:flex;align-items:center;gap:6px;width:max-content;transform:translate(-9px,-9px);cursor:pointer;">
+      <span style="position:relative;display:block;width:18px;height:18px;">
+        <span style="position:absolute;inset:-5px;border-radius:50%;background:${color};opacity:.22;"></span>
+        <span style="position:absolute;inset:0;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(16,44,85,.4);"></span>
+      </span>
+      <span style="padding:3px 8px;border-radius:6px;background:rgba(255,255,255,.97);border:1px solid #D9E6F5;
+        box-shadow:0 1px 2px rgba(16,44,85,.12);font:600 11px Inter,Arial,sans-serif;color:#102C55;white-space:nowrap;line-height:1.35;">
+        ${escapeHtml(row.city)}${row.isHq ? " (HQ)" : ""}<br/>
+        <span style="font-weight:500;color:#52514e;">${escapeHtml(row.status)} · ${row.camerasOnline}/${row.camerasTotal} cams</span>
+      </span>
+    </div>`
+}
 
 type CityStatusMapProps = {
   className?: string
@@ -80,44 +45,79 @@ type CityStatusMapProps = {
   rows?: CityControlRow[]
 }
 
-function statusClass(status: CityStatus) {
-  return status.toLowerCase()
-}
-
+/** Every location at its real position (office pin from Locations & Sync, else the city centre). */
 export function CityStatusMap({ className, tall, rows = [] }: CityStatusMapProps) {
-  const byId = Object.fromEntries(rows.map((c) => [c.id, c]))
-  const byName = Object.fromEntries(rows.map((c) => [c.city.trim().toLowerCase(), c]))
+  const navigate = useNavigate()
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<{ L: Leaflet; map: LeafletMap } | null>(null)
+  const markersRef = useRef<LeafletMarker[]>([])
+  const fittedFor = useRef("")
+  const [ready, setReady] = useState(false)
+  const [failed, setFailed] = useState(false)
 
-  // Only plot cities that are actually present in live rows (Central Ops servers).
-  // Do NOT default missing sample cities to Online — that caused fake pins.
-  const cities = MAP_CITIES.flatMap((city) => {
-    const live = byId[city.id] ?? byName[city.name.trim().toLowerCase()]
-    if (!live) return []
-    return [{ ...city, name: live.city || city.name, status: live.status as CityStatus }]
-  })
+  const { placed, unplaced } = useMemo(() => {
+    const placed: { row: CityControlRow; pos: [number, number] }[] = []
+    const unplaced: CityControlRow[] = []
+    for (const row of rows) {
+      const pos = mapPosition(row.locationCode || row.id, row.latitude, row.longitude)
+      if (pos) placed.push({ row, pos })
+      else unplaced.push(row)
+    }
+    return { placed, unplaced }
+  }, [rows])
 
-  // Also plot connected servers that are not in the fixed MAP_CITIES layout
-  // (skip — they need coordinates; only known map slots are shown).
+  // Create the map once.
+  useEffect(() => {
+    let cancelled = false
+    loadLeaflet()
+      .then((L) => {
+        if (cancelled || !containerRef.current) return
+        const map = L.map(containerRef.current, { zoomControl: true, scrollWheelZoom: false, attributionControl: true })
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 18,
+          attribution: "&copy; OpenStreetMap contributors",
+        }).addTo(map)
+        map.setView([33.9, 71.9], 7)
+        mapRef.current = { L, map }
+        setReady(true)
+      })
+      .catch(() => setFailed(true))
+    return () => {
+      cancelled = true
+      mapRef.current?.map.remove()
+      mapRef.current = null
+      markersRef.current = []
+      fittedFor.current = ""
+    }
+  }, [])
 
-  const description =
-    cities.length === 0
-      ? "No connected cities to display. Register servers in Central Ops."
-      : [
-          cities
-            .filter((c) => c.status === "Online")
-            .map((c) => c.name)
-            .join(", ") + (cities.some((c) => c.status === "Online") ? " are online." : ""),
-          cities
-            .filter((c) => c.status === "Degraded")
-            .map((c) => c.name)
-            .join(", ") + (cities.some((c) => c.status === "Degraded") ? " is degraded." : ""),
-          cities
-            .filter((c) => c.status === "Offline")
-            .map((c) => c.name)
-            .join(", ") + (cities.some((c) => c.status === "Offline") ? " is offline." : ""),
-        ]
-          .filter((s) => s && !s.startsWith(" are") && !s.startsWith(" is"))
-          .join(" ")
+  // Redraw pins on every refresh; re-fit only when the set of locations changes.
+  useEffect(() => {
+    const current = mapRef.current
+    if (!ready || !current) return
+    const { L, map } = current
+    markersRef.current.forEach((m) => m.remove())
+    markersRef.current = placed.map(({ row, pos }) => {
+      const marker = L.marker(pos, {
+        icon: L.divIcon({ html: pinHtml(row), className: "", iconSize: [0, 0] }),
+        title: `${row.city}: ${row.status}`,
+        keyboard: true,
+      }).addTo(map)
+      marker.on("click", () => navigate(`${ROUTES.CITY_CONTROL_GRID}/${row.id}`))
+      return marker
+    })
+    const key = placed.map(({ row, pos }) => `${row.id}:${pos.join(",")}`).sort().join("|")
+    if (key && key !== fittedFor.current) {
+      fittedFor.current = key
+      if (placed.length === 1) {
+        map.setView(placed[0].pos, 12)
+      } else {
+        const group = L.featureGroup(markersRef.current)
+        map.fitBounds(group.getBounds().pad(0.25), { maxZoom: 12 })
+      }
+    }
+    map.invalidateSize()
+  }, [ready, placed, navigate])
 
   return (
     <div
@@ -126,69 +126,38 @@ export function CityStatusMap({ className, tall, rows = [] }: CityStatusMapProps
         className
       )}
     >
-      <div className="border-b border-[#D9E6F5] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#D9E6F5] px-4 py-3">
         <h2 className="text-[15px] font-semibold text-[#102C55]">City Status Map</h2>
+        <div className="flex items-center gap-3 text-[12px] text-[#52514e]">
+          {LEGEND.map((label) => (
+            <span key={label} className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: STATUS_COLOR[label] }} aria-hidden />
+              {label}
+            </span>
+          ))}
+        </div>
       </div>
 
-      <div className={cn("flex flex-1 items-center justify-center p-3", tall ? "min-h-[420px]" : "min-h-[280px]")}>
-        <figure className="city-status-map" aria-label="City Status Map">
-          <style>{MAP_CSS}</style>
-          <svg viewBox="0 0 648 438" role="img" aria-labelledby="map-title map-description">
-            <title id="map-title">City Status Map</title>
-            <desc id="map-description">{description}</desc>
-
-            <text x={25} y={37} className="heading">
-              City Status Map
-            </text>
-
-            <path d={OUTLINE} className="land" />
-            {BOUNDARIES.map((d, i) => (
-              <path key={`boundary-${i}`} d={d} className="boundary" />
-            ))}
-
-            {cities.length === 0 ? (
-              <text x={324} y={220} textAnchor="middle" className="legend">
-                No connected cities — add servers in Central Ops
-              </text>
-            ) : (
-              cities.map((city) => {
-                const state = statusClass(city.status)
-                return (
-                  <g key={city.id}>
-                    <circle cx={city.x} cy={city.y} r={12} className={`${state} halo`} />
-                    <circle cx={city.x} cy={city.y} r={8} className={state} />
-                    <text
-                      x={city.tx}
-                      y={city.ty}
-                      textAnchor={city.anchor || "start"}
-                      className={`${city.major ? "major" : "city"}${state === "degraded" ? " degraded-label" : ""}`}
-                    >
-                      {city.name}
-                    </text>
-                    <text
-                      x={city.tx + (city.name === "Swat" ? 6 : 0)}
-                      y={city.ty + 24}
-                      textAnchor={city.anchor || "start"}
-                      className={`status ${state === "offline" ? "offline" : `${state}-label`}`}
-                    >
-                      {city.status}
-                    </text>
-                  </g>
-                )
-              })
-            )}
-
-            {LEGEND.map((label, i) => (
-              <g key={label}>
-                <circle cx={510} cy={311 + i * 34} r={8} className={statusClass(label)} />
-                <text x={533} y={317 + i * 34} className="legend">
-                  {label}
-                </text>
-              </g>
-            ))}
-          </svg>
-        </figure>
+      <div className={cn("relative flex-1", tall ? "min-h-[420px]" : "min-h-[300px]")}>
+        <div ref={containerRef} className="absolute inset-0 z-0" aria-label="City Status Map" />
+        {failed && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 p-4 text-center text-[13px] text-[#607DA5]">
+            The map could not load (no internet access to the map tiles).
+          </div>
+        )}
+        {ready && rows.length === 0 && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-[400] mx-auto w-max rounded bg-white/95 px-3 py-1.5 text-[12px] text-[#607DA5] shadow">
+            No locations yet. Add cities on Locations &amp; Sync.
+          </div>
+        )}
       </div>
+
+      {unplaced.length > 0 && (
+        <p className="border-t border-[#D9E6F5] px-4 py-2 text-[12px] text-[#607DA5]">
+          Not on the map yet (set their Map location on Locations &amp; Sync):{" "}
+          {unplaced.map((r) => `${r.city} (${r.status})`).join(", ")}
+        </p>
+      )}
     </div>
   )
 }

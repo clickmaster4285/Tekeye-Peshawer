@@ -265,6 +265,8 @@ export const PAGE_LOADERS = {
     import("@/pages/operations/CityControlGridPage").then((m) => ({ default: m.default })),
   CityControlSummaryPage: () =>
     import("@/pages/operations/CityControlSummaryPage").then((m) => ({ default: m.default })),
+  CityCamerasPage: () =>
+    import("@/pages/operations/CityCamerasPage").then((m) => ({ default: m.default })),
 } as const satisfies Record<string, PageLoader>
 
 function toLazyPages<T extends Record<string, PageLoader>>(loaders: T) {

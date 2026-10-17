@@ -1,91 +1,48 @@
-"use client"
-
-import { useState } from "react"
+import { Link } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Switch } from "@/components/ui/switch"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Bell } from "lucide-react"
+import { DetectionThumb } from "@/components/city-control/detection-thumb"
+import { SeverityBadge } from "@/components/analytics/palette"
+import type { AnalyticsDetection } from "@/lib/analytics-api"
+import { ROUTES } from "@/routes/config"
 
-const SEVERITIES = ["Critical", "High", "Medium", "Low"]
+function timeOf(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+}
 
-export function DashboardAlertFeed() {
-  const [maxAlerts, setMaxAlerts] = useState(20)
-  const [playSound, setPlaySound] = useState(false)
-
+/** Weapon and AI alerts from the last 24 hours, newest first, with the detection picture. */
+export function DashboardAlertFeed({ alerts, loading }: { alerts: AnalyticsDetection[]; loading: boolean }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Bell className="h-4 w-4" />
-          Alert Feed
-        </CardTitle>
-        <div className="flex flex-wrap gap-4 pt-2">
-          <div>
-            <Label className="text-xs text-muted-foreground">Severity</Label>
-            <div className="flex gap-2 mt-1">
-              {SEVERITIES.map((s) => (
-                <label key={s} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox />
-                  {s}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Max alerts</Label>
-            <Input type="number" min={10} max={100} value={maxAlerts} onChange={(e) => setMaxAlerts(Number(e.target.value) || 20)} className="w-20 h-8 mt-1" />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Refresh</Label>
-            <Select defaultValue="10">
-              <SelectTrigger className="w-24 h-8 mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5">5s</SelectItem>
-                <SelectItem value="10">10s</SelectItem>
-                <SelectItem value="30">30s</SelectItem>
-                <SelectItem value="60">60s</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch id="alert-sound" checked={playSound} onCheckedChange={setPlaySound} />
-            <Label htmlFor="alert-sound" className="text-xs">Play sound</Label>
-          </div>
-        </div>
+    <Card className="flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-base">Alert feed (last 24h)</CardTitle>
+        <Link to={ROUTES.CITY_CONTROL_GRID} className="text-xs font-semibold text-primary hover:underline">
+          All cities
+        </Link>
       </CardHeader>
-      <CardContent>
-        <ul className="space-y-2 max-h-[220px] overflow-y-auto">
-          <li className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-            <div className="flex items-center gap-2">
-              <Badge variant="destructive">Critical</Badge>
-              <span className="text-muted-foreground">Fire</span>
-              <span>Warehouse-2</span>
-            </div>
-            <span className="text-muted-foreground text-xs">8 min ago</span>
-          </li>
-          <li className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">High</Badge>
-              <span className="text-muted-foreground">Intrusion</span>
-              <span>Gate-01</span>
-            </div>
-            <span className="text-muted-foreground text-xs">2 min ago</span>
-          </li>
-          <li className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Medium</Badge>
-              <span className="text-muted-foreground">Motion</span>
-              <span>Parking-A</span>
-            </div>
-            <span className="text-muted-foreground text-xs">5 min ago</span>
-          </li>
-        </ul>
+      <CardContent className="flex-1">
+        {alerts.length === 0 ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            {loading ? "Loading alerts…" : "No alerts in the last 24 hours."}
+          </p>
+        ) : (
+          <ul className="max-h-[420px] divide-y divide-border overflow-y-auto">
+            {alerts.map((a) => (
+              <li key={a.id} className="flex items-center gap-3 py-2">
+                <DetectionThumb src={a.image} alt={a.object} size={44} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {a.object || a.type} · {a.camera}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {a.location} · {timeOf(a.at)}
+                  </p>
+                </div>
+                <SeverityBadge severity={a.severity} />
+              </li>
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   )

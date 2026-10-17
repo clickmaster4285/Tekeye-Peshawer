@@ -33,6 +33,35 @@ LOCATION_LABELS = dict(User.LOCATION_CHOICES)
 TEST_TIMEOUT_SECONDS = 5
 
 
+_MAP_PATTERNS = (
+    # Exact place pin in a Google Maps link: ...!3d34.0080!4d71.5789
+    re.compile(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)"),
+    # ?q=34.008,71.5789  /  ?ll=  /  query=
+    re.compile(r"[?&](?:q|ll|query|destination)=(-?\d+(?:\.\d+)?)\s*(?:,|%2C)\s*(-?\d+(?:\.\d+)?)", re.I),
+    # Map view centre: /@34.008,71.5789,17z
+    re.compile(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)"),
+    # Plain "34.008, 71.5789"
+    re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$"),
+)
+
+
+def parse_map_location(raw: str) -> tuple[float, float] | None:
+    """(lat, lng) from "34.008, 71.5789" or a Google Maps link; None when empty. ValueError if unreadable."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for pattern in _MAP_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            lat, lng = float(m.group(1)), float(m.group(2))
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return round(lat, 6), round(lng, 6)
+    raise ValueError(
+        "Could not read a map position. Paste the Google Maps link of the office, or 'latitude, longitude' "
+        "(e.g. 34.008, 71.5789)."
+    )
+
+
 def normalize_base_url(raw: str) -> str:
     """Accept '192.168.120.13', '192.168.120.13:8000' or a full URL; return 'http://host:port'."""
     value = (raw or "").strip().rstrip("/")
@@ -112,6 +141,8 @@ def serialize_site(site: SyncSite, *, status_row, record_count: int, media_count
         "last_test_at": site.last_test_at,
         "last_test_ok": site.last_test_ok,
         "last_test_detail": site.last_test_detail,
+        "latitude": site.latitude,
+        "longitude": site.longitude,
         **_downlink_counts(site.location_code),
         "created_at": site.created_at,
     }
@@ -212,9 +243,19 @@ class SyncSitesView(_SitesAdminView):
             return Response(
                 {"detail": f"{code} is already added."}, status=status.HTTP_400_BAD_REQUEST
             )
+        try:
+            pin = parse_map_location(str(body.get("map_location") or ""))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            site = SyncSite.objects.create(location_code=code, name=name[:128], base_url=base_url)
+            site = SyncSite.objects.create(
+                location_code=code,
+                name=name[:128],
+                base_url=base_url,
+                latitude=pin[0] if pin else None,
+                longitude=pin[1] if pin else None,
+            )
             api_key = issue_key(site)
         audit("site_added", actor=request.user.username, loc=code, detail={"base_url": base_url})
         return Response(
@@ -246,6 +287,13 @@ class SyncSiteDetailView(_SitesAdminView):
             site.base_url = changed["base_url"] = base_url
         if "is_paused" in body:
             site.is_paused = changed["is_paused"] = bool(body.get("is_paused"))
+        if "map_location" in body:
+            try:
+                pin = parse_map_location(str(body.get("map_location") or ""))
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            site.latitude, site.longitude = pin if pin else (None, None)
+            changed["map_location"] = list(pin) if pin else None
         site.save()
         audit("site_updated", actor=request.user.username, loc=site.location_code, detail={**changed})
         return Response({"site": _serialize_one(site)})

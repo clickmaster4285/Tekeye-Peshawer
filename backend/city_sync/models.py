@@ -426,6 +426,9 @@ class SyncSite(models.Model):
     last_test_detail = models.CharField(max_length=500, blank=True, default="")
     # Hash of the camera list last received from this city (see CityCamera).
     camera_directory_hash = models.CharField(max_length=64, blank=True, default="")
+    # Office pin on the City Status Map (pasted from Google Maps); empty = city center.
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

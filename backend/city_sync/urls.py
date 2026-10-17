@@ -9,6 +9,7 @@ from city_sync.sites_api import (
 )
 
 from city_sync.views import (
+    CityCameraStreamView,
     CityStatusListView,
     DownlinkAckView,
     DownlinkMediaView,
@@ -52,6 +53,8 @@ urlpatterns = [
     path("sync/v1/downlink", DownlinkPullView.as_view(), name="sync-downlink"),
     path("sync/v1/downlink/ack", DownlinkAckView.as_view(), name="sync-downlink-ack"),
     path("sync/v1/downlink/media", DownlinkMediaView.as_view(), name="sync-downlink-media"),
+    # City: camera video for a browser at HQ, with an HQ view pass (no HQ load)
+    path("sync/v1/view/<int:camera_id>/", CityCameraStreamView.as_view(), name="sync-camera-view"),
     # HQ Locations admin page (Stage 2)
     path("sync/v1/sites/", SyncSitesView.as_view(), name="sync-sites"),
     path("sync/v1/sites/<str:code>/", SyncSiteDetailView.as_view(), name="sync-site-detail"),

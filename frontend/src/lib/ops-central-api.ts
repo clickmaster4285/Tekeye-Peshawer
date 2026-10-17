@@ -1,4 +1,4 @@
-import { API_BASE_URL, getAuthHeaders, getStoredToken } from "@/lib/api"
+import { API_BASE_URL, getAuthHeaders, withUrlToken } from "@/lib/api"
 
 const API = `${API_BASE_URL}/api`
 
@@ -208,12 +208,8 @@ export function normalizeMlUrl(raw: string): string {
 
 /** Append hub auth token for MJPEG <img> proxy URLs. */
 export function withOpsStreamToken(url: string): string {
-  const token = getStoredToken()
-  if (!token || !url) return url
-  if (!url.includes("/api/ops/")) return url
-  const sep = url.includes("?") ? "&" : "?"
-  if (url.includes("token=")) return url
-  return `${url}${sep}token=${encodeURIComponent(token)}`
+  if (!url || !url.includes("/api/ops/")) return url
+  return withUrlToken(url)
 }
 
 /**
@@ -529,6 +525,9 @@ export type CityControlBoardCity = {
   seizure_delta?: string
   detention_delta?: string
   detail?: CityControlBoardDetail
+  /** Office pin set on Locations & Sync */
+  latitude?: number | null
+  longitude?: number | null
 }
 
 export type CityControlBoardDetection = {
@@ -593,6 +592,45 @@ export async function fetchCityControlBoard(opts?: {
     city_count: data.city_count ?? (data.cities || []).length,
     generated_at: data.generated_at,
   }
+}
+
+export type CityCamerasView = {
+  location_code: string
+  name: string
+  /** City server address the browser loads video from (never through HQ) */
+  base_url: string
+  state: string
+  /** Short-lived HQ-signed pass the city accepts instead of a login */
+  pass: string
+  expires_at: number
+  pass_ttl_sec: number
+  cameras: {
+    id: number
+    name: string
+    code: string
+    zone: string
+    location: string
+    site_name: string
+    channel: number | null
+  }[]
+}
+
+/** A synced city's cameras plus a view pass; video then comes straight from the city server. */
+export async function fetchCityCameras(code: string, opts?: { signal?: AbortSignal }): Promise<CityCamerasView> {
+  const res = await fetch(`${API}/ops/city-cameras/${encodeURIComponent(code)}/`, {
+    headers: getAuthHeaders(),
+    signal: opts?.signal,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error((data as { detail?: string })?.detail || `Request failed (HTTP ${res.status})`)
+  return data as CityCamerasView
+}
+
+/** Video URL on the city server itself (kind=jpeg: one frame, live: MJPEG stream). */
+export function cityCameraStreamUrl(view: Pick<CityCamerasView, "base_url" | "pass">, cameraId: number, kind: "jpeg" | "live", bust?: number): string {
+  const params = new URLSearchParams({ pass: view.pass, kind })
+  if (bust !== undefined) params.set("t", String(bust))
+  return `${view.base_url}/api/sync/v1/view/${cameraId}/?${params}`
 }
 
 export async function quickConnect(payload: {
