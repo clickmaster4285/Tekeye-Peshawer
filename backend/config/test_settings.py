@@ -12,3 +12,8 @@ class DisableMigrations:
 
 
 MIGRATION_MODULES = DisableMigrations()
+
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "login_guard": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "login-guard-tests"},
+}

@@ -82,10 +82,11 @@ class LoginView(APIView):
     authentication_classes = []  # No token/session needed for login
 
     def post(self, request):
-        from users.login_guard import clear_failures, is_locked_out, record_failure
+        from users.login_guard import clear_failures, client_ip, is_locked_out, record_failure
 
         username = str(request.data.get("username") or "")
-        if is_locked_out(username):
+        ip = client_ip(request)
+        if is_locked_out(username, ip):
             return Response(
                 {"detail": "Too many wrong passwords. Try again later.", "code": "LOGIN_LOCKED"},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -95,10 +96,10 @@ class LoginView(APIView):
             try:
                 serializer.is_valid(raise_exception=True)
             except ValidationError:
-                record_failure(username)
+                record_failure(username, ip)
                 raise
             user = serializer.validated_data["user"]
-            clear_failures(username)
+            clear_failures(username, ip)
             mobile_session = None
             device_uuid = (request.data.get("device_uuid") or "").strip()
             if device_uuid:

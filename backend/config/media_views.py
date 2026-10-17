@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import posixpath
+
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.http import Http404, HttpResponse, HttpResponseRedirect
@@ -73,16 +75,50 @@ def _unauthorized(request) -> HttpResponse:
     return HttpResponse("Authentication required", status=401, content_type="text/plain")
 
 
+# Staff documents (CNIC, contracts, CVs) and face-training images: only for the
+# people who may use the HR / recognition APIs that hand out these URLs.
+HR_ONLY_MEDIA_PREFIXES = ("staff_docs/", "dataset/", "face_samples/")
+
+
+def media_path_allowed(user, path: str) -> bool:
+    from users.permissions import has_hr_api_access
+
+    # Same normalising as django.views.static.serve, so "a/../staff_docs/x" is caught.
+    clean = posixpath.normpath(path.replace("\\", "/")).lstrip("/").lower()
+    if clean.startswith("hq_sync_media/"):
+        # HQ keeps city files by date; the city's own path tells what the file is.
+        from city_sync.models import HqMediaObject
+
+        name = posixpath.basename(clean)
+        source = (
+            HqMediaObject.objects.filter(storage_path__iendswith=name)
+            .values_list("source_path", flat=True)
+            .first()
+        )
+        source = "/" + (source or "").replace("\\", "/").lower()
+        if any("/" + prefix in source for prefix in HR_ONLY_MEDIA_PREFIXES):
+            return has_hr_api_access(user)
+        return True
+    if clean.startswith(HR_ONLY_MEDIA_PREFIXES):
+        return has_hr_api_access(user)
+    return True
+
+
 def protected_media(request, path: str):
     if request.method not in ("GET", "HEAD"):
         return HttpResponse(status=405)
-    if media_user_from_request(request) is None:
+    user = media_user_from_request(request)
+    if user is None:
         return _unauthorized(request)
     if not path or path.endswith("/"):
         raise Http404("Not found")
+    if not media_path_allowed(user, path):
+        return HttpResponse("Not allowed", status=403, content_type="text/plain")
     try:
         response = serve(request, path, document_root=settings.MEDIA_ROOT)
     except SuspiciousFileOperation:
         raise Http404("Not found")
     response["Cache-Control"] = "private, no-store"
+    # PDFs are previewed in an <iframe> on our own pages; other sites still cannot frame them.
+    response["X-Frame-Options"] = "SAMEORIGIN"
     return response

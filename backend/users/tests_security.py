@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
+from django.core.cache import caches
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
@@ -69,18 +69,41 @@ class DetentionsNeedLoginTests(TestCase):
 @override_settings(LOGIN_MAX_FAILURES=3, LOGIN_LOCKOUT_MINUTES=15)
 class LoginLockoutTests(TestCase):
     def setUp(self):
-        cache.clear()
+        caches["login_guard"].clear()
         _make_user("guard", "Right-pass-987")
         self.client = APIClient()
 
-    def _login(self, password):
-        return self.client.post("/api/auth/login/", {"username": "guard", "password": password}, format="json")
+    def _login(self, password, ip="10.1.1.1"):
+        # Requests come from nginx on 127.0.0.1, which passes the browser IP in X-Real-IP.
+        return self.client.post(
+            "/api/auth/login/", {"username": "guard", "password": password}, format="json", HTTP_X_REAL_IP=ip
+        )
 
     def test_locks_after_repeated_wrong_passwords(self):
         for _ in range(3):
             self.assertEqual(self._login("wrong").status_code, 400)
         # Even the right password is refused while locked.
         self.assertEqual(self._login("Right-pass-987").status_code, 429)
+
+    def test_attacker_cannot_lock_owner_out_from_another_ip(self):
+        for _ in range(3):
+            self._login("wrong", ip="10.9.9.9")
+        self.assertEqual(self._login("wrong", ip="10.9.9.9").status_code, 429)
+        self.assertEqual(self._login("Right-pass-987", ip="10.1.1.1").status_code, 200)
+
+    @override_settings(LOGIN_MAX_FAILURES=3, LOGIN_MAX_FAILURES_TOTAL=5)
+    def test_guessing_from_many_ips_hits_the_total_ceiling(self):
+        for n in range(5):
+            self._login("wrong", ip=f"10.0.0.{n + 1}")
+        self.assertEqual(self._login("Right-pass-987", ip="10.1.1.1").status_code, 429)
+
+    def test_proxy_header_ignored_when_not_from_local_nginx(self):
+        from django.test import RequestFactory
+
+        from users.login_guard import client_ip
+
+        req = RequestFactory().get("/", REMOTE_ADDR="203.0.113.7", HTTP_X_REAL_IP="10.1.1.1")
+        self.assertEqual(client_ip(req), "203.0.113.7")
 
     def test_success_clears_the_count(self):
         self._login("wrong")
@@ -93,7 +116,7 @@ class LoginLockoutTests(TestCase):
 
 class LogoutCancelsTokenTests(TestCase):
     def setUp(self):
-        cache.clear()
+        caches["login_guard"].clear()
         _make_user("leaver", "Right-pass-987")
         self.client = APIClient()
 
@@ -186,3 +209,33 @@ class NvrPasswordNotLeakedTests(TestCase):
         nvr = Nvr.objects.get()
         resp = self.client.patch(f"/api/nvrs/{nvr.pk}/", {"ip_address": "6.6.6.6"}, format="json")
         self.assertEqual(resp.status_code, 403)
+
+
+class HrOnlyMediaTests(TestCase):
+    def setUp(self):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        for rel in ("staff_docs/cnic.pdf", "detections/2026/a.jpg"):
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_bytes(b"x")
+        self.client = APIClient()
+
+    def _get(self, user, path):
+        token = issue_token(user)
+        with self.settings(MEDIA_ROOT=str(self.root)):
+            return self.client.get(f"/media/{path}", HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_guard_cannot_open_staff_documents(self):
+        guard = _user_with_role("guard", "GUARD")
+        self.assertEqual(self._get(guard, "staff_docs/cnic.pdf").status_code, 403)
+        self.assertEqual(self._get(guard, "detections/../staff_docs/cnic.pdf").status_code, 403)
+        self.assertEqual(self._get(guard, "detections/2026/a.jpg").status_code, 200)
+
+    def test_hr_can_open_staff_documents_in_a_frame(self):
+        res = self._get(_user_with_role("hr_officer", "HR"), "staff_docs/cnic.pdf")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["X-Frame-Options"], "SAMEORIGIN")

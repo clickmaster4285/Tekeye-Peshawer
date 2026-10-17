@@ -45,6 +45,21 @@ ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS") or []
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 
+# HTTPS. nginx terminates TLS and must send "X-Forwarded-Proto $scheme" so Django
+# knows the request was secure (needed for Secure cookies on the login cookie).
+if os.getenv("TRUST_X_FORWARDED_PROTO", "False").lower() in ("true", "1", "yes"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# HTTPS_ONLY=True once every user opens the site over https: redirects http,
+# sends cookies only over https and tells browsers to stay on https (HSTS).
+HTTPS_ONLY = os.getenv("HTTPS_ONLY", "False").lower() in ("true", "1", "yes")
+SECURE_SSL_REDIRECT = HTTPS_ONLY
+SESSION_COOKIE_SECURE = HTTPS_ONLY
+CSRF_COOKIE_SECURE = HTTPS_ONLY
+# Start small (e.g. 3600) and raise to 31536000 when https is known to work: browsers remember it.
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0")) if HTTPS_ONLY else 0
+SECURE_REFERRER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
+
 # -----------------------------
 # Installed Apps
 # -----------------------------
@@ -193,6 +208,17 @@ TOKEN_NO_EXPIRY_USERS = _env_list("TOKEN_NO_EXPIRY_USERS")
 # Lock a username out of login for LOGIN_LOCKOUT_MINUTES after this many wrong passwords.
 LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
 LOGIN_LOCKOUT_MINUTES = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
+# Ceiling for one username across all IPs (guessing spread over many machines).
+LOGIN_MAX_FAILURES_TOTAL = int(os.getenv("LOGIN_MAX_FAILURES_TOTAL", "50"))
+
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    # Wrong-password counts must be shared by every gunicorn worker, so they live on disk.
+    "login_guard": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv("LOGIN_GUARD_CACHE_DIR", str(BASE_DIR / ".cache" / "login_guard")),
+    },
+}
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
