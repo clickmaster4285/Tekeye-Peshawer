@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from logs.device_views import LogoutView
 from .views import (
+    WebLogoutView,
     StaffViewSet,
     AttendanceViewSet,
     LoginView,
@@ -23,6 +24,7 @@ urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/login", LoginView.as_view(), name="login-no-slash"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
+    path("auth/web-logout/", WebLogoutView.as_view(), name="web-logout"),
     path("auth/logout", LogoutView.as_view(), name="logout-no-slash"),
     path("", include(router.urls)),
 ]

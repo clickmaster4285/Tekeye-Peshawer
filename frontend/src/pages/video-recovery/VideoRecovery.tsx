@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
@@ -34,7 +34,6 @@ import {
   type PipelineStage,
   type VideoRecoveryJob,
 } from "@/lib/video-recovery-api"
-import { syncAuthCookieFromSession } from "@/lib/auth"
 import { resolveMediaUrl } from "@/lib/cameras-api"
 import { cn } from "@/lib/utils"
 
@@ -595,10 +594,6 @@ export default function VideoRecovery() {
   const processing = job?.status === "processing" || job?.status === "uploaded"
   const originalMediaUrl = job?.original_url ? resolveMediaUrl(job.original_url) : null
   const recoveredMediaUrl = job?.recovered_url ? resolveMediaUrl(job.recovered_url) : null
-
-  useEffect(() => {
-    syncAuthCookieFromSession()
-  }, [])
 
   return (
     <ModulePageLayout

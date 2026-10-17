@@ -237,7 +237,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
             scope = get_location_scope(actor)
             if scope:
                 attrs["location"] = scope
-            if role and not location_admin_may_assign_role(actor, role):
+            new_role = attrs.get("role")
+            role_changing = new_role and (self.instance is None or new_role != self.instance.role)
+            if role_changing and not location_admin_may_assign_role(actor, new_role):
                 raise serializers.ValidationError(
                     {"role": "You cannot assign this role."}
                 )

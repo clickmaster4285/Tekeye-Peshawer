@@ -106,7 +106,9 @@ MIDDLEWARE = [
 # -----------------------------
 # CORS Settings
 # -----------------------------
-CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True") == "True"
+# The frontend reaches /api on its own origin (nginx / Vite proxy), so other
+# websites must not call the API with a user's credentials. Opt in per origin.
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "False") == "True"
 if not CORS_ALLOW_ALL_ORIGINS:
     CORS_ALLOWED_ORIGINS = _env_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = True
@@ -171,7 +173,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "runserver":
 # -----------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "users.token_auth.ExpiringTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -183,6 +185,14 @@ REST_FRAMEWORK = {
 # Auth
 # -----------------------------
 AUTH_USER_MODEL = "users.User"
+
+# API tokens expire this many hours after login (0 = never). See users/token_auth.py.
+TOKEN_TTL_HOURS = float(os.getenv("TOKEN_TTL_HOURS", "24"))
+# Service accounts whose tokens are saved on other servers (Ops Central) never expire.
+TOKEN_NO_EXPIRY_USERS = _env_list("TOKEN_NO_EXPIRY_USERS")
+# Lock a username out of login for LOGIN_LOCKOUT_MINUTES after this many wrong passwords.
+LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
+LOGIN_LOCKOUT_MINUTES = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

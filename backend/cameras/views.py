@@ -9,7 +9,6 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status, viewsets
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -40,7 +39,15 @@ from .serializers import (
     purpose_options,
 )
 from .stream_utils import capture_jpeg_frame, ffmpeg_available, generate_mjpeg_frames
-from users.permissions import IsGlobalAdmin, apply_source_location_filter, is_global_admin
+from config.media_views import MEDIA_AUTH_COOKIE
+from users.token_auth import user_for_token_key
+from users.permissions import (
+    IsGlobalAdmin,
+    ReadOnlyUnlessCameraAdmin,
+    apply_source_location_filter,
+    is_global_admin,
+    is_it_superadmin,
+)
 
 
 def _token_key_from_request(request) -> str | None:
@@ -50,16 +57,27 @@ def _token_key_from_request(request) -> str | None:
     auth = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
     if auth.lower().startswith("token "):
         return auth[6:].strip()
-    return None
+    # <img> on the same origin sends the login cookie instead of a ?token= in the URL.
+    return (request.COOKIES.get(MEDIA_AUTH_COOKIE) or "").strip() or None
+
+
+def _request_user(request):
+    if getattr(request.user, "is_authenticated", False) and request.user.is_authenticated:
+        return request.user
+    return user_for_token_key(_token_key_from_request(request))
 
 
 def _request_has_valid_auth(request) -> bool:
-    if getattr(request.user, "is_authenticated", False) and request.user.is_authenticated:
-        return True
-    key = _token_key_from_request(request)
-    if not key:
+    return _request_user(request) is not None
+
+
+def _may_see_rtsp_credentials(user) -> bool:
+    """RTSP URLs carry NVR passwords: only top admins and HQ service accounts get them."""
+    if user is None:
         return False
-    return Token.objects.filter(key=key).exists()
+    if is_global_admin(user) or is_it_superadmin(user):
+        return True
+    return user.get_username() in getattr(settings, "TOKEN_NO_EXPIRY_USERS", ())
 
 
 def _capture_stream_url(camera: Camera) -> str | None:
@@ -69,7 +87,7 @@ def _capture_stream_url(camera: Camera) -> str | None:
 class SiteViewSet(viewsets.ModelViewSet):
     queryset = Site.objects.all()
     serializer_class = SiteSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [ReadOnlyUnlessCameraAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["is_active"]
     search_fields = ["code", "name"]
@@ -79,7 +97,7 @@ class SiteViewSet(viewsets.ModelViewSet):
 class NvrViewSet(viewsets.ModelViewSet):
     queryset = Nvr.objects.select_related("site").all()
     serializer_class = NvrSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [ReadOnlyUnlessCameraAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["site", "brand", "is_active"]
     search_fields = ["name", "ip_address", "site__code", "site__name"]
@@ -131,7 +149,7 @@ class NvrViewSet(viewsets.ModelViewSet):
 class CameraViewSet(viewsets.ModelViewSet):
     queryset = Camera.objects.select_related("nvr", "nvr__site", "ml_server").all()
     serializer_class = CameraSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [ReadOnlyUnlessCameraAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["nvr", "nvr__site", "location", "purpose", "status", "is_active", "ml_server"]
     search_fields = ["name", "code", "zone", "nvr__name", "nvr__site__code"]
@@ -901,8 +919,10 @@ class CameraStreamListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        if not _request_has_valid_auth(request):
+        user = _request_user(request)
+        if user is None:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        show_rtsp = _may_see_rtsp_credentials(user)
 
         cameras = []
         # Dashboard / live walls: allocated cameras only (idle until assigned in Distribution)
@@ -937,7 +957,7 @@ class CameraStreamListView(APIView):
                     "ml_server_id": cam.ml_server_id,
                     "ml_live_stream_url": ml_assigned_mjpeg_public_url(cam, kind="live"),
                     "raw_stream_url": ml_assigned_mjpeg_public_url(cam, kind="raw"),
-                    "rtsp_url": cam.effective_stream_url(),
+                    "rtsp_url": cam.effective_stream_url() if show_rtsp else "",
                     "status": cam.status,
                     "is_active": cam.is_active,
                 }

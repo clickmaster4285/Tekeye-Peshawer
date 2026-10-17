@@ -33,6 +33,8 @@ from .permissions import (
     can_view_all_staff,
     get_location_scope,
     is_global_admin,
+    location_admin_may_assign_role,
+    may_manage_account,
     GLOBAL_ADMIN_ROLE,
     LOCATION_ADMIN_ROLE,
     IsGlobalAdmin,
@@ -57,7 +59,21 @@ from .serializers import (
 )
 from logs.middleware import create_activity_log
 from decimal import Decimal
-from config.media_views import attach_media_auth_cookie
+from config.media_views import attach_media_auth_cookie, clear_media_auth_cookie
+from users.token_auth import issue_token
+
+
+class WebLogoutView(APIView):
+    """POST /api/auth/web-logout/ — cancel the login token on the server and drop the auth cookie."""
+
+    def post(self, request):
+        if isinstance(request.auth, Token):
+            request.auth.delete()
+        try:
+            create_activity_log(request.user, request, "LOGOUT")
+        except Exception:
+            logger.exception("Failed to write logout activity log")
+        return clear_media_auth_cookie(Response({"ok": True}))
 
 
 class LoginView(APIView):
@@ -66,10 +82,23 @@ class LoginView(APIView):
     authentication_classes = []  # No token/session needed for login
 
     def post(self, request):
+        from users.login_guard import clear_failures, is_locked_out, record_failure
+
+        username = str(request.data.get("username") or "")
+        if is_locked_out(username):
+            return Response(
+                {"detail": "Too many wrong passwords. Try again later.", "code": "LOGIN_LOCKED"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
         try:
             serializer = LoginSerializer(data=request.data, context={"request": request})
-            serializer.is_valid(raise_exception=True)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except ValidationError:
+                record_failure(username)
+                raise
             user = serializer.validated_data["user"]
+            clear_failures(username)
             mobile_session = None
             device_uuid = (request.data.get("device_uuid") or "").strip()
             if device_uuid:
@@ -89,7 +118,7 @@ class LoginView(APIView):
                     raise
                 except Exception:
                     logger.exception("Mobile session registration failed during login")
-            token, _ = Token.objects.get_or_create(user=user)
+            token = issue_token(user)
             try:
                 create_activity_log(user, request, "POST /api/auth/login (success)")
             except Exception:
@@ -143,6 +172,8 @@ class UserViewSet(viewsets.ModelViewSet):
         )
 
     def perform_update(self, serializer):
+        if not may_manage_account(self.request.user, serializer.instance):
+            raise PermissionDenied("Only the Super Admin can change administrator accounts.")
         user = serializer.save()
         create_activity_log(
             self.request.user,
@@ -480,6 +511,11 @@ class StaffViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Select a valid system role."},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not location_admin_may_assign_role(request.user, role):
+            return Response(
+                {"error": "Only the Super Admin can give this role."},
+                status=status.HTTP_403_FORBIDDEN,
             )
         if role != "ADMIN" and not location:
             return Response(

@@ -46,6 +46,25 @@ export function getStoredToken(): string | null {
   return window.sessionStorage.getItem(AUTH_TOKEN_KEY)
 }
 
+/**
+ * <img>/<video> URLs cannot send the Authorization header. On our own origin the
+ * login cookie authenticates them, so the token is only put in the URL (where it
+ * can leak into logs and history) when the URL points at another origin.
+ */
+export function withUrlToken(url: string): string {
+  if (!url || /[?&]token=/.test(url)) return url
+  if (typeof window !== "undefined") {
+    try {
+      if (new URL(url, window.location.origin).origin === window.location.origin) return url
+    } catch {
+      return url
+    }
+  }
+  const token = getStoredToken()
+  if (!token) return url
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+}
+
 export function getAuthHeaders(): Record<string, string> {
   const token = getStoredToken()
   const headers: Record<string, string> = {

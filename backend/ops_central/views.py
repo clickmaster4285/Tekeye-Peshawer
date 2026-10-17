@@ -9,7 +9,8 @@ import requests
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
-from rest_framework.authtoken.models import Token
+from config.media_views import MEDIA_AUTH_COOKIE
+from users.token_auth import user_for_token_key
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -56,7 +57,9 @@ def _token_key_from_request(request) -> str:
     auth = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
     if auth.lower().startswith("token "):
         return auth[6:].strip()
-    return (request.query_params.get("token") or request.GET.get("token") or "").strip()
+    key = (request.query_params.get("token") or request.GET.get("token") or "").strip()
+    # <img> on the same origin sends the login cookie instead of a ?token= in the URL.
+    return key or (request.COOKIES.get(MEDIA_AUTH_COOKIE) or "").strip()
 
 
 def _ops_user_from_request(request):
@@ -67,12 +70,9 @@ def _ops_user_from_request(request):
     key = _token_key_from_request(request)
     if not key:
         return None
-    try:
-        token = Token.objects.select_related("user").get(key=key)
-    except Token.DoesNotExist:
-        return None
-    if is_ops_viewer(token.user) and token.user.is_active:
-        return token.user
+    user = user_for_token_key(key)
+    if user is not None and is_ops_viewer(user):
+        return user
     return None
 
 
@@ -204,6 +204,14 @@ def _ml_mjpeg_upstream_candidates(
     )
 
 
+def _browser_camera_row(cam: dict) -> dict:
+    """Copy of a camera row without the RTSP URL (it carries the NVR username and password)."""
+    row = dict(cam)
+    row.pop("rtsp_url", None)
+    row.pop("stream_url", None)
+    return row
+
+
 def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]:
     """Rewrite stream URLs to hub proxy endpoints."""
     from django.conf import settings
@@ -215,7 +223,7 @@ def _attach_proxy_urls(server_id: int | None, cameras: list[dict]) -> list[dict]
     )
     out = []
     for cam in cameras:
-        row = dict(cam)
+        row = _browser_camera_row(cam)
         key = (row.get("ml_stream_key") or "").strip()
         cam_id = row.get("id")
         if server_id is not None:
@@ -859,7 +867,7 @@ class QuickConnectView(APIView):
 
                 cameras = []
                 for cam in cams.get("cameras") or []:
-                    row = dict(cam)
+                    row = _browser_camera_row(cam)
                     key = (row.get("ml_stream_key") or "").strip()
                     if key:
                         row["ml_live_stream_url"] = (
@@ -943,7 +951,7 @@ class QuickConnectView(APIView):
         else:
             cameras = []
             for cam in cams.get("cameras") or []:
-                row = dict(cam)
+                row = _browser_camera_row(cam)
                 key = (row.get("ml_stream_key") or "").strip()
                 if key:
                     row["ml_live_stream_url"] = (

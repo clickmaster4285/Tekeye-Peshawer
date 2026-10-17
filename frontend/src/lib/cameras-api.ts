@@ -1,4 +1,4 @@
-import { API_BASE_URL, getAuthHeaders, getAuthHeadersFormData, getStoredToken } from "@/lib/api";
+import { API_BASE_URL, getAuthHeaders, getAuthHeadersFormData, getStoredToken, withUrlToken } from "@/lib/api";
 
 export type CameraPurpose =
   | "general_objects"
@@ -272,13 +272,8 @@ export function getMlLiveMultipartUrl(
     url += (url.includes("?") ? "&" : "?") + params.toString()
   }
 
-  // <img> cannot send Authorization — ops MJPEG requires ?token=
-  if (url.includes("/api/ops/")) {
-    const token = getStoredToken()
-    if (token && !/[?&]token=/.test(url)) {
-      url += `${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
-    }
-  }
+  // <img> cannot send Authorization: same origin uses the login cookie, else ?token=
+  if (url.includes("/api/ops/")) url = withUrlToken(url)
   return url
 }
 
@@ -308,12 +303,7 @@ export function getRawMjpegUrl(
     if (route) url = `/ml/live/cam/${encodeURIComponent(route)}/mjpeg/raw`;
   }
   if (!url) return null;
-  if (url.includes("/api/ops/")) {
-    const token = getStoredToken();
-    if (token && !/[?&]token=/.test(url)) {
-      url += `${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
-    }
-  }
+  if (url.includes("/api/ops/")) url = withUrlToken(url);
   return url;
 }
 
@@ -321,9 +311,7 @@ export function getRawMjpegUrl(
 export function getCameraMjpegUrl(streamPath: string): string {
   const base = API_BASE_URL.replace(/\/$/, "");
   const path = streamPath.startsWith("/") ? streamPath : `/${streamPath}`;
-  const token = getStoredToken();
-  const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-  return `${base}${path}${qs}`;
+  return withUrlToken(`${base}${path}`);
 }
 
 function parseList<T>(data: unknown): T[] {

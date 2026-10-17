@@ -1,5 +1,5 @@
 import type { AuthUser } from "@/lib/auth";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, getAuthHeaders } from "@/lib/api";
 
 export type LoginResponse = {
   token: string;
@@ -44,4 +44,17 @@ export async function login(username: string, password: string): Promise<LoginRe
     token: data.token,
     user: data.user,
   };
+}
+
+/** Cancel the login token on the server (so a copied token stops working) and drop the auth cookie. */
+export async function logoutOnServer(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/auth/web-logout/`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+    });
+  } catch {
+    /* offline: the token still expires on its own */
+  }
 }

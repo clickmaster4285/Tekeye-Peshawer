@@ -6,18 +6,20 @@ from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.views.static import serve
-from rest_framework.authtoken.models import Token
 from urllib.parse import quote
 
 MEDIA_AUTH_COOKIE = "tekeye_auth_token"
 
 
 def attach_media_auth_cookie(response: HttpResponse, token_key: str, request=None) -> HttpResponse:
-    """Allow same-origin <img> / new-tab requests to send the API token."""
+    """Allow same-origin <img> / new-tab requests to send the API token.
+
+    HttpOnly: page scripts cannot read it, so an injected script cannot steal it.
+    """
     response.set_cookie(
         MEDIA_AUTH_COOKIE,
         token_key,
-        httponly=False,
+        httponly=True,
         samesite="Lax",
         path="/",
         secure=bool(request and request.is_secure()),
@@ -41,14 +43,9 @@ def media_user_from_request(request):
     key = _token_key_from_request(request)
     if not key:
         return None
-    try:
-        token = Token.objects.select_related("user").get(key=key)
-    except Token.DoesNotExist:
-        return None
-    user = token.user
-    if not user.is_active or getattr(user, "is_deleted", False):
-        return None
-    return user
+    from users.token_auth import user_for_token_key
+
+    return user_for_token_key(key)
 
 
 def _safe_media_next(path: str) -> str | None:

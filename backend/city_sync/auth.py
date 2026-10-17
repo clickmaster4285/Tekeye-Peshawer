@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -46,7 +48,7 @@ class SyncApiKeyAuthentication(BaseAuthentication):
             return (SyncPrincipal(location_code=cred.location_code), raw)
 
         for loc, secret in env_map.items():
-            if secret and secret == raw:
+            if secret and hmac.compare_digest(secret.encode(), raw.encode()):
                 return (SyncPrincipal(location_code=loc), raw)
 
         raise AuthenticationFailed("Invalid sync API key")

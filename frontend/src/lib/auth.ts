@@ -2,30 +2,18 @@
 export const AUTH_SESSION_KEY = "pakistan_customs_auth";
 const AUTH_TOKEN_KEY = "pakistan_customs_token";
 const AUTH_USER_KEY = "pakistan_customs_user";
-/** Same-origin cookie so /media/ images and new-tab links work without an Authorization header. */
+/**
+ * Same-origin cookie so /media/ images and new-tab links work without an
+ * Authorization header. The server sets it HttpOnly at login (scripts cannot
+ * read it) and clears it at logout; the page never writes it.
+ */
 export const AUTH_TOKEN_COOKIE = "tekeye_auth_token";
 
-function authCookieSuffix(): string {
+/** Remove a cookie written by older builds that set it from JavaScript. */
+function clearLegacyAuthCookie() {
+  if (typeof document === "undefined") return;
   const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
-  return `; Path=/; SameSite=Lax${secure}`;
-}
-
-function setAuthTokenCookie(token: string) {
-  if (typeof document === "undefined") return;
-  document.cookie = `${AUTH_TOKEN_COOKIE}=${encodeURIComponent(token)}${authCookieSuffix()}`;
-}
-
-function clearAuthTokenCookie() {
-  if (typeof document === "undefined") return;
-  document.cookie = `${AUTH_TOKEN_COOKIE}=; Max-Age=0${authCookieSuffix()}`;
-}
-
-/** Keep the media cookie in sync with sessionStorage (covers already-logged-in tabs). */
-export function syncAuthCookieFromSession() {
-  if (typeof window === "undefined") return;
-  const token = window.sessionStorage.getItem(AUTH_TOKEN_KEY);
-  if (token) setAuthTokenCookie(token);
-  else clearAuthTokenCookie();
+  document.cookie = `${AUTH_TOKEN_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
 }
 
 export type AuthUser = {
@@ -62,7 +50,6 @@ export function setAuthenticatedWithToken(token: string, user: AuthUser) {
   window.sessionStorage.setItem(AUTH_TOKEN_KEY, token);
   window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
   window.sessionStorage.setItem(AUTH_SESSION_KEY, "true");
-  setAuthTokenCookie(token);
   window.dispatchEvent(new CustomEvent("tekeye-auth-changed"));
 }
 
@@ -101,7 +88,7 @@ export function clearAuth() {
     window.sessionStorage.removeItem(AUTH_SESSION_KEY);
     window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
     window.sessionStorage.removeItem(AUTH_USER_KEY);
-    clearAuthTokenCookie();
+    clearLegacyAuthCookie();
     window.dispatchEvent(new CustomEvent("tekeye-auth-changed"));
   }
 }
@@ -122,9 +109,6 @@ export function handleSessionExpired() {
   }
 }
 
-if (typeof window !== "undefined") {
-  syncAuthCookieFromSession();
-}
 
 /**
  * Normalize a `next` query value to a same-origin path+search.

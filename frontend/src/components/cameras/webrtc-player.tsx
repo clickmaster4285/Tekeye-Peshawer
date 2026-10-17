@@ -1,7 +1,7 @@
 "use client"
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
-import { getStoredToken } from "@/lib/api"
+import { withUrlToken } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export type WebRtcPlayerHandle = {
@@ -21,13 +21,8 @@ type WebRtcPlayerProps = {
   connectTimeoutMs?: number
 }
 
-function withToken(url: string): string {
-  const token = getStoredToken()
-  if (!token || !url) return url
-  if (url.includes("token=")) return url
-  const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}token=${encodeURIComponent(token)}`
-}
+/** Token in the URL only for another origin; our own origin sends the login cookie. */
+const withToken = withUrlToken
 
 /**
  * Low-latency viewing path: browser ↔ Django ↔ go2rtc (RTSP).

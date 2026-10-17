@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Switch } from "@/components/ui/switch"
 import { clearAuth, getStoredUser, isAuthenticated, AUTH_USER_UPDATED_EVENT } from "@/lib/auth"
+import { logoutOnServer } from "@/lib/auth-api"
 import { stopOfficerGpsTracking } from "@/lib/officer-gps-session"
 import { queryClient } from "@/lib/query-client"
 import { clearLegacyVmsLocalStorage } from "@/lib/vms-list-api"
@@ -419,6 +420,7 @@ export const Header = memo(function Header({ onMenuClick }: HeaderProps) {
 
   const handleLogout = async () => {
     await stopOfficerGpsTracking({ endDuty: true })
+    await logoutOnServer()
     clearAuth()
     queryClient.clear()
     clearLegacyVmsLocalStorage()

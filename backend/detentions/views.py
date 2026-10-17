@@ -207,7 +207,7 @@ class DetentionMemoListAPIView(APIView):
 
     """GET /api/detention-memos/list/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
 
@@ -222,7 +222,7 @@ class DetentionMemoCreateAPIView(APIView):
 
     """POST /api/detention-memos/create/ (JSON or multipart/form-data with `payload` + files)."""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
 
@@ -277,7 +277,7 @@ class DetentionMemoReadAPIView(APIView):
 
     """GET /api/detention-memos/<uuid:pk>/read/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
 
@@ -290,7 +290,7 @@ class DetentionMemoUpdateAPIView(APIView):
 
     """PUT /api/detention-memos/<uuid:pk>/update/ — full replacement + optional extra files appended."""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def put(self, request, pk):
 
@@ -325,7 +325,7 @@ class DetentionMemoDeleteAPIView(APIView):
 
     """DELETE /api/detention-memos/<uuid:pk>/delete/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def delete(self, request, pk):
 
@@ -340,7 +340,7 @@ class DepositAccountEntryListAPIView(APIView):
 
     """GET /api/deposit-accounts/list/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
 
@@ -354,7 +354,7 @@ class DepositAccountEntryCreateAPIView(APIView):
 
     """POST /api/deposit-accounts/create/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
 
@@ -373,7 +373,7 @@ class DepositAccountEntryReadAPIView(APIView):
 
     """GET /api/deposit-accounts/<uuid:pk>/read/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
 
@@ -392,7 +392,7 @@ class DepositAccountEntryUpdateAPIView(APIView):
 
     """PATCH /api/deposit-accounts/<uuid:pk>/update/ — partial update (camelCase)."""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, pk):
 
@@ -416,7 +416,7 @@ class DepositAccountEntryDeleteAPIView(APIView):
 
     """DELETE /api/deposit-accounts/<uuid:pk>/delete/"""
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def delete(self, request, pk):
 

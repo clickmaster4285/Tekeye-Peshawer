@@ -179,11 +179,19 @@ def resolve_location_for_write(user, requested_location: str = "") -> str:
 
 
 def location_admin_may_assign_role(actor, role: str) -> bool:
+    """Only the Super Admin may hand out admin roles; HR and location admins may not."""
     if is_global_admin(actor):
         return True
-    if is_location_admin(actor):
-        return role not in PRIVILEGED_ROLES
-    return True
+    return role not in PRIVILEGED_ROLES
+
+
+def may_manage_account(actor, target) -> bool:
+    """Admin accounts can be changed only by the Super Admin (or by the admin themselves)."""
+    if is_global_admin(actor):
+        return True
+    if getattr(target, "role", None) not in PRIVILEGED_ROLES:
+        return True
+    return getattr(target, "pk", None) is not None and target.pk == getattr(actor, "pk", None)
 
 
 HR_MODULE_KEY = "Human Resource"
@@ -260,3 +268,18 @@ class IsAdminUser(permissions.BasePermission):
 
     def has_permission(self, request, view):
         return is_admin_user(request.user)
+
+
+CAMERA_ADMIN_ROLES = frozenset({GLOBAL_ADMIN_ROLE, IT_SUPERADMIN_ROLE, LOCATION_ADMIN_ROLE, "IT_ADMIN"})
+
+
+class ReadOnlyUnlessCameraAdmin(permissions.BasePermission):
+    """Any logged-in user may view sites/NVRs/cameras; only admin roles may change them."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return getattr(user, "role", None) in CAMERA_ADMIN_ROLES

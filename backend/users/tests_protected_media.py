@@ -36,7 +36,7 @@ class ProtectedMediaTests(TestCase):
                 HTTP_AUTHORIZATION=f"Token {self.token.key}",
             )
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.content, b"\xff\xd8\xff\xd9")
+        self.assertEqual(b"".join(res.streaming_content), b"\xff\xd8\xff\xd9")
 
     def test_cookie_can_read(self):
         self.client.cookies[MEDIA_AUTH_COOKIE] = self.token.key
