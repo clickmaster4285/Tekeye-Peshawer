@@ -797,7 +797,11 @@ def capture_detection_clip_sync(camera_id: int, event_id: int) -> None:
         return
 
     annotated = _draw_detection_on_frame(frame, event, camera=camera)
-    ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    ok, encoded = cv2.imencode(
+        ".jpg",
+        annotated,
+        [int(cv2.IMWRITE_JPEG_QUALITY), _detection_jpeg_quality(), int(cv2.IMWRITE_JPEG_OPTIMIZE), 1],
+    )
     if not ok or encoded is None:
         logger.warning("JPEG encode failed for detection event %s", event_id)
         _update_clip_status(event_id, ClipStatus.FAILED)
@@ -944,6 +948,10 @@ def _attendance_jpeg_quality() -> int:
 
 def _attendance_video_crf() -> int:
     return max(15, min(28, int(getattr(settings, "ATTENDANCE_VIDEO_CRF", 18))))
+
+
+def _detection_jpeg_quality() -> int:
+    return max(50, min(100, int(getattr(settings, "DETECTION_SNAPSHOT_JPEG_QUALITY", 75))))
 
 
 def _journey_snapshot_width() -> int:

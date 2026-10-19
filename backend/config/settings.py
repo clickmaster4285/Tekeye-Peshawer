@@ -391,6 +391,8 @@ FFMPEG_THREADS = os.getenv("FFMPEG_THREADS", "1")
 # JPEG snapshot saved with each new detection event (DETECTION_CLIP_SECONDS is unused; kept for .env compat)
 DETECTION_CLIP_ENABLED = os.getenv("DETECTION_CLIP_ENABLED", "true").strip().lower() in ("true", "1", "yes")
 DETECTION_CLIP_SECONDS = int(os.getenv("DETECTION_CLIP_SECONDS", "7"))
+# JPEG quality for new detection snapshots (75 ≈ 30% smaller than 88 with no visible loss)
+DETECTION_SNAPSHOT_JPEG_QUALITY = int(os.getenv("DETECTION_SNAPSHOT_JPEG_QUALITY", "75"))
 # Min seconds before the same label/class on one camera is saved again (0 = save every poll)
 DETECTION_DEDUP_SECONDS = int(os.getenv("DETECTION_DEDUP_SECONDS", "5"))
 # Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
