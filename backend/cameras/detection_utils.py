@@ -68,8 +68,6 @@ _ALLOWED_COCO_CLASS_NAMES = frozenset(
         "knife",
         # Medium priority
         "bicycle",
-        "bench",
-        "chair",
         "dining table",
         "bottle",
     }

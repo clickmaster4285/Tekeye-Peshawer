@@ -77,13 +77,11 @@ ALLOWED_COCO_CLASS_IDS: frozenset[int] = frozenset(
         3,   # motorcycle
         5,   # bus
         7,   # truck
-        13,  # bench (medium)
         24,  # backpack
         26,  # handbag
         28,  # suitcase
         39,  # bottle (medium)
         43,  # knife — keep COCO knife (not dropped)
-        56,  # chair (medium)
         60,  # dining table (medium)
         63,  # laptop
         67,  # cell phone
@@ -105,8 +103,6 @@ ALLOWED_COCO_CLASS_NAMES = frozenset(
         "knife",
         # Medium priority
         "bicycle",
-        "bench",
-        "chair",
         "dining table",
         "bottle",
     }
@@ -142,8 +138,6 @@ HIGH_PRIORITY_CLASS_NAMES = frozenset(
 MEDIUM_PRIORITY_CLASS_NAMES = frozenset(
     {
         "bicycle",
-        "bench",
-        "chair",
         "dining table",
         "bottle",
     }
