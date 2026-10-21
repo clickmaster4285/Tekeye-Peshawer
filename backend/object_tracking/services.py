@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Any
 
 import numpy as np
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -33,9 +34,28 @@ PERSON_REID_MATCH_THRESHOLD = 0.95
 VEHICLE_REID_MATCH_THRESHOLD = 0.93
 REID_EMA_MIN_SCORE = 0.96
 TRACK_REUSE_WINDOW = timedelta(minutes=30)
-# If a track/visit is not refreshed within this window, mark exited.
-VISIT_EXIT_GRACE = timedelta(seconds=20)
 _CODE_ALLOC_ATTEMPTS = 12
+# Classes the detector flips between for one physical object (stationary matching only).
+_STATIONARY_CLASS_GROUPS = {"truck": "car", "bus": "car", "vehicle": "car", "face": "person"}
+
+
+def _setting_number(name: str, default: float) -> float:
+    try:
+        return float(getattr(settings, name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _exit_missed_polls() -> int:
+    return max(1, int(_setting_number("OBJECT_EXIT_MISSED_POLLS", 3)))
+
+
+def _exit_min_gone() -> timedelta:
+    return timedelta(seconds=max(0.0, _setting_number("OBJECT_EXIT_MIN_SECONDS", 60)))
+
+
+def _stale_visit_window() -> timedelta:
+    return timedelta(minutes=max(1.0, _setting_number("OBJECT_STALE_VISIT_MINUTES", 10)))
 
 
 def object_type_for_class(class_name: str) -> str:
@@ -95,6 +115,86 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if na <= 0 or nb <= 0:
         return 0.0
     return float(np.dot(va / na, vb / nb))
+
+
+def _iou(a: list, b: list) -> float:
+    if len(a or []) < 4 or len(b or []) < 4:
+        return 0.0
+    try:
+        ax1, ay1, ax2, ay2 = (float(v) for v in a[:4])
+        bx1, by1, bx2, by2 = (float(v) for v in b[:4])
+    except (TypeError, ValueError):
+        return 0.0
+    iw = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    ih = max(0.0, min(ay2, by2) - max(ay1, by1))
+    inter = iw * ih
+    union = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1) + max(0.0, bx2 - bx1) * max(0.0, by2 - by1) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _class_group(class_name: str) -> str:
+    name = _normalize_class(class_name)
+    return _STATIONARY_CLASS_GROUPS.get(name, name)
+
+
+def _find_stationary_visit(
+    camera: Camera,
+    *,
+    class_name: str,
+    bbox: list,
+    embedding: list,
+    face_key: str,
+    now,
+    only_object: GlobalObject | None = None,
+    exclude_visit_ids: set[int] | None = None,
+) -> ObjectVisit | None:
+    """
+    Recent visit on this camera whose box sits where this detection is.
+
+    Catches a stationary object the tracker re-identified under a new local ID
+    (flicker, occlusion) so it is not counted — and photographed — as new.
+    """
+    if len(bbox or []) < 4:
+        return None
+    window = timedelta(minutes=max(1.0, _setting_number("OBJECT_STATIONARY_WINDOW_MIN", 10)))
+    min_iou = _setting_number("OBJECT_STATIONARY_IOU", 0.6)
+    min_reid = _setting_number("OBJECT_STATIONARY_MIN_REID", 0.75)
+    group = _class_group(class_name)
+
+    qs = ObjectVisit.objects.filter(camera=camera, last_seen_at__gte=now - window)
+    if only_object is not None:
+        qs = qs.filter(global_object=only_object)
+    best: ObjectVisit | None = None
+    best_iou = min_iou
+    for visit in qs.select_related("global_object").order_by("-last_seen_at")[:100]:
+        if exclude_visit_ids and visit.pk in exclude_visit_ids:
+            continue
+        obj = visit.global_object
+        if _class_group(obj.class_name or "") != group:
+            continue
+        stored_face = str((obj.metadata or {}).get("face_key") or "").strip()
+        if face_key and stored_face and stored_face != face_key:
+            continue
+        overlap = _iou(bbox, visit.bbox or [])
+        if overlap < best_iou:
+            continue
+        # Same spot but clearly different appearance → another object took the place.
+        if embedding and obj.reid_embedding and _cosine(embedding, obj.reid_embedding) < min_reid:
+            continue
+        best, best_iou = visit, overlap
+    return best
+
+
+def _visit_confirmed(visit: ObjectVisit, det: dict[str, Any]) -> bool:
+    """Seen in enough polls, or ML has tracked it long enough — not a one-frame flicker."""
+    seen = int((visit.metadata or {}).get("seen_polls") or 0)
+    if seen >= max(1, int(_setting_number("OBJECT_ENTER_CONFIRM_POLLS", 2))):
+        return True
+    try:
+        ml_age = float(det.get("last_seen")) - float(det.get("first_seen"))
+    except (TypeError, ValueError):
+        return False
+    return ml_age >= _setting_number("OBJECT_ENTER_CONFIRM_SECONDS", 1.0)
 
 
 def _code_prefix(object_type: str) -> str:
@@ -297,7 +397,7 @@ def _open_visit(
         last_seen_at=now,
         bbox=bbox or [],
         confidence=confidence,
-        metadata={"source": "object_tracking"},
+        metadata={"source": "object_tracking", "seen_polls": 1, "missed_polls": 0},
     )
     obj.entry_at = now
     obj.exit_at = None
@@ -307,16 +407,51 @@ def _open_visit(
     return visit
 
 
+def _reopen_visit(visit: ObjectVisit) -> ObjectVisit:
+    """Object is back in the same spot shortly after its visit closed — continue that visit."""
+    visit.status = VisitStatus.ACTIVE
+    visit.exit_at = None
+    visit.save(update_fields=["status", "exit_at", "updated_at"])
+    return visit
+
+
+def _end_visit(visit: ObjectVisit, *, exited_at) -> None:
+    """Close a visit whose object really left; drop it if it was never confirmed."""
+    obj = visit.global_object
+    for track in ObjectCameraTrack.objects.filter(
+        global_object=obj,
+        camera_id=visit.camera_id,
+        status=TrackStatus.ACTIVE,
+    ):
+        _finish_track(track, ended_at=exited_at)
+
+    if visit.detection_event_id is not None:
+        _close_visit(visit, exited_at=exited_at)
+        return
+
+    # Never confirmed (one-frame flicker / false box): leave no ghost visit or object behind.
+    visit.delete()
+    if obj.first_detection_event_id is None and not ObjectVisit.objects.filter(global_object=obj).exists():
+        obj.delete()
+    else:
+        obj.exit_at = exited_at
+        obj.save(update_fields=["exit_at", "updated_at"])
+
+
 @transaction.atomic
 def upsert_global_object(
     camera: Camera,
     det: dict[str, Any],
+    *,
+    claimed_visit_ids: set[int] | None = None,
 ) -> tuple[GlobalObject | None, ObjectVisit | None, bool]:
     """
     Create/update GlobalObject + visit + camera track.
 
     Returns (global_object, visit, should_create_detection_event).
-    should_create_detection_event is True when a NEW visit starts (first seen or return).
+    should_create_detection_event is True once per visit, when the visit is first
+    confirmed (seen in enough polls) — never again while the object stays.
+    claimed_visit_ids: visits already matched by other boxes in this poll.
     """
     if is_excluded_detection(det):
         return None, None, False
@@ -347,7 +482,7 @@ def upsert_global_object(
     ml_gid = str(det.get("global_object_id") or "").strip()
     face_key = str(det.get("face_identity_key") or "").strip()
     obj: GlobalObject | None = None
-    new_visit = False
+    stationary: ObjectVisit | None = None
     reid_score = 0.0
 
     # 1) Active local track bind (only if type still matches this detection)
@@ -400,7 +535,21 @@ def upsert_global_object(
                 obj = candidate
                 reid_score = 1.0
 
-    # 4) Strict ReID gallery match (leave / return) — same type only
+    # 4) Stationary memory: something of this class sat in this exact spot on this camera
+    if obj is None:
+        stationary = _find_stationary_visit(
+            camera,
+            class_name=class_name,
+            bbox=bbox,
+            embedding=embedding,
+            face_key=face_key,
+            now=now,
+            exclude_visit_ids=claimed_visit_ids,
+        )
+        if stationary is not None:
+            obj = stationary.global_object
+
+    # 5) Strict ReID gallery match (leave / return) — same type only
     if obj is None:
         obj, reid_score = _match_by_reid(object_type, class_name, embedding)
         if obj is not None and face_key:
@@ -436,7 +585,6 @@ def upsert_global_object(
             confidence=confidence,
             now=now,
         )
-        new_visit = True
     else:
         # Keep type + class stable; only refresh label when class still matches
         if _same_identity_class(obj.class_name or "", class_name):
@@ -472,6 +620,22 @@ def upsert_global_object(
 
         visit = _active_visit(obj)
         if visit is None:
+            # Back in the same spot shortly after its visit closed (occluded, missed polls)
+            # → same visit, no new snapshot.
+            recent = stationary
+            if recent is None or recent.global_object_id != obj.pk:
+                recent = _find_stationary_visit(
+                    camera,
+                    class_name=class_name,
+                    bbox=bbox,
+                    embedding=embedding,
+                    face_key=face_key,
+                    now=now,
+                    only_object=obj,
+                )
+            if recent is not None and recent.detection_event_id is not None:
+                visit = _reopen_visit(recent)
+        if visit is None:
             # Object returned after exit (or first visit after legacy rows) → new visit
             visit = _open_visit(
                 obj,
@@ -481,8 +645,11 @@ def upsert_global_object(
                 confidence=confidence,
                 now=now,
             )
-            new_visit = True
         else:
+            meta = dict(visit.metadata or {})
+            meta["seen_polls"] = int(meta.get("seen_polls") or 0) + 1
+            meta["missed_polls"] = 0
+            visit.metadata = meta
             visit.last_seen_at = now
             visit.bbox = bbox or visit.bbox
             if confidence is not None:
@@ -498,6 +665,7 @@ def upsert_global_object(
                     "confidence",
                     "local_track_id",
                     "camera",
+                    "metadata",
                     "updated_at",
                 ]
             )
@@ -524,6 +692,7 @@ def upsert_global_object(
                 status=TrackStatus.ACTIVE,
                 started_at=now,
                 last_bbox=bbox,
+                metadata={"missed_polls": 0},
             )
             obj.track_history = _append_history(
                 obj.track_history or [],
@@ -538,10 +707,13 @@ def upsert_global_object(
             if track.global_object_id != obj.pk:
                 track.global_object = obj
             track.last_bbox = bbox
-            track.save(update_fields=["global_object", "last_bbox"])
+            track.metadata = {**(track.metadata or {}), "missed_polls": 0}
+            track.save(update_fields=["global_object", "last_bbox", "metadata"])
 
-    # Capture once per visit (first frame of visit / return)
-    should_capture = bool(new_visit and visit is not None and visit.detection_event_id is None)
+    # Capture once per visit, as soon as the visit is confirmed real
+    should_capture = bool(
+        visit is not None and visit.detection_event_id is None and _visit_confirmed(visit, det)
+    )
     return obj, visit, should_capture
 
 
@@ -572,70 +744,62 @@ def mark_detection_captured(
 
 
 @transaction.atomic
-def finalize_missing_tracks(camera: Camera, active_track_ids: set[int]) -> int:
+def record_camera_poll(
+    camera: Camera,
+    *,
+    seen_visit_ids: set[int],
+    active_track_ids: set[int],
+) -> int:
     """
-    Mark tracks/visits exited when their local track_id left the frame.
-    Uses last_seen grace so empty/untracked frames do not thrash visits.
+    One detection poll of this camera finished: count misses, close what really left.
+
+    A visit ends only after it is missing in OBJECT_EXIT_MISSED_POLLS polls of its own
+    camera AND has not been seen for OBJECT_EXIT_MIN_SECONDS — so a slow poll cycle
+    (many cameras round-robin) never closes a visit for an object that did not move.
+    Returns the number of visits closed.
     """
     now = timezone.now()
+    missed_limit = _exit_missed_polls()
+    gone_cutoff = now - _exit_min_gone()
     closed = 0
-    stale_cutoff = now - VISIT_EXIT_GRACE
 
-    # Only drop tracks that were seen before and are missing from this frame,
-    # and only after grace based on GlobalObject.last_seen_at.
-    if active_track_ids:
-        active_tracks = ObjectCameraTrack.objects.filter(
-            camera=camera,
-            status=TrackStatus.ACTIVE,
-        ).select_related("global_object")
+    active_visits = (
+        ObjectVisit.objects.filter(camera=camera, status=VisitStatus.ACTIVE)
+        .exclude(pk__in=seen_visit_ids)
+        .select_related("global_object")
+    )
+    for visit in active_visits:
+        meta = dict(visit.metadata or {})
+        meta["missed_polls"] = int(meta.get("missed_polls") or 0) + 1
+        if meta["missed_polls"] >= missed_limit and visit.last_seen_at <= gone_cutoff:
+            _end_visit(visit, exited_at=visit.last_seen_at)
+            closed += 1
+        else:
+            visit.metadata = meta
+            visit.save(update_fields=["metadata", "updated_at"])
 
-        for track in active_tracks:
-            if track.local_track_id in active_track_ids:
-                continue
-            obj = track.global_object
-            if obj.last_seen_at and obj.last_seen_at > stale_cutoff:
-                continue
-            _finish_track(track, ended_at=now)
-            visit = _active_visit(obj)
-            if visit is not None and (not visit.last_seen_at or visit.last_seen_at <= stale_cutoff):
-                _close_visit(visit, exited_at=visit.last_seen_at or now)
-                closed += 1
-            elif obj.exit_at is None and (not obj.last_seen_at or obj.last_seen_at <= stale_cutoff):
-                obj.exit_at = now
-                obj.save(update_fields=["exit_at", "updated_at"])
-                closed += 1
-
-    # Stale active visits on this camera (no refresh within grace)
-    stale_visits = ObjectVisit.objects.filter(
-        camera=camera,
-        status=VisitStatus.ACTIVE,
-        last_seen_at__lt=stale_cutoff,
-    ).select_related("global_object")
-    for visit in stale_visits:
-        if active_track_ids and visit.local_track_id and visit.local_track_id in active_track_ids:
-            continue
-        _close_visit(visit, exited_at=visit.last_seen_at or now)
-        if visit.local_track_id:
-            track = (
-                ObjectCameraTrack.objects.filter(
-                    camera=camera,
-                    local_track_id=visit.local_track_id,
-                    status=TrackStatus.ACTIVE,
-                )
-                .order_by("-started_at")
-                .first()
-            )
-            if track is not None:
-                _finish_track(track, ended_at=visit.exit_at or now)
-        closed += 1
+    # Local ByteTrack sessions that stopped appearing (ID switch or object left)
+    stale_tracks = ObjectCameraTrack.objects.filter(camera=camera, status=TrackStatus.ACTIVE).exclude(
+        local_track_id__in=active_track_ids
+    )
+    for track in stale_tracks:
+        meta = dict(track.metadata or {})
+        meta["missed_polls"] = int(meta.get("missed_polls") or 0) + 1
+        track.metadata = meta
+        if meta["missed_polls"] >= missed_limit:
+            track.status = TrackStatus.FINISHED
+            track.ended_at = now
+            track.save(update_fields=["status", "ended_at", "metadata"])
+        else:
+            track.save(update_fields=["metadata"])
 
     return closed
 
 
 def finalize_stale_visits_globally(*, limit: int = 200) -> int:
-    """Safety net: close any active visits not refreshed within grace window."""
+    """Safety net for cameras that stopped reporting: close visits not refreshed for minutes."""
     now = timezone.now()
-    cutoff = now - VISIT_EXIT_GRACE
+    cutoff = now - _stale_visit_window()
     closed = 0
     qs = (
         ObjectVisit.objects.filter(status=VisitStatus.ACTIVE, last_seen_at__lt=cutoff)
@@ -643,6 +807,6 @@ def finalize_stale_visits_globally(*, limit: int = 200) -> int:
         .order_by("last_seen_at")[:limit]
     )
     for visit in qs:
-        _close_visit(visit, exited_at=visit.last_seen_at or now)
+        _end_visit(visit, exited_at=visit.last_seen_at or now)
         closed += 1
     return closed

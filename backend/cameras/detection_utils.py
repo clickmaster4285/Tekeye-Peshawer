@@ -500,19 +500,17 @@ def save_detection_batch(
 
     Uses ByteTrack local track id + ReID global object id so the same object is
     captured once (smoke/fire/weapon are excluded from this identity flow).
+    Call it for empty polls too — they count as misses toward an object's exit.
     """
     detections = filter_detections_for_camera(camera, detections or [])
 
     alert_saved = evaluate_camera_alerts(camera, detections)
 
-    if not detections:
-        return alert_saved
-
     from object_tracking.services import (
-        finalize_missing_tracks,
         finalize_stale_visits_globally,
         is_excluded_detection,
         mark_detection_captured,
+        record_camera_poll,
         upsert_global_object,
     )
 
@@ -520,6 +518,7 @@ def save_detection_batch(
     since = timezone.now() - timedelta(seconds=max(1, dedup_window)) if dedup_window > 0 else None
     saved = alert_saved
     active_track_ids: set[int] = set()
+    seen_visit_ids: set[int] = set()
 
     for det in detections:
         if is_excluded_detection(det):
@@ -579,10 +578,14 @@ def save_detection_batch(
         visit = None
         should_capture = False
         try:
-            global_obj, visit, should_capture = upsert_global_object(camera, det)
+            global_obj, visit, should_capture = upsert_global_object(
+                camera, det, claimed_visit_ids=seen_visit_ids
+            )
         except Exception:
             logger.exception("Global object upsert failed for camera %s", camera.pk)
             should_capture = False
+        if visit is not None:
+            seen_visit_ids.add(visit.pk)
 
         if not should_capture:
             continue
@@ -639,7 +642,7 @@ def save_detection_batch(
         saved += 1
 
     try:
-        finalize_missing_tracks(camera, active_track_ids)
+        record_camera_poll(camera, seen_visit_ids=seen_visit_ids, active_track_ids=active_track_ids)
         finalize_stale_visits_globally(limit=50)
     except Exception:
         logger.exception("Failed to finalize exited object tracks for camera %s", camera.pk)

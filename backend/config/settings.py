@@ -395,6 +395,20 @@ DETECTION_CLIP_SECONDS = int(os.getenv("DETECTION_CLIP_SECONDS", "7"))
 DETECTION_SNAPSHOT_JPEG_QUALITY = int(os.getenv("DETECTION_SNAPSHOT_JPEG_QUALITY", "75"))
 # Min seconds before the same label/class on one camera is saved again (0 = save every poll)
 DETECTION_DEDUP_SECONDS = int(os.getenv("DETECTION_DEDUP_SECONDS", "5"))
+# Object visits (one snapshot per visit). Exit = missing in N polls of its own camera AND gone ≥ min seconds,
+# so slow round-robin polling cannot close a visit for an object that never moved.
+OBJECT_EXIT_MISSED_POLLS = int(os.getenv("OBJECT_EXIT_MISSED_POLLS", "3"))
+OBJECT_EXIT_MIN_SECONDS = int(os.getenv("OBJECT_EXIT_MIN_SECONDS", "60"))
+# Enter = seen in N polls, or ML says the object has existed ≥ seconds (filters one-frame flickers)
+OBJECT_ENTER_CONFIRM_POLLS = int(os.getenv("OBJECT_ENTER_CONFIRM_POLLS", "2"))
+OBJECT_ENTER_CONFIRM_SECONDS = float(os.getenv("OBJECT_ENTER_CONFIRM_SECONDS", "1.0"))
+# Stationary memory: same camera + same class group + box overlap ≥ IoU within window → same object
+OBJECT_STATIONARY_IOU = float(os.getenv("OBJECT_STATIONARY_IOU", "0.6"))
+OBJECT_STATIONARY_WINDOW_MIN = int(os.getenv("OBJECT_STATIONARY_WINDOW_MIN", "10"))
+# Below this appearance similarity a box in the same spot is a different object (e.g. another car parked there)
+OBJECT_STATIONARY_MIN_REID = float(os.getenv("OBJECT_STATIONARY_MIN_REID", "0.75"))
+# Safety net for cameras that stopped reporting: close visits not refreshed for this long
+OBJECT_STALE_VISIT_MINUTES = int(os.getenv("OBJECT_STALE_VISIT_MINUTES", "10"))
 # Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
 CROWD_ALERT_ENABLED = os.getenv("CROWD_ALERT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
 CROWD_ALERT_THRESHOLD = int(os.getenv("CROWD_ALERT_THRESHOLD", "10"))

@@ -823,7 +823,7 @@ class CameraViewSet(viewsets.ModelViewSet):
         detections = filter_detections_for_camera(camera, detections)
         save_param = request.query_params.get("save", "true").lower()
         saved_count = 0
-        if save_param in ("true", "1", "yes") and detections:
+        if save_param in ("true", "1", "yes"):
             saved_count = save_detection_batch(camera, detections)
 
         return Response(
