@@ -58,7 +58,73 @@ export type GlobalObjectRecord = {
   updated_at?: string
 }
 
+export type MovementDirection =
+  | "right"
+  | "up-right"
+  | "up"
+  | "up-left"
+  | "left"
+  | "down-left"
+  | "down"
+  | "down-right"
+  | "closer"
+  | "farther"
+  | ""
+
+export type ObjectMovementRecord = {
+  id: number
+  clip: number
+  global_object: number | null
+  global_code: string
+  global_uuid: string | null
+  object_type: string
+  visit: number | null
+  class_name: string
+  ml_object_id: string
+  local_track_id: number | null
+  started_at: string
+  ended_at: string | null
+  still_moving: boolean
+  duration_seconds: number
+  /** Boxes are in source frame pixels (see clip source_width / source_height) */
+  from_bbox: number[]
+  to_bbox: number[]
+  distance_px: number
+  distance_pct: number
+  direction: MovementDirection
+}
+
+export type MotionClipBrief = {
+  id: number
+  camera_name: string
+  started_at: string
+  duration_seconds: number
+  part: number
+  video_url: string
+  poster_url: string
+  end_frame_url: string
+  source_width: number
+  source_height: number
+}
+
+export type ObjectMovementWithClip = ObjectMovementRecord & { clip_detail: MotionClipBrief }
+
+export type MotionClipRecord = Omit<MotionClipBrief, "camera_name"> & {
+  camera: number | null
+  camera_name: string
+  camera_key: string
+  ended_at: string
+  end_frame_url: string
+  clip_width: number
+  clip_height: number
+  fps: number
+  size_bytes: number
+  movements: ObjectMovementRecord[]
+  created_at: string
+}
+
 export type GlobalObjectDetail = GlobalObjectRecord & {
+  movements?: ObjectMovementWithClip[]
   track_history?: Array<Record<string, unknown>>
   visits?: ObjectVisitRecord[]
   tracks?: Array<{
@@ -164,6 +230,46 @@ export async function fetchObjectVisits(query: {
     page_size: query.page_size ?? 25,
   })
   return getJson(`${API}/visits/${params}`, "Failed to load visits")
+}
+
+export async function fetchMotionClips(query: {
+  q?: string
+  camera?: number | "all"
+  object_type?: ObjectType | "all"
+  object?: string
+  date_from?: string
+  date_to?: string
+  page?: number
+  page_size?: number
+} = {}): Promise<PaginatedResponse<MotionClipRecord>> {
+  const params = buildParams({
+    q: query.q,
+    camera: query.camera && query.camera !== "all" ? query.camera : undefined,
+    object_type: query.object_type && query.object_type !== "all" ? query.object_type : undefined,
+    object: query.object,
+    date_from: query.date_from,
+    date_to: query.date_to,
+    page: query.page ?? 1,
+    page_size: query.page_size ?? 24,
+  })
+  return getJson(`${API}/motion-clips/${params}`, "Failed to load movement clips")
+}
+
+const DIRECTION_LABELS: Record<string, string> = {
+  right: "→ Right",
+  "up-right": "↗ Up-right",
+  up: "↑ Up",
+  "up-left": "↖ Up-left",
+  left: "← Left",
+  "down-left": "↙ Down-left",
+  down: "↓ Down",
+  "down-right": "↘ Down-right",
+  closer: "Toward camera",
+  farther: "Away from camera",
+}
+
+export function directionLabel(direction: string): string {
+  return DIRECTION_LABELS[direction] || "Small move"
 }
 
 export function formatDuration(seconds: number | null | undefined): string {

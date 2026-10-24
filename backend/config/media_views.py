@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import mimetypes
+import os
 import posixpath
+import re
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
-from django.http import Http404, HttpResponse, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseRedirect, StreamingHttpResponse
+from django.utils._os import safe_join
 from django.views.static import serve
 from urllib.parse import quote
 
@@ -104,6 +108,57 @@ def media_path_allowed(user, path: str) -> bool:
     return True
 
 
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def _iter_file_range(fh, start: int, length: int, chunk: int = 64 * 1024):
+    try:
+        fh.seek(start)
+        left = length
+        while left > 0:
+            data = fh.read(min(chunk, left))
+            if not data:
+                break
+            left -= len(data)
+            yield data
+    finally:
+        fh.close()
+
+
+def _range_response(request, path: str) -> HttpResponse | None:
+    """206 partial content for a single "Range: bytes=a-b" (video seeking). None = serve normally."""
+    match = _RANGE_RE.match((request.META.get("HTTP_RANGE") or "").strip())
+    if not match:
+        return None
+    full = safe_join(settings.MEDIA_ROOT, path)
+    if not os.path.isfile(full):
+        return None
+    size = os.path.getsize(full)
+    first, last = match.groups()
+    if first == "" and last == "":
+        return None
+    if first == "":
+        start, end = max(0, size - int(last)), size - 1  # "bytes=-500" = last 500 bytes
+    else:
+        start = int(first)
+        end = min(int(last), size - 1) if last else size - 1
+    if start >= size or start > end:
+        response = HttpResponse(status=416)
+        response["Content-Range"] = f"bytes */{size}"
+        return response
+    length = end - start + 1
+    content_type = mimetypes.guess_type(full)[0] or "application/octet-stream"
+    if request.method == "HEAD":
+        response = HttpResponse(status=206, content_type=content_type)
+    else:
+        response = StreamingHttpResponse(
+            _iter_file_range(open(full, "rb"), start, length), status=206, content_type=content_type
+        )
+    response["Content-Range"] = f"bytes {start}-{end}/{size}"
+    response["Content-Length"] = str(length)
+    return response
+
+
 def protected_media(request, path: str):
     if request.method not in ("GET", "HEAD"):
         return HttpResponse(status=405)
@@ -115,9 +170,10 @@ def protected_media(request, path: str):
     if not media_path_allowed(user, path):
         return HttpResponse("Not allowed", status=403, content_type="text/plain")
     try:
-        response = serve(request, path, document_root=settings.MEDIA_ROOT)
+        response = _range_response(request, path) or serve(request, path, document_root=settings.MEDIA_ROOT)
     except SuspiciousFileOperation:
         raise Http404("Not found")
+    response["Accept-Ranges"] = "bytes"
     response["Cache-Control"] = "private, no-store"
     # PDFs are previewed in an <iframe> on our own pages; other sites still cannot frame them.
     response["X-Frame-Options"] = "SAMEORIGIN"

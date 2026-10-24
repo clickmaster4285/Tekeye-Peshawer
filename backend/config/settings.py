@@ -100,7 +100,22 @@ INSTALLED_APPS = [
     "voice_agent.apps.VoiceAgentConfig",
     "requests_support.apps.RequestsSupportConfig",
     "city_sync.apps.CitySyncConfig",
+    "employee_monitoring.apps.EmployeeMonitoringConfig",
 ]
+
+# -----------------------------
+# Employee monitoring
+# -----------------------------
+# Deployment-wide switch; when off, the monitoring API returns 501 so the app shows a clear
+# "not available" state. Call metadata/recordings only ever come from an approved telephony
+# source — the app never captures call audio or call logs from the handset.
+EMPLOYEE_MONITORING_ENABLED = os.getenv("EMPLOYEE_MONITORING_ENABLED", "False").lower() in ("true", "1", "yes")
+TEKEYE_DEPLOYMENT_ID = os.getenv("TEKEYE_DEPLOYMENT_ID", "").strip()
+MONITORING_RETENTION_DAYS = int(os.getenv("MONITORING_RETENTION_DAYS", "0") or "0")
+# Private directory for ingested call-audio files (never under public MEDIA_ROOT).
+MONITORING_RECORDING_ROOT = os.getenv(
+    "MONITORING_RECORDING_ROOT", os.path.join(BASE_DIR, "private_media", "monitoring")
+)
 
 # -----------------------------
 # Middleware
@@ -409,6 +424,11 @@ OBJECT_STATIONARY_WINDOW_MIN = int(os.getenv("OBJECT_STATIONARY_WINDOW_MIN", "10
 OBJECT_STATIONARY_MIN_REID = float(os.getenv("OBJECT_STATIONARY_MIN_REID", "0.75"))
 # Safety net for cameras that stopped reporting: close visits not refreshed for this long
 OBJECT_STALE_VISIT_MINUTES = int(os.getenv("OBJECT_STALE_VISIT_MINUTES", "10"))
+# Motion clips: ML nodes record 10-30 s video when objects move; background workers collect them
+MOTION_CLIP_PULL_ENABLED = os.getenv("MOTION_CLIP_PULL_ENABLED", "True").lower() in ("true", "1", "yes")
+MOTION_CLIP_PULL_INTERVAL_SEC = float(os.getenv("MOTION_CLIP_PULL_INTERVAL_SEC", "10"))
+# Clips older than this are deleted (0 = keep forever)
+MOTION_CLIP_RETENTION_DAYS = int(os.getenv("MOTION_CLIP_RETENTION_DAYS", "14"))
 # Crowd: person_count > threshold → one DetectionEvent + realtime alert; clears when ≤ threshold
 CROWD_ALERT_ENABLED = os.getenv("CROWD_ALERT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
 CROWD_ALERT_THRESHOLD = int(os.getenv("CROWD_ALERT_THRESHOLD", "10"))

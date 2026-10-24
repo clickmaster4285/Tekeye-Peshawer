@@ -43,6 +43,10 @@ class Command(BaseCommand):
         start_live_ingest_worker()
         start_mobile_monitor_thread()
 
+        from object_tracking.motion_clips import start_motion_clip_worker, stop_motion_clip_worker
+
+        start_motion_clip_worker()
+
         if getattr(settings, "PERSON_JOURNEY_WORKER_ENABLED", False):
             from person_journey.journey_worker import start_journey_worker_thread
 
@@ -59,6 +63,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"Stopping background workers (signal {signum})…"))
             stop_background_worker()
             stop_mobile_monitor_thread()
+            stop_motion_clip_worker()
             stop.set()
 
         signal.signal(signal.SIGINT, _shutdown)
@@ -66,7 +71,8 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Background workers running (detection + journey + attendance + CIIS mobile monitor). Ctrl+C to stop."
+                "Background workers running (detection + journey + attendance + CIIS mobile monitor + motion clips). "
+                "Ctrl+C to stop."
             )
         )
 

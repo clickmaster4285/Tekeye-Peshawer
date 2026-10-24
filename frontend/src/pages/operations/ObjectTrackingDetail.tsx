@@ -1,6 +1,7 @@
+import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Camera, Clock3, MapPin } from "lucide-react"
+import { ArrowLeft, Camera, Clock3, Film, MapPin } from "lucide-react"
 import { ModulePageLayout } from "@/components/dashboard/module-page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,9 +10,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ROUTES } from "@/routes/config"
 import { TrackingCaptureThumb } from "@/components/object-tracking/tracking-capture-thumb"
 import {
+  MovementClipDialog,
+  MovementFrame,
+  MovementSummary,
+  PlayClipButton,
+} from "@/components/object-tracking/movement-clip"
+import {
   fetchTrackedObjectDetail,
   formatDuration,
   objectTypeLabel,
+  type ObjectMovementWithClip,
 } from "@/lib/object-tracking-api"
 
 function formatDateTime(iso: string | null | undefined): string {
@@ -38,9 +46,12 @@ export default function ObjectTrackingDetailPage() {
     enabled: Boolean(uuid)
   })
 
+  const [playing, setPlaying] = useState<ObjectMovementWithClip | null>(null)
+
   const obj = detailQuery.data
   const visits = obj?.visits ?? []
   const tracks = obj?.tracks ?? []
+  const movements = obj?.movements ?? []
 
   return (
     <ModulePageLayout
@@ -121,6 +132,56 @@ export default function ObjectTrackingDetailPage() {
                 size="lg"
                 className="h-56 w-full max-w-xl rounded-md border object-contain bg-muted/30"
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Film className="h-4 w-4" />
+                Movement clips
+              </CardTitle>
+              <CardDescription>
+                While it stands still this object has one snapshot. Each time it moves, a clip is recorded
+                (newest first).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {movements.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No movement recorded for this object yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {movements.map((m) => (
+                    <div key={m.id} className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center">
+                      <button
+                        type="button"
+                        className="w-full shrink-0 sm:w-56"
+                        onClick={() => setPlaying(m)}
+                        aria-label="Play movement clip"
+                      >
+                        <MovementFrame
+                          url={m.clip_detail.poster_url}
+                          movements={[m]}
+                          sourceWidth={m.clip_detail.source_width}
+                          sourceHeight={m.clip_detail.source_height}
+                          alt={`Movement ${m.id}`}
+                        />
+                      </button>
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <p className="flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <Camera className="h-3.5 w-3.5" />
+                            {m.clip_detail.camera_name || "Camera"}
+                          </span>
+                          <span>{formatDateTime(m.started_at)}</span>
+                        </p>
+                        <MovementSummary movement={m} />
+                        <PlayClipButton onClick={() => setPlaying(m)} label="Play clip" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -256,6 +317,14 @@ export default function ObjectTrackingDetailPage() {
           </Card>
         </div>
       )}
+      <MovementClipDialog
+        clip={playing?.clip_detail ?? null}
+        movements={playing ? [playing] : []}
+        open={playing !== null}
+        onOpenChange={(open) => {
+          if (!open) setPlaying(null)
+        }}
+      />
     </ModulePageLayout>
   )
 }

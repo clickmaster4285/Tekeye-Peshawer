@@ -67,6 +67,8 @@ from inference_engine import (
     resolve_smoke_weights_path,
     resolve_weapon_weights_path,
 )
+from motion_clips import MotionClipRecorder
+from motion_state import MotionRegistry
 from object_identity import get_object_identity_registry
 from plate_recognizer import PlateEngine, get_plate_engine
 
@@ -984,6 +986,34 @@ def encode_jpeg(frame: np.ndarray, quality: int) -> bytes | None:
     return jpeg.tobytes() if ret else None
 
 
+class _StageTimer:
+    """Average time per inference step (for /live/timing) — finds what limits the infer rate."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._totals: dict[str, list[float]] = {}
+        self._since = time.time()
+
+    def add(self, stage: str, seconds: float) -> None:
+        with self._lock:
+            row = self._totals.setdefault(stage, [0, 0.0])
+            row[0] += 1
+            row[1] += seconds
+
+    def snapshot(self, reset: bool = False) -> dict[str, Any]:
+        with self._lock:
+            elapsed = max(1e-6, time.time() - self._since)
+            out = {
+                stage: {"calls": int(n), "avg_ms": round(1000 * t / n, 1) if n else 0.0, "busy_pct": round(100 * t / elapsed, 1)}
+                for stage, (n, t) in sorted(self._totals.items())
+            }
+            result = {"window_sec": round(elapsed, 1), "stages": out}
+            if reset:
+                self._totals = {}
+                self._since = time.time()
+            return result
+
+
 class _CameraSession:
     """Per-camera buffers: latest frame mirror + result/JPEG caches."""
 
@@ -1022,6 +1052,12 @@ class LiveStreamManager:
         self._lock = threading.Lock()
         self._byte_trackers = CameraByteTrackerPool(track_buffer=90)
         self._object_identity = get_object_identity_registry()
+        self._motion = MotionRegistry()
+        self._timing = _StageTimer()
+        self._clips = MotionClipRecorder(
+            ffmpeg_path=_resolve_ffmpeg_path,
+            frame_sources=lambda: {key: s.stream for key, s in list(self._sessions.items())},
+        )
         self._infer_executor: ThreadPoolExecutor | None = None
         self._infer_futures: list[Future] = []
         self._infer_threads: list[threading.Thread] = []  # compat / status
@@ -1343,6 +1379,8 @@ class LiveStreamManager:
             self._registry.pop(key, None)
             self._purposes.pop(key, None)
             self._close_session(key)
+        self._motion.reset(key)
+        self._clips.reset(key)
         return True
 
     def ensure_camera(self, key: str, rtsp_url: str | None = None) -> bool:
@@ -1427,6 +1465,7 @@ class LiveStreamManager:
                 self._infer_thread = None
                 self._render_thread = threading.Thread(target=self._render_loop, daemon=True, name="live-render")
                 self._render_thread.start()
+                self._clips.start()
                 max_label = (
                     "native"
                     if self._max_width <= 0 and self._max_height <= 0
@@ -1451,6 +1490,7 @@ class LiveStreamManager:
 
     def stop(self):
         self._running = False
+        self._clips.stop()
         if self._infer_executor is not None:
             try:
                 self._infer_executor.shutdown(wait=False, cancel_futures=True)
@@ -1691,8 +1731,13 @@ class LiveStreamManager:
         }
         if classes is not None:
             kwargs["classes"] = list(classes)
+        t0 = time.perf_counter()
         with gpu_predict_lock():
-            return model.predict(frame, **kwargs)
+            t1 = time.perf_counter()
+            result = model.predict(frame, **kwargs)
+        self._timing.add("gpu_lock_wait", t1 - t0)
+        self._timing.add("yolo_predict", time.perf_counter() - t1)
+        return result
 
     def _purposes_for(self, camera_key: str) -> list[str]:
         values = self._purposes.get(camera_key) or []
@@ -1795,6 +1840,14 @@ class LiveStreamManager:
         smoke_detections: list[dict[str, Any]] = []
         weapon_detections: list[dict[str, Any]] = []
 
+        mark = time.perf_counter()
+
+        def _step(name: str) -> None:
+            nonlocal mark
+            now_pc = time.perf_counter()
+            self._timing.add(name, now_pc - mark)
+            mark = now_pc
+
         if pipeline.get("coco") and self._coco_model is not None:
             coco_classes = pipeline.get("coco_classes")
             if coco_classes is None:
@@ -1813,6 +1866,7 @@ class LiveStreamManager:
                     model_tag="coco",
                     face_db=self._face_db if pipeline.get("recognize_faces") else None,
                 )
+            _step("coco_and_faces")
 
         if pipeline.get("custom") and self._custom_model is not None:
             custom_ids = custom_only_class_ids(self._custom_model)
@@ -1833,6 +1887,7 @@ class LiveStreamManager:
                     face_db=None,
                 )
             )
+            _step("custom_model")
 
         if pipeline.get("smoke") and self._smoke_model is not None:
             results = self._predict(self._smoke_model, infer_frame, min_conf=SMOKE_FIRE_MIN_CONF)
@@ -1846,6 +1901,7 @@ class LiveStreamManager:
                 model_tag="smoke",
                 face_db=None,
             )
+            _step("smoke_model")
 
         if pipeline.get("weapon") and self._weapon_model is not None:
             results = self._predict(self._weapon_model, infer_frame, min_conf=WEAPON_MIN_CONF)
@@ -1859,6 +1915,7 @@ class LiveStreamManager:
                 model_tag="weapon",
                 face_db=None,
             )
+            _step("weapon_model")
 
         detections = merge_triple_detections(coco_detections, custom_detections, smoke_detections)
         detections.extend(weapon_detections)
@@ -1892,6 +1949,7 @@ class LiveStreamManager:
             else:
                 # Keep last plate boxes on screen between detect cycles
                 detections.extend(self._last_plate_dets.get(camera_key, []))
+            _step("plates")
 
         if self._osd_filter:
             h, w = frame.shape[:2]
@@ -1909,13 +1967,16 @@ class LiveStreamManager:
             detections,
             pipeline.get("purposes") or self._purposes_for(camera_key),
         )
+        _step("filters")
         detections = self._byte_trackers.assign_track_ids(camera_key, detections, frame)
+        _step("bytetrack")
         detections = self._object_identity.enrich_detections(
             camera_key,
             frame,
             detections,
             face_db=self._face_db,
         )
+        _step("identity_reid")
         detections = assign_overlay_ids(detections)
         return detections
 
@@ -1946,6 +2007,16 @@ class LiveStreamManager:
         session = self._sessions.get(camera_key)
         if session is not None:
             session.set_results(detections)
+
+    def timing(self, reset: bool = False) -> dict[str, Any]:
+        return self._timing.snapshot(reset=reset)
+
+    def motion_status(self) -> dict[str, Any]:
+        return {**self._motion.status(), "clips": self._clips.status()}
+
+    @property
+    def motion_clips(self) -> MotionClipRecorder:
+        return self._clips
 
     def _sessions_for_worker(self, worker_id: int) -> list[_CameraSession]:
         """
@@ -2009,16 +2080,20 @@ class LiveStreamManager:
             session.last_infer_at = now
 
         try:
+            t_infer = time.perf_counter()
             detections = self._infer_frame(
                 frame,
                 camera_key=session.ip,
                 run_plates=self._should_run_plates(session.ip),
             )
+            self._timing.add("infer_frame_total", time.perf_counter() - t_infer)
             fh, fw = frame.shape[:2]
             for det in detections:
                 det["frame_width"] = int(fw)
                 det["frame_height"] = int(fh)
+            motion_events = self._motion.update(session.ip, detections, now)
             self._publish_results(session.ip, detections, frame=frame)
+            self._clips.submit(session.ip, detections, motion_events, now)
             with session.infer_lock:
                 session.infer_seq_done = seq
         except Exception as exc:

@@ -159,6 +159,7 @@ export const PAGE_LOADERS = {
     })),
   ObjectDetection: () => import("@/pages/cameras/ObjectDetection").then((m) => ({ default: m.default })),
   ObjectTracking: () => import("@/pages/operations/ObjectTracking").then((m) => ({ default: m.default })),
+  MovementClips: () => import("@/pages/operations/MovementClips").then((m) => ({ default: m.default })),
   ObjectTrackingDetail: () =>
     import("@/pages/operations/ObjectTrackingDetail").then((m) => ({ default: m.default })),
   Assistant: () => import("@/pages/assistant/AssistantPage").then((m) => ({ default: m.default })),

@@ -36,3 +36,6 @@ models/**/*.pth
 Thumbs.db
 .idea/
 .vscode/
+
+# Motion clips waiting for the backend to collect them
+motion_clips/

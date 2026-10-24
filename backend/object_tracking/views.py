@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
@@ -9,12 +9,14 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import GlobalObject, ObjectVisit, VisitStatus
+from .models import GlobalObject, MotionClip, ObjectMovement, ObjectVisit, VisitStatus
 from .serializers import (
     GlobalObjectDetailSerializer,
     GlobalObjectListSerializer,
+    MotionClipSerializer,
     ObjectVisitSerializer,
 )
+from .services import object_type_for_class
 from .services import finalize_stale_visits_globally
 
 
@@ -176,4 +178,62 @@ class ObjectTrackingLiveAPIView(APIView):
                     visits, many=True, context={"request": request}
                 ).data,
             }
+        )
+
+
+class MotionClipListAPIView(generics.ListAPIView):
+    """Motion clips (newest first). Filters: camera, object_type, class_name, object (uuid), q, date_from, date_to."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MotionClipSerializer
+    pagination_class = ObjectTrackingPagination
+
+    def get_queryset(self):
+        params = self.request.query_params
+        qs = MotionClip.objects.select_related("camera").prefetch_related(
+            Prefetch("movements", queryset=ObjectMovement.objects.select_related("global_object").order_by("started_at"))
+        )
+        camera = (params.get("camera") or "").strip()
+        if camera.isdigit():
+            qs = qs.filter(camera_id=int(camera))
+        object_type = (params.get("object_type") or "").strip().lower()
+        if object_type in ("person", "vehicle", "object"):
+            # Unlinked movements only have a class name, so match on that too
+            classes = set(
+                ObjectMovement.objects.values_list("class_name", flat=True).distinct()
+            )
+            matching = [c for c in classes if object_type_for_class(c) == object_type]
+            qs = qs.filter(
+                Q(movements__global_object__object_type=object_type) | Q(movements__class_name__in=matching)
+            )
+        class_name = (params.get("class_name") or "").strip()
+        if class_name:
+            qs = qs.filter(movements__class_name__iexact=class_name)
+        obj = (params.get("object") or "").strip()
+        if obj:
+            qs = qs.filter(movements__global_object__uuid=obj)
+        q = (params.get("q") or "").strip()
+        if q:
+            qs = qs.filter(
+                Q(movements__global_object__code__icontains=q)
+                | Q(movements__ml_object_id__icontains=q)
+                | Q(movements__class_name__icontains=q)
+                | Q(camera__name__icontains=q)
+            )
+        for name, lookup in (("date_from", "started_at__date__gte"), ("date_to", "started_at__date__lte")):
+            try:
+                day = date.fromisoformat((params.get(name) or "").strip())
+            except ValueError:
+                continue
+            qs = qs.filter(**{lookup: day})
+        return qs.distinct().order_by("-started_at")
+
+
+class MotionClipDetailAPIView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MotionClipSerializer
+
+    def get_queryset(self):
+        return MotionClip.objects.select_related("camera").prefetch_related(
+            Prefetch("movements", queryset=ObjectMovement.objects.select_related("global_object").order_by("started_at"))
         )

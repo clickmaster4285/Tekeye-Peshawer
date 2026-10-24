@@ -167,3 +167,89 @@ class ObjectVisit(models.Model):
         self.status = VisitStatus.EXITED
         start = self.entry_at or self.last_seen_at
         self.duration_seconds = max(0.0, (end - start).total_seconds()) if start else 0.0
+
+
+class MotionClip(models.Model):
+    """Video recorded by the ML service while objects moved on one camera (pre-roll + motion)."""
+
+    ml_clip_id = models.CharField(max_length=96, unique=True)
+    camera = models.ForeignKey(
+        "cameras.Camera",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="motion_clips",
+    )
+    camera_key = models.CharField(max_length=64, blank=True, default="")
+    part = models.PositiveSmallIntegerField(default=1)
+    started_at = models.DateTimeField(db_index=True)
+    ended_at = models.DateTimeField()
+    duration_seconds = models.FloatField(default=0.0)
+    video = models.FileField(upload_to="motion_clips/%Y/%m/%d/", max_length=255)
+    # Frame when the motion was confirmed (object near its old spot) and the last frame (new spot)
+    poster = models.FileField(upload_to="motion_clips/%Y/%m/%d/", max_length=255, blank=True)
+    end_frame = models.FileField(upload_to="motion_clips/%Y/%m/%d/", max_length=255, blank=True)
+    # Box coordinates in movements are in source pixels; the video may be scaled down
+    source_width = models.PositiveIntegerField(default=0)
+    source_height = models.PositiveIntegerField(default=0)
+    clip_width = models.PositiveIntegerField(default=0)
+    clip_height = models.PositiveIntegerField(default=0)
+    fps = models.FloatField(default=0.0)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["camera", "-started_at"])]
+
+    def __str__(self) -> str:
+        return f"Motion clip {self.pk} {self.camera_key} {self.started_at:%Y-%m-%d %H:%M:%S}"
+
+
+class ObjectMovement(models.Model):
+    """One object's move inside a clip: where it rested before, where it ended up."""
+
+    clip = models.ForeignKey(MotionClip, on_delete=models.CASCADE, related_name="movements")
+    global_object = models.ForeignKey(
+        GlobalObject,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movements",
+    )
+    visit = models.ForeignKey(
+        ObjectVisit,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movements",
+    )
+    camera = models.ForeignKey(
+        "cameras.Camera",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="object_movements",
+    )
+    class_name = models.CharField(max_length=80, blank=True, default="")
+    ml_object_id = models.CharField(max_length=32, blank=True, default="")
+    local_track_id = models.PositiveIntegerField(null=True, blank=True)
+    started_at = models.DateTimeField(db_index=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    # Still moving when the clip reached its maximum length (continues in the next part)
+    still_moving = models.BooleanField(default=False)
+    duration_seconds = models.FloatField(default=0.0)
+    from_bbox = models.JSONField(default=list, blank=True)
+    to_bbox = models.JSONField(default=list, blank=True)
+    distance_px = models.FloatField(default=0.0)
+    # Distance as % of the frame diagonal, so cameras of different resolution compare
+    distance_pct = models.FloatField(default=0.0)
+    direction = models.CharField(max_length=16, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["global_object", "-started_at"])]
+
+    def __str__(self) -> str:
+        return f"Movement {self.pk} {self.ml_object_id or self.class_name} {self.direction}"

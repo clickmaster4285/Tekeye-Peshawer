@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     GlobalObjectDetailAPIView,
     GlobalObjectListAPIView,
+    MotionClipDetailAPIView,
+    MotionClipListAPIView,
     ObjectTrackingLiveAPIView,
     ObjectTrackingSummaryAPIView,
     ObjectVisitListAPIView,
@@ -18,4 +20,10 @@ urlpatterns = [
         name="object-tracking-object-detail",
     ),
     path("object-tracking/visits/", ObjectVisitListAPIView.as_view(), name="object-tracking-visits"),
+    path("object-tracking/motion-clips/", MotionClipListAPIView.as_view(), name="object-tracking-motion-clips"),
+    path(
+        "object-tracking/motion-clips/<int:pk>/",
+        MotionClipDetailAPIView.as_view(),
+        name="object-tracking-motion-clip-detail",
+    ),
 ]

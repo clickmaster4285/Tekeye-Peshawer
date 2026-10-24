@@ -387,6 +387,39 @@ def live_status():
     return _live.status()
 
 
+@app.get("/live/timing")
+def live_timing(reset: bool = False):
+    """Average time per live inference step since start (or last reset)."""
+    return _live.timing(reset=reset)
+
+
+@app.get("/live/motion/status")
+def live_motion_status():
+    return _live.motion_status()
+
+
+@app.get("/live/motion/clips")
+def live_motion_clips(limit: int = 50):
+    """Finished motion clips waiting for the backend (oldest first)."""
+    return {"clips": _live.motion_clips.list_ready(limit=max(1, min(int(limit), 200)))}
+
+
+@app.get("/live/motion/clips/{clip_id}/{kind}")
+def live_motion_clip_file(clip_id: str, kind: str):
+    if kind not in ("video", "poster", "end"):
+        raise HTTPException(status_code=404, detail="Unknown file")
+    path = _live.motion_clips.file_path(clip_id, kind)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return FileResponse(path, media_type="video/mp4" if kind == "video" else "image/jpeg")
+
+
+@app.delete("/live/motion/clips/{clip_id}")
+def live_motion_clip_delete(clip_id: str):
+    """Backend calls this after it stored the clip."""
+    return {"deleted": _live.motion_clips.delete_clip(clip_id) > 0}
+
+
 @app.post("/live/register/bulk")
 def register_cameras_bulk(
     payload: list[CameraRegisterEntry],
